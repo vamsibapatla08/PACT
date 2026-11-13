@@ -1,2 +1,1 @@
 # PACT
-agreement based application
