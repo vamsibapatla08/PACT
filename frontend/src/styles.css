@@ -46,6 +46,7 @@ button:focus-visible, a:focus-visible { outline: 2px solid var(--gold-soft); out
   pointer-events: none;
   background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 180 180' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.88' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.5'/%3E%3C/svg%3E");
   animation: grain 10s steps(6) infinite;
+  will-change: transform;
 }
 
 .top-glow {
@@ -59,7 +60,7 @@ button:focus-visible, a:focus-visible { outline: 2px solid var(--gold-soft); out
   opacity: .035;
 }
 
-.global-finance-bg { position: absolute; z-index: 1; inset: 0; overflow: hidden; pointer-events: none; }
+.global-finance-bg { position: absolute; z-index: 1; inset: 0; overflow: hidden; pointer-events: none; contain: layout paint; }
 .global-orbit { position: absolute; border: 1px solid rgba(230,194,112,.16); border-radius: 50%; box-shadow: inset 0 0 60px rgba(198,162,92,.035), 0 0 45px rgba(198,162,92,.035); }
 .orbit-wide { width: 72vw; height: 72vw; max-width: 1120px; max-height: 1120px; top: -73%; left: 17%; animation: global-orbit-one 28s linear infinite; }
 .orbit-wide::before, .orbit-wide::after { content: ''; position: absolute; border: 1px solid rgba(198,162,92,.045); border-radius: inherit; }
@@ -150,7 +151,7 @@ button:focus-visible, a:focus-visible { outline: 2px solid var(--gold-soft); out
 .finance-token span { position: relative; z-index: 1; }
 .token-dollar { top: 13%; left: 9%; width: 78px; height: 78px; font-size: 42px; animation: token-float-a 7s ease-in-out infinite; }
 .token-verified { right: 5%; bottom: 13%; width: 54px; height: 54px; font: 500 18px 'Manrope', sans-serif; animation: token-float-b 8.5s -2s ease-in-out infinite; }
-.ledger-card { position: absolute; bottom: -1%; left: 18%; width: 210px; padding: 14px 16px 13px; border: 1px solid rgba(198,162,92,.1); background: linear-gradient(130deg, rgba(15,16,18,.76), rgba(8,9,11,.28)); box-shadow: 0 18px 50px rgba(0,0,0,.22); -webkit-backdrop-filter: blur(4px); backdrop-filter: blur(4px); animation: ledger-float 9s ease-in-out infinite; }
+.ledger-card { position: absolute; bottom: -1%; left: 18%; width: 210px; padding: 14px 16px 13px; border: 1px solid rgba(198,162,92,.1); background: linear-gradient(130deg, rgba(15,16,18,.92), rgba(8,9,11,.64)); box-shadow: 0 18px 50px rgba(0,0,0,.22); animation: ledger-float 9s ease-in-out infinite; }
 .ledger-label { display: flex; align-items: center; gap: 8px; color: rgba(198,162,92,.42); font: 600 7px 'Manrope', sans-serif; letter-spacing: .14em; }
 .ledger-label span { width: 4px; height: 4px; border-radius: 50%; background: #b99650; box-shadow: 0 0 8px rgba(185,150,80,.55); }
 .ledger-bars { height: 39px; margin: 14px 0 10px; border-bottom: 1px solid rgba(255,255,255,.05); display: flex; align-items: flex-end; gap: 8px; }
@@ -262,10 +263,11 @@ h1 em { color: var(--gold-soft); font-style: normal; font-weight: 500; backgroun
   pointer-events: none;
   -webkit-mask-image: linear-gradient(90deg, transparent 0%, #000 15%, #000 92%, transparent 100%);
   mask-image: linear-gradient(90deg, transparent 0%, #000 15%, #000 92%, transparent 100%);
+  contain: layout paint;
 }
 .scene-wrap::before { content: ''; position: absolute; inset: 13% 8% 10% 19%; border-radius: 50%; background: radial-gradient(circle, rgba(185,143,62,.09), rgba(126,95,42,.025) 46%, transparent 70%); filter: blur(20px); }
 .scene-wrap::after { content: ''; position: absolute; left: 27%; right: 13%; bottom: 18%; height: 1px; background: radial-gradient(ellipse, rgba(218,184,109,.28), transparent 66%); filter: blur(3px); }
-.coin-canvas { position: absolute !important; inset: 0; width: 100% !important; height: 100% !important; background: transparent !important; }
+.coin-canvas { position: absolute !important; inset: 0; width: 100% !important; height: 100% !important; background: transparent !important; transform: translateZ(0); backface-visibility: hidden; }
 .scene-fallback { position: absolute; inset: 0; display: grid; place-items: center; }
 .fallback-coin { position: relative; display: grid; place-items: center; width: min(24%, 240px); aspect-ratio: 1; border: 10px ridge #d2a851; border-radius: 50%; color: #e1b65c; background: radial-gradient(circle at 34% 28%, #292a2d, #111214 62%, #08090a); box-shadow: inset 0 0 0 4px #8f672d, inset 0 0 28px rgba(255,226,155,.08), 0 30px 50px rgba(0,0,0,.82); transform: rotate(-7deg); }
 .fallback-coin span { font: 700 clamp(52px, 8vw, 100px)/1 'Manrope', sans-serif; text-shadow: 2px 3px 0 #6c4b18, 0 0 18px rgba(225,182,92,.22); }
@@ -273,7 +275,7 @@ h1 em { color: var(--gold-soft); font-style: normal; font-weight: 500; backgroun
 
 
 @keyframes spin { to { transform: rotate(360deg); } }
-@keyframes grain { 0%,100% { transform: translate(0,0); } 33% { transform: translate(3%,-2%); } 66% { transform: translate(-2%,3%); } }
+@keyframes grain { 0%,100% { transform: translate3d(0,0,0); } 33% { transform: translate3d(3%,-2%,0); } 66% { transform: translate3d(-2%,3%,0); } }
 @keyframes line-flow { 0%,15% { transform: translateX(-110%); } 65%,100% { transform: translateX(110%); } }
 @keyframes value-pulse { 0% { opacity: 0; transform: translateX(-20%); } 18% { opacity: 1; } 75% { opacity: .7; } 100% { opacity: 0; transform: translateX(210%); } }
 @keyframes gold-shimmer { 0%,20% { background-position: 100% 50%; } 65%,100% { background-position: 0% 50%; } }
@@ -300,6 +302,21 @@ h1 em { color: var(--gold-soft); font-style: normal; font-weight: 500; backgroun
 @keyframes card-float { 0%,100% { transform: rotate(-10deg) perspective(500px) rotateY(14deg) translateY(0); } 50% { transform: rotate(-7deg) perspective(500px) rotateY(7deg) translateY(-10px); } }
 @keyframes stack-rise { 0%,100% { opacity: .42; transform: scaleY(.78); } 50% { opacity: .88; transform: scaleY(1); } }
 @keyframes draw-market { 0% { opacity: 0; stroke-dashoffset: 420; } 28%,72% { opacity: 1; } 100% { opacity: 0; stroke-dashoffset: 0; } }
+
+.global-orbit,
+.bg-medallion,
+.ambient-particles i,
+.market-panel,
+.allocation-wheel,
+.payment-card-shape,
+.value-stack i,
+.finance-token,
+.ledger-card,
+.ledger-bars i,
+.hero-copy::before {
+  will-change: transform, opacity;
+  backface-visibility: hidden;
+}
 
 @media (max-width: 1000px) {
   .brand-header, .hero { width: calc(100% - 48px); }
