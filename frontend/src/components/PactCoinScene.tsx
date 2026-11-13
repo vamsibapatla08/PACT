@@ -12,10 +12,15 @@ function GoldMaterial({ roughness = 0.22 }: { roughness?: number }) {
 
 function ConnectionRings() {
   const group = useRef<THREE.Group>(null)
-  useFrame((state) => {
+  const phase = useRef(0)
+
+  useFrame((_, delta) => {
     if (!group.current) return
-    group.current.rotation.z = state.clock.elapsedTime * 0.035
-    group.current.rotation.y = Math.sin(state.clock.elapsedTime * 0.18) * 0.14
+    // A backgrounded tab can resume with a very large delta. Advancing with a
+    // bounded step prevents the rings from visibly snapping to a new angle.
+    phase.current += Math.min(delta, 1 / 30)
+    group.current.rotation.z = phase.current * 0.035
+    group.current.rotation.y = Math.sin(phase.current * 0.18) * 0.14
   })
   return (
     <group ref={group} position={[0.25, 0, -1.8]} rotation={[1.05, 0.25, -0.25]}>
@@ -60,16 +65,19 @@ function DollarEmblem({ back = false }: { back?: boolean }) {
 
 function PactCoin() {
   const coin = useRef<THREE.Group>(null)
+  const phase = useRef(0)
   const { pointer } = useThree()
   const target = useMemo(() => new THREE.Vector2(), [])
 
-  useFrame((state, delta) => {
+  useFrame((_, delta) => {
     if (!coin.current) return
+    const stableDelta = Math.min(delta, 1 / 30)
+    phase.current += stableDelta
     target.set(pointer.y * 0.12, pointer.x * 0.2)
-    coin.current.rotation.x = THREE.MathUtils.damp(coin.current.rotation.x, 0.08 + target.x, 2.6, delta)
-    coin.current.rotation.y += delta * 0.18
-    coin.current.rotation.z = THREE.MathUtils.damp(coin.current.rotation.z, -0.06 + target.y * 0.15, 2.4, delta)
-    coin.current.position.y = Math.sin(state.clock.elapsedTime * 0.65) * 0.1
+    coin.current.rotation.x = THREE.MathUtils.damp(coin.current.rotation.x, 0.08 + target.x, 2.6, stableDelta)
+    coin.current.rotation.y += stableDelta * 0.18
+    coin.current.rotation.z = THREE.MathUtils.damp(coin.current.rotation.z, -0.06 + target.y * 0.15, 2.4, stableDelta)
+    coin.current.position.y = Math.sin(phase.current * 0.65) * 0.1
   })
 
   return (
@@ -123,7 +131,14 @@ class SceneBoundary extends Component<{ children: ReactNode; fallback: ReactNode
 export function PactCoinScene() {
   return (
     <SceneBoundary fallback={<SceneFallback />}>
-      <Canvas className="coin-canvas" dpr={[1, 1.65]} camera={{ position: [0, 0, 6.4], fov: 40 }} gl={{ antialias: true, alpha: true, premultipliedAlpha: false, powerPreference: 'high-performance' }} shadows fallback={<SceneFallback />}>
+      <Canvas
+        className="coin-canvas"
+        dpr={[1, 1.35]}
+        camera={{ position: [0, 0, 6.4], fov: 40 }}
+        gl={{ antialias: true, alpha: true, premultipliedAlpha: true, powerPreference: 'high-performance', stencil: false }}
+        resize={{ scroll: false, debounce: { scroll: 100, resize: 100 } }}
+        fallback={<SceneFallback />}
+      >
         <Suspense fallback={null}><Scene /></Suspense>
       </Canvas>
     </SceneBoundary>
