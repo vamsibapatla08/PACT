@@ -1,106 +1,81 @@
 # PACT
 
-Plan a trip with friends in a group chat, agree on it, and pay your share, with every payment checked on chain.
+Plan a trip with friends in one group chat, agree on it, and pay your share, with every payment checked on chain.
 
-## What it is
+## The problem
 
-- A group chat app for planning things together, like a trip
-- An AI agent (Grok) sits in the chat, sums up what the group agreed and finds options
-- Everyone votes, then each person pays their share
+- Group trips fall apart in the group chat. Nobody agrees on dates, budget or place
+- One person ends up booking and paying for everyone, then chasing people for weeks to get paid back
+- "I sent it" is hard to check, and nobody likes asking twice
+
+## What Pact does
+
+- One chat per plan, with an AI agent in it that sums up what the group agreed and finds real options
+- Everyone votes. Nothing is bought until the group agrees
+- Each person pays their own share, and only up to the spend cap they set
 - A share only shows "Paid" once the payment is checked on the blockchain
-- Users never see crypto. They see dollars
+- No one sees crypto. Everyone sees dollars
 
-## Hackathon
-
-- UBC 2026, hacking Nov 13 to 20
-- Due Fri Nov 20, 12 PM CST. Finals Nov 21 in Austin
-- Tracks: Consumer Applications, and Best Use of Circle's Arc
-
-## How it works for a user
+## How it works
 
 1. Sign in with Google
 2. Create a pact, or join one with an invite link
-3. Chat about dates, budget, place and how many people
+3. Chat about dates, budget, place and how many people are coming
 4. Everyone taps Agree
 5. The agent checks the plan and suggests changes
-6. The agent shows 2 to 3 options. The group votes
-7. Each person taps "Pay my share" (or one person pays and the rest pay them back)
-8. Watch "3 of 4 paid". The booking is held for 10 minutes
-9. Booked. Everyone gets a receipt they can check
+6. The agent shows 2 to 3 options, and the group votes
+7. Each person taps "Pay my share", or one person pays and the rest pay them back
+8. Watch "3 of 4 paid" fill up while the booking is held for 10 minutes
+9. Booked. Everyone gets a receipt they can check for themselves
 
-## Rules the system follows
+## Our promises
 
 - Nothing shows "Paid" until it is checked on chain
 - Nothing is bought without a group vote
 - No one pays more than their spend cap
-- Test money only. No real money during the hackathon
+- The AI agent can suggest and organise, but it never touches money
+- Test money only during the hackathon. No real funds
 
-## Tech
+## Built with
 
-- **Frontend:** web app on Vercel
-- **Backend:** Supabase (database, Google sign-in, realtime chat)
-- **Agent:** Grok, which only calls tools on our MCP server and never touches money
-- **Wallets and payments:** Circle wallets and test USDC on the Arc test network
-- **Payment checks:** QuickNode watches our contract and tells our webhook
+| Part | What we use |
+|---|---|
+| App | Web app, hosted on Vercel |
+| Accounts, data and chat | Supabase (Google sign-in, Postgres, realtime) |
+| AI agent | Grok, which can only use the tools on our own MCP server |
+| Wallets and payments | Circle wallets and test USDC on the Arc test network |
+| Payment checks | QuickNode Streams watches our contract and tells our server |
+
+## Privacy
+
+- You only see the pacts you are in, and the people in them
+- Only the host of a pact can change it
+- Every table in the database has row level security turned on
 
 ## Team
 
-- **Rory:** agent and blockchain
-- **Nihar:** frontend
-- **Vamsi:** backend (Supabase)
-- **Dimple:** onchain data (QuickNode)
+| Name | Role |
+|---|---|
+| Rory Geddes | AI agent and blockchain |
+| Nihar | Frontend |
+| Vamsi | Backend (Supabase) |
+| Dimple | Onchain data (QuickNode) |
 
-Where everyone is at: [docs/status/](docs/status/README.md). Each person has their own checklist there, plus one group checklist.
+## Hackathon
 
-## Folders
+- Built for UBC 2026, hacking Nov 13 to 20
+- Submission due Fri Nov 20, 12 PM CST. Finals Nov 21 in Austin
+- Tracks: Consumer Applications, and Best Use of Circle's Arc
 
-- `frontend/`: the app people use
-- `backend/`: server code
-- `backend/supabase/`: the database, saved as SQL files
-- `docs/`: the team canvas and notes
-- `docs/status/`: each person's checklist and the group checklist
+## Progress
 
-## Database (Supabase)
+- See where we are at in [docs/status/](docs/status/README.md): one checklist per person and one for the whole team
 
-### What is in it so far
+## Repo
 
-- `profiles`: one per user, made automatically when they sign in with Google
-- `pacts`: a group planning something, with an invite code
-- `pact_members`: who is in each pact. The person who creates a pact is its host
-- Chat, plans, votes and payments come next
-
-### Who can see what
-
-- You only see pacts you are in, and the people in them
-- Only the host can edit the pact or let someone handle money
-- Join a pact with `supabase.rpc('join_pact', { p_invite_code: 'abc12345' })`
-
-### Add the SQL to Supabase
-
-Option 1, the easy way:
-
-- Open the Supabase dashboard, then SQL Editor
-- Paste each file from `backend/supabase/migrations/` in order, oldest first, and run it
-
-Option 2, with the Supabase CLI:
-
-- `supabase link --project-ref <your-project-ref> --workdir backend`
-- `supabase db push --workdir backend`
-
-### Run it on your own computer
-
-- Needs Docker and the Supabase CLI
-- `supabase start --workdir backend` starts a local Supabase
-- `supabase db reset --workdir backend` rebuilds it and loads the demo data in `seed.sql`
-
-### Change the database
-
-- Never edit an old migration file that has already been run
-- Add a new file: `supabase migration new <what_it_does> --workdir backend`
-- Write the SQL, test it locally, then push
-
-## Working on the repo
-
-- Pull before you start: `git pull`
-- Keep commits small and say what changed
-- Never commit keys or passwords. Put them in a `.env` file, which git ignores
+| Folder | What lives there |
+|---|---|
+| `frontend/` | The app people use |
+| `backend/` | Server and agent code |
+| `backend/supabase/` | The database as SQL migrations |
+| `docs/` | Our planning canvas, notes and status checklists |
