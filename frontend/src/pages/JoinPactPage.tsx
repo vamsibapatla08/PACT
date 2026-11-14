@@ -18,9 +18,10 @@ export function JoinPactPage({ user, profile, initialInvitation = '', onNavigate
     if (!invitation.trim()) { setError('Enter an invitation code or link to continue.'); return }
     setJoining(true); setError(null)
     try {
-      await requestJoinPact({ invitation: invitation.trim() })
+      const joinedPactId = await requestJoinPact({ invitation: invitation.trim() })
+      onNavigate(`/pacts/${joinedPactId}`)
     } catch (reason) {
-      setError(friendlyError(reason, 'Invitation acceptance is not connected yet. Vamsi’s backend contract is required.'))
+      setError(friendlyError(reason, 'That invitation could not be accepted. Please check the code and try again.'))
       setJoining(false)
     }
   }
@@ -30,7 +31,7 @@ export function JoinPactPage({ user, profile, initialInvitation = '', onNavigate
       <button className="back-link" type="button" onClick={() => onNavigate('/dashboard')}>← Back to dashboard</button>
       <p className="section-kicker">PACT / INVITATION</p>
       <h1>Join a Pact.</h1>
-      <p className="form-intro">Enter the invitation your group shared with you. Acceptance will be connected when the Pact backend contract is ready.</p>
+      <p className="form-intro">Enter the invitation your group shared with you to join the shared plan.</p>
       <form className="pact-form" onSubmit={submit}>
         <label htmlFor="invite-code">Invitation code or link <span>Required</span></label>
         <input id="invite-code" value={invitation} onChange={(event) => setInvitation(event.target.value)} placeholder="austin26 or an invitation link" autoFocus />

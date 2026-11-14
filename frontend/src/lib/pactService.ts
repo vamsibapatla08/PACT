@@ -13,7 +13,7 @@ function logRetrievalFailure(operation: string, context: Record<string, unknown>
 
 export function friendlyError(error: unknown, fallback: string) {
   const message = error instanceof Error ? error.message : ''
-  if (/invite code not found/i.test(message)) return 'That invitation code is invalid or has expired.'
+  if (/invite|invitation|expired|revoked|redeemed/i.test(message)) return 'That invitation code is invalid, expired, or no longer available.'
   if (/row-level security|permission denied|not authorized|jwt/i.test(message)) return 'You do not have permission to access that Pact.'
   if (/fetch|network|timeout/i.test(message)) return 'Pact could not reach the server. Check your connection and try again.'
   return fallback
@@ -55,20 +55,15 @@ export async function listPacts(userId: string): Promise<PactSummary[]> {
     throw pactResult.error
   }
 
-  // Fetch only active membership keys in one request. RLS decides whether the
-  // signed-in user can see all active members of each authorized Pact.
-  const membershipCountResult = await client()
-    .from('pact_members')
-    .select('pact_id')
-    .in('pact_id', pactIds)
-    .eq('membership_status', 'active')
-  let memberCounts: Map<string, number> | null = null
-  if (membershipCountResult.error) {
-    logRetrievalFailure('count active pact members', { userId, pactIds }, membershipCountResult.error)
-  } else {
-    memberCounts = new Map<string, number>()
-    for (const row of membershipCountResult.data ?? []) memberCounts.set(row.pact_id, (memberCounts.get(row.pact_id) ?? 0) + 1)
-  }
+  const memberCounts = new Map<string, number>()
+  await Promise.all(pactIds.map(async (pactId) => {
+    try {
+      const members = await listPactMembers(pactId)
+      memberCounts.set(pactId, members.length)
+    } catch (error) {
+      if (error && typeof error === 'object' && 'code' in error) logRetrievalFailure('list Pact members for count', { userId, pactId }, error as { code?: string; message?: string; details?: string; hint?: string })
+    }
+  }))
 
   return (pactResult.data ?? []).map((pact) => ({
     id: pact.pact_id,
@@ -88,12 +83,28 @@ export async function createPact(name: string): Promise<{ id: string }> {
 
 export type JoinPactRequest = { invitation: string }
 
-// This is intentionally a pending adapter. Vamsi still needs to provide the
-// live invitation RPC's parameter names, return value, and authorization rules.
-// Keeping the boundary here prevents the UI from treating an arbitrary UUID or
-// unverified code as permission to join a private Pact.
-export async function requestJoinPact(_request: JoinPactRequest): Promise<never> {
-  throw new Error('Invitation acceptance is not connected yet. Vamsi’s backend contract is required.')
+export async function requestJoinPact({ invitation }: JoinPactRequest): Promise<string> {
+  const { data: pactId, error } = await client().rpc('join_pact', { p_invite_code: invitation.trim() })
+  if (error) throw error
+  if (typeof pactId !== 'string' || !pactId) throw new Error('Joining the Pact returned no Pact ID.')
+  return pactId
+}
+
+export async function createPactInvitation(pactId: string): Promise<string> {
+  const { data, error } = await client().rpc('create_pact_invitation', { p_pact_id: pactId })
+  if (error) throw error
+  const row = Array.isArray(data) ? data[0] : data
+  const inviteCode = row && typeof row === 'object' && 'invite_code' in row ? row.invite_code : null
+  if (typeof inviteCode !== 'string' || !inviteCode) throw new Error('Invitation creation returned no invite code.')
+  return inviteCode
+}
+
+type PactMemberRpcRow = { user_id?: string; id?: string; role?: string; joined_at?: string | null; name?: string | null; avatar_url?: string | null }
+
+export async function listPactMembers(pactId: string): Promise<PactMemberRpcRow[]> {
+  const { data, error } = await client().rpc('list_pact_members', { p_pact_id: pactId })
+  if (error) throw error
+  return Array.isArray(data) ? data as PactMemberRpcRow[] : []
 }
 
 export async function getPactWorkspace(pactId: string): Promise<PactWorkspace> {
@@ -102,18 +113,8 @@ export async function getPactWorkspace(pactId: string): Promise<PactWorkspace> {
   const userId = authData.user?.id
   if (!userId) throw new Error('Your sign-in session has expired. Please sign in again.')
 
-  const membersResult = await client()
-    .from('pact_members')
-    .select('user_id, role, membership_status, joined_at')
-    .eq('pact_id', pactId)
-    .eq('membership_status', 'active')
-    .order('joined_at', { ascending: true })
-  if (membersResult.error) {
-    logRetrievalFailure('load workspace memberships', { userId, pactId }, membersResult.error)
-    throw membersResult.error
-  }
-  const membershipRows = membersResult.data ?? []
-  if (!membershipRows.some((member) => member.user_id === userId)) {
+  const memberRows = await listPactMembers(pactId)
+  if (!memberRows.some((member) => (member.user_id || member.id) === userId)) {
     logRetrievalFailure('membership denied', { userId, pactId }, { code: 'PACT_NOT_ACTIVE_MEMBER', message: 'No active membership found for the authenticated user.' })
     throw new Error('This Pact does not exist or you do not have active membership.')
   }
@@ -131,9 +132,15 @@ export async function getPactWorkspace(pactId: string): Promise<PactWorkspace> {
     logRetrievalFailure('pact not found', { userId, pactId }, { code: 'PACT_NOT_FOUND', message: 'No visible Pact row matched pact_id.' })
     throw new Error('This Pact does not exist or you do not have access to it.')
   }
+  const pact = pactResult.data
 
   // Do not make authorized Pact retrieval depend on optional profile columns.
   // Member display names can be added once the live profile contract is known.
-  const members = membershipRows.map((member) => ({ user_id: member.user_id, role: member.role, joined_at: member.joined_at, profile: null })) as PactMember[]
-  return { id: pactResult.data.pact_id, name: pactResult.data.name, created_by: pactResult.data.created_by, created_at: pactResult.data.created_at, member_count: members.length, members }
+  const members = memberRows.map((member) => ({
+    user_id: member.user_id || member.id || '',
+    role: member.role === 'host' ? 'host' : 'member',
+    joined_at: member.joined_at || pact.created_at,
+    profile: member.name || member.avatar_url ? { id: member.user_id || member.id || '', full_name: member.name || null, avatar_url: member.avatar_url || null } : null,
+  })) as PactMember[]
+  return { id: pact.pact_id, name: pact.name, created_by: pact.created_by, created_at: pact.created_at, member_count: members.length, members }
 }
