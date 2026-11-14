@@ -1,10 +1,11 @@
-import { useEffect, useState } from 'react'
+import { lazy, Suspense, useEffect, useState } from 'react'
 import { motion, useReducedMotion } from 'motion/react'
 import type { User } from '@supabase/supabase-js'
 import { AppShell, firstName } from '../components/AppShell'
 import { StatusPanel } from '../components/StatusPanel'
 import { friendlyError, getProfile, listPacts } from '../lib/pactService'
 import type { PactSummary, Profile } from '../types/pact'
+const PactCardArt = lazy(() => import('../components/PactCardScene').then(module => ({ default: module.PactCardArt })))
 
 type Props = {
   user: User
@@ -55,12 +56,14 @@ export function DashboardPage({ user, profile: initialProfile, onNavigate, onSig
 
       <section className="action-grid" aria-label="Pact actions">
         <motion.button className="action-card action-card-primary" type="button" onClick={() => onNavigate('/pacts/create')} initial={reduceMotion ? false : { opacity: 0, y: 18 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: .65, delay: .1 }}>
+          <CardRefraction />
           <span className="action-index">01 / BEGIN</span>
           <strong>Create a Pact</strong>
           <span>Start a new shared plan.</span>
           <i aria-hidden="true">↗</i>
         </motion.button>
         <motion.button className="action-card" type="button" onClick={() => onNavigate('/pacts/join')} initial={reduceMotion ? false : { opacity: 0, y: 18 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: .65, delay: .18 }}>
+          <CardRefraction />
           <span className="action-index">02 / ENTER</span>
           <strong>Join a Pact</strong>
           <span>Use an invitation from your group.</span>
@@ -73,18 +76,32 @@ export function DashboardPage({ user, profile: initialProfile, onNavigate, onSig
         {error ? <StatusPanel title="Your Pacts are temporarily unavailable." message={error} actionLabel="Retry" onAction={() => window.location.reload()} /> : null}
         {!error && loading ? <div className="loading-line"><span /> Restoring your Pact space…</div> : null}
         {!error && !loading && pacts.length === 0 ? <StatusPanel title="No Pacts yet." message="Your next plan is one click away." actionLabel="Create your first Pact" onAction={() => onNavigate('/pacts/create')} /> : null}
-        {!error && !loading && pacts.length > 0 ? <div className="pact-grid">{pacts.map((pact) => <PactCard key={pact.id} pact={pact} onOpen={() => onNavigate(`/pacts/${pact.id}`)} />)}</div> : null}
+        {!error && !loading && pacts.length > 0 ? <div className="pact-grid">{pacts.map((pact, index) => <PactCard key={pact.id} pact={pact} variant={index % 4} onOpen={() => onNavigate(`/pacts/${pact.id}`)} />)}</div> : null}
       </section>
     </AppShell>
   )
 }
 
-function PactCard({ pact, onOpen }: { pact: PactSummary; onOpen: () => void }) {
+function PactCard({ pact, variant, onOpen }: { pact: PactSummary; variant: number; onOpen: () => void }) {
   return (
     <button className="pact-card" type="button" onClick={onOpen}>
+      <CardRefraction />
       <div className="pact-card-top"><span className="pact-dot" /> <span>ACTIVE PLAN</span><small>{formatDate(pact.created_at)}</small></div>
       <strong>{pact.name}</strong>
+      <Suspense fallback={null}><PactCardArt variant={variant} /></Suspense>
       <div className="pact-card-meta"><span>{pact.member_count === null ? 'Members unavailable' : `${pact.member_count} member${pact.member_count === 1 ? '' : 's'}`}</span><span>Open Pact →</span></div>
     </button>
   )
+}
+
+function CardRefraction() {
+  return <span className="card-refraction" aria-hidden="true">
+    <svg viewBox="0 0 1000 400" preserveAspectRatio="none">
+      <path className="holo-frame" d="M28 3 H955 L997 40 V351 L956 397 H32 L3 368 V43 Z" />
+      <path className="holo-rail" d="M35 11 H948 L988 46 V345 L950 389 H38 L12 362 V49 Z" />
+      <path className="holo-corners" d="M28 3 H103 M3 43 V111 M897 3 H955 L997 40 V95 M997 304 V351 L956 397 H885 M111 397 H32 L3 368 V308" />
+      <path d="M0 48 120 8 265 30 312 0M0 48l82 120-55 86 129 36 76-70 80 30M1000 28 862 4 810 64l-88-18-64 83 95 62-48 91 150 82 145-52M1000 28 925 125l75 66M120 8l32 96 113-74M232 220l-26 130 110 50M810 64l-34 127 81 20 58-86" />
+      <path className="refraction-glint" d="M0 48 120 8 265 30 312 0M0 48l82 120-55 86 129 36 76-70 80 30M1000 28 862 4 810 64l-88-18-64 83 95 62-48 91 150 82 145-52M1000 28 925 125l75 66M120 8l32 96 113-74M232 220l-26 130 110 50M810 64l-34 127 81 20 58-86" />
+    </svg>
+  </span>
 }

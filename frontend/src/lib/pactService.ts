@@ -86,24 +86,14 @@ export async function createPact(name: string): Promise<{ id: string }> {
   return { id: pactId }
 }
 
-export function extractInviteCode(value: string) {
-  const trimmed = value.trim()
-  if (!trimmed) return ''
-  try {
-    const url = new URL(trimmed)
-    const fromQuery = url.searchParams.get('invite') || url.searchParams.get('code')
-    if (fromQuery) return fromQuery.trim()
-    return url.pathname.split('/').filter(Boolean).at(-1)?.trim() ?? ''
-  } catch { return trimmed }
-}
+export type JoinPactRequest = { invitation: string }
 
-export async function joinPact(invitation: string): Promise<string> {
-  const inviteCode = extractInviteCode(invitation)
-  if (!inviteCode) throw new Error('Enter an invitation code or link.')
-  const { data, error } = await client().rpc('join_pact', { p_invite_code: inviteCode })
-  if (error) throw error
-  if (typeof data !== 'string') throw new Error('The invitation could not be completed.')
-  return data
+// This is intentionally a pending adapter. Vamsi still needs to provide the
+// live invitation RPC's parameter names, return value, and authorization rules.
+// Keeping the boundary here prevents the UI from treating an arbitrary UUID or
+// unverified code as permission to join a private Pact.
+export async function requestJoinPact(_request: JoinPactRequest): Promise<never> {
+  throw new Error('Invitation acceptance is not connected yet. Vamsi’s backend contract is required.')
 }
 
 export async function getPactWorkspace(pactId: string): Promise<PactWorkspace> {

@@ -1,6 +1,19 @@
-import type { ReactNode } from 'react'
+import { lazy, Suspense, useState, type ReactNode } from 'react'
+import { useReducedMotion } from 'motion/react'
 import type { User } from '@supabase/supabase-js'
 import type { Profile } from '../types/pact'
+import { PactBackground } from './PactBackground'
+import { SceneFallback } from './SceneFallback'
+import { GalaxyBackground } from './GalaxyBackground'
+
+const PactCoinScene = lazy(() => import('./PactCoinScene').then((module) => ({ default: module.PactCoinScene })))
+
+function supportsWebGL() {
+  try {
+    const canvas = document.createElement('canvas')
+    return Boolean(window.WebGL2RenderingContext && canvas.getContext('webgl2'))
+  } catch { return false }
+}
 
 type Props = { user: User; profile: Profile | null; current: 'dashboard' | 'pacts'; onNavigate: (path: string) => void; onSignOut: () => Promise<void>; signingOut: boolean; children: ReactNode }
 
@@ -12,8 +25,14 @@ export function avatarUrl(user: User, profile?: Profile | null) { return profile
 
 export function AppShell({ user, profile, current, onNavigate, onSignOut, signingOut, children }: Props) {
   const name = displayName(user, profile); const avatar = avatarUrl(user, profile)
+  const reduceMotion = useReducedMotion()
+  const [webgl] = useState(supportsWebGL)
   return <main className="app-page">
-    <div className="app-grain" aria-hidden="true" /><div className="app-ambient" aria-hidden="true"><i /><i /><i /><i /><i /></div>
+    <GalaxyBackground />
+    <PactBackground authenticated />
+    <div className="app-coin-scene" aria-hidden="true">
+      {webgl && !reduceMotion ? <Suspense fallback={<SceneFallback />}><PactCoinScene /></Suspense> : <SceneFallback />}
+    </div>
     <header className="app-nav">
       <button className="app-brand" type="button" onClick={() => onNavigate('/dashboard')} aria-label="Pact dashboard"><img src="/pact-logo.png" alt="" /><span>PACT</span></button>
       <nav aria-label="Primary navigation"><button className={current === 'dashboard' ? 'is-active' : ''} type="button" onClick={() => onNavigate('/dashboard')}>Dashboard</button><button className={current === 'pacts' ? 'is-active' : ''} type="button" onClick={() => onNavigate('/dashboard#my-pacts')}>My Pacts</button></nav>

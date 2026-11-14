@@ -2,7 +2,7 @@ import { FormEvent, useState } from 'react'
 import { motion, useReducedMotion } from 'motion/react'
 import type { User } from '@supabase/supabase-js'
 import { AppShell } from '../components/AppShell'
-import { friendlyError, joinPact } from '../lib/pactService'
+import { friendlyError, requestJoinPact } from '../lib/pactService'
 import type { Profile } from '../types/pact'
 
 type Props = { user: User; profile: Profile | null; initialInvitation?: string; onNavigate: (path: string) => void; onSignOut: () => Promise<void>; signingOut: boolean }
@@ -18,10 +18,9 @@ export function JoinPactPage({ user, profile, initialInvitation = '', onNavigate
     if (!invitation.trim()) { setError('Enter an invitation code or link to continue.'); return }
     setJoining(true); setError(null)
     try {
-      const pactId = await joinPact(invitation)
-      onNavigate(`/pacts/${pactId}`)
+      await requestJoinPact({ invitation: invitation.trim() })
     } catch (reason) {
-      setError(friendlyError(reason, 'That invitation could not be accepted. Please check it and try again.'))
+      setError(friendlyError(reason, 'Invitation acceptance is not connected yet. Vamsi’s backend contract is required.'))
       setJoining(false)
     }
   }
@@ -31,7 +30,7 @@ export function JoinPactPage({ user, profile, initialInvitation = '', onNavigate
       <button className="back-link" type="button" onClick={() => onNavigate('/dashboard')}>← Back to dashboard</button>
       <p className="section-kicker">PACT / INVITATION</p>
       <h1>Join a Pact.</h1>
-      <p className="form-intro">Enter the invitation your group shared with you. Access is confirmed by the Pact backend.</p>
+      <p className="form-intro">Enter the invitation your group shared with you. Acceptance will be connected when the Pact backend contract is ready.</p>
       <form className="pact-form" onSubmit={submit}>
         <label htmlFor="invite-code">Invitation code or link <span>Required</span></label>
         <input id="invite-code" value={invitation} onChange={(event) => setInvitation(event.target.value)} placeholder="austin26 or an invitation link" autoFocus />
