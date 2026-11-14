@@ -1,89 +1,90 @@
 import { useEffect, useState } from 'react'
-import { BrandHeader } from '../components/BrandHeader'
-import { supabase } from '../lib/supabase'
+import { motion, useReducedMotion } from 'motion/react'
 import type { User } from '@supabase/supabase-js'
+import { AppShell, firstName } from '../components/AppShell'
+import { StatusPanel } from '../components/StatusPanel'
+import { friendlyError, getProfile, listPacts } from '../lib/pactService'
+import type { PactSummary, Profile } from '../types/pact'
 
-export function DashboardPage() {
-  const [user, setUser] = useState<User | null>(null)
+type Props = {
+  user: User
+  profile: Profile | null
+  onNavigate: (path: string) => void
+  onSignOut: () => Promise<void>
+  signingOut: boolean
+}
+
+function formatDate(date: string) {
+  return new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', year: 'numeric' }).format(new Date(date))
+}
+
+export function DashboardPage({ user, profile: initialProfile, onNavigate, onSignOut, signingOut }: Props) {
+  const reduceMotion = useReducedMotion()
+  const [profile, setProfile] = useState(initialProfile)
+  const [pacts, setPacts] = useState<PactSummary[]>([])
   const [loading, setLoading] = useState(true)
-  const [signingOut, setSigningOut] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    const client = supabase
-    if (!client) {
-      window.location.replace('/')
-      return
-    }
-
     let active = true
-    const loadSession = async () => {
-      const { data, error } = await client.auth.getSession()
-      if (error) {
-        console.error('Unable to load the authenticated session.', error)
-      }
-      if (!active) return
-      if (!data.session) {
-        window.location.replace('/')
-        return
-      }
-      setUser(data.session.user)
-      setLoading(false)
-    }
-
-    void loadSession()
-    const { data: listener } = client.auth.onAuthStateChange((event, session) => {
-      if (event === 'SIGNED_OUT') {
-        window.location.replace('/')
-        return
-      }
-      if (!session) return
-      setUser(session.user)
-      setLoading(false)
-    })
-
-    return () => {
-      active = false
-      listener.subscription.unsubscribe()
-    }
-  }, [])
-
-  const signOut = async () => {
-    const client = supabase
-    if (!client || signingOut) return
-    setSigningOut(true)
-    const { error } = await client.auth.signOut()
-    if (error) {
-      console.error('Unable to sign out.', error)
-      setSigningOut(false)
-    }
-  }
-
-  if (loading) {
-    return (
-      <main className="dashboard-page">
-        <p className="dashboard-status">Loading your Pact...</p>
-      </main>
-    )
-  }
+    setLoading(true)
+    Promise.all([getProfile(user), listPacts(user.id)])
+      .then(([nextProfile, nextPacts]) => {
+        if (!active) return
+        setProfile(nextProfile)
+        setPacts(nextPacts)
+        setError(null)
+      })
+      .catch((reason) => {
+        if (active) setError(friendlyError(reason, 'Your Pact data could not be loaded yet.'))
+      })
+      .finally(() => { if (active) setLoading(false) })
+    return () => { active = false }
+  }, [user])
 
   return (
-    <main className="dashboard-page">
-      <div className="grain" aria-hidden="true" />
-      <div className="top-glow" aria-hidden="true" />
-      <BrandHeader />
-      <section className="dashboard-content" aria-labelledby="dashboard-title">
-        <div className="eyebrow">Your shared workspace</div>
-        <h1 id="dashboard-title">Welcome to Pact.</h1>
-        <p className="dashboard-description">
-          You&apos;re signed in{user?.email ? ` as ${user.email}` : ''}. Create a plan, invite your group, and keep every decision and payment together.
-        </p>
-        <div className="dashboard-actions">
-          <button className="dashboard-primary" type="button">Create a Pact</button>
-          <button className="dashboard-secondary" type="button" onClick={() => void signOut()} disabled={signingOut}>
-            {signingOut ? 'Signing out...' : 'Sign out'}
-          </button>
-        </div>
+    <AppShell user={user} profile={profile} current="dashboard" onNavigate={onNavigate} onSignOut={onSignOut} signingOut={signingOut}>
+      <section className="welcome-block">
+        <motion.div initial={reduceMotion ? false : { opacity: 0, y: 18 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: .7, ease: [.22, 1, .36, 1] }}>
+          <p className="section-kicker">PACT / YOUR SPACE</p>
+          <h1>Welcome to Pact, <em>{firstName(user, profile)}.</em></h1>
+          <p className="welcome-subtitle">Plan together. Decide together. Make it happen.</p>
+        </motion.div>
+        <div className="welcome-mark" aria-hidden="true"><span>↗</span><i /><b /></div>
       </section>
-    </main>
+
+      <section className="action-grid" aria-label="Pact actions">
+        <motion.button className="action-card action-card-primary" type="button" onClick={() => onNavigate('/pacts/create')} initial={reduceMotion ? false : { opacity: 0, y: 18 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: .65, delay: .1 }}>
+          <span className="action-index">01 / BEGIN</span>
+          <strong>Create a Pact</strong>
+          <span>Start a new shared plan.</span>
+          <i aria-hidden="true">↗</i>
+        </motion.button>
+        <motion.button className="action-card" type="button" onClick={() => onNavigate('/pacts/join')} initial={reduceMotion ? false : { opacity: 0, y: 18 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: .65, delay: .18 }}>
+          <span className="action-index">02 / ENTER</span>
+          <strong>Join a Pact</strong>
+          <span>Use an invitation from your group.</span>
+          <i aria-hidden="true">→</i>
+        </motion.button>
+      </section>
+
+      <section id="my-pacts" className="pacts-section">
+        <div className="section-heading"><div><p className="section-kicker">PACT / SHARED PLANS</p><h2>My Pacts</h2></div><span>{loading ? 'SYNCING' : `${pacts.length.toString().padStart(2, '0')} ACTIVE`}</span></div>
+        {error ? <StatusPanel title="Your Pacts are temporarily unavailable." message={error} actionLabel="Retry" onAction={() => window.location.reload()} /> : null}
+        {!error && loading ? <div className="loading-line"><span /> Restoring your Pact space…</div> : null}
+        {!error && !loading && pacts.length === 0 ? <StatusPanel title="No Pacts yet." message="Your next plan is one click away." actionLabel="Create your first Pact" onAction={() => onNavigate('/pacts/create')} /> : null}
+        {!error && !loading && pacts.length > 0 ? <div className="pact-grid">{pacts.map((pact) => <PactCard key={pact.id} pact={pact} onOpen={() => onNavigate(`/pacts/${pact.id}`)} />)}</div> : null}
+      </section>
+    </AppShell>
+  )
+}
+
+function PactCard({ pact, onOpen }: { pact: PactSummary; onOpen: () => void }) {
+  return (
+    <button className="pact-card" type="button" onClick={onOpen}>
+      <div className="pact-card-top"><span className="pact-dot" /> <span>ACTIVE PLAN</span><small>{formatDate(pact.created_at)}</small></div>
+      <strong>{pact.name}</strong>
+      <div className="pact-card-meta"><span>{pact.member_count === null ? 'Members unavailable' : `${pact.member_count} member${pact.member_count === 1 ? '' : 's'}`}</span><span>Open Pact →</span></div>
+    </button>
   )
 }
