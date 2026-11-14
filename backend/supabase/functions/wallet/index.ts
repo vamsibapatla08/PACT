@@ -1,5 +1,11 @@
-// Returns the signed-in user's Circle wallet on Arc Testnet, making it the first time.
-// POST /functions/v1/wallet with the user's Supabase session token.
+// The signed-in user's own Circle wallet on Arc Testnet (user-controlled: only their PIN moves money).
+// The Circle user ID is the Supabase auth.uid(), so one wallet follows a person across every Pact.
+//
+//   GET  /functions/v1/wallet                                   status: read only, never creates
+//   POST /functions/v1/wallet { "action": "status" }            same as GET
+//   POST /functions/v1/wallet { "action": "start" }             returns what Circle's web SDK needs
+//   POST /functions/v1/wallet { "action": "confirm", "challengeId": "..." }
+//
 // Calls Circle's REST API directly: its Node SDK fails to boot in the Edge runtime.
 import { createClient } from 'npm:@supabase/supabase-js@2'
 
@@ -7,8 +13,6 @@ const BLOCKCHAIN = 'ARC-TESTNET'
 const ARC_RPC = 'https://rpc.testnet.arc.network'
 const CIRCLE_API = 'https://api.circle.com/v1/w3s'
 const CIRCLE_API_KEY = Deno.env.get('CIRCLE_API_KEY')!
-const CIRCLE_ENTITY_SECRET = Deno.env.get('CIRCLE_ENTITY_SECRET')!
-const CIRCLE_WALLET_SET_ID = Deno.env.get('CIRCLE_WALLET_SET_ID')!
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
@@ -21,55 +25,60 @@ const admin = createClient(
   Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
 )
 
-type CircleWallet = { id: string; address: string; blockchain: string }
+type CircleWallet = { id: string; address: string; blockchain: string; state: string; custodyType: string; userId?: string }
+type WalletRow = { address: string; blockchain: string }
 
-async function circleRequest(path: string, init: RequestInit = {}) {
-  const res = await fetch(`${CIRCLE_API}${path}`, {
-    ...init,
-    headers: { Authorization: `Bearer ${CIRCLE_API_KEY}`, 'Content-Type': 'application/json' },
-  })
-  const body = await res.json().catch(() => ({}))
-  if (!res.ok) throw new Error(`Circle ${path} ${res.status}: ${body.message ?? ''}`)
-  return body.data
+class CircleError extends Error {
+  constructor(readonly status: number, readonly code: number | undefined, path: string) {
+    super(`Circle ${path} ${status} (code ${code ?? 'none'})`)
+  }
 }
 
-// Circle wants the entity secret RSA-encrypted with its public key, freshly for every write.
-async function entitySecretCiphertext() {
-  const { publicKey } = await circleRequest('/config/entity/publicKey')
-  const der = Uint8Array.from(atob(publicKey.replace(/-----[^-]+-----|\s/g, '')), (c) => c.charCodeAt(0))
-  const key = await crypto.subtle.importKey('spki', der, { name: 'RSA-OAEP', hash: 'SHA-256' }, false, ['encrypt'])
-  const secret = Uint8Array.from(CIRCLE_ENTITY_SECRET.match(/../g)!, (h) => parseInt(h, 16))
-  const encrypted = new Uint8Array(await crypto.subtle.encrypt({ name: 'RSA-OAEP' }, key, secret))
-  return btoa(String.fromCharCode(...encrypted))
+// Errors carry only the status and Circle's code, never response bodies, so tokens can't reach the logs.
+async function circle(path: string, { method = 'GET', body, userToken }: { method?: string; body?: unknown; userToken?: string } = {}) {
+  const headers: Record<string, string> = { Authorization: `Bearer ${CIRCLE_API_KEY}`, 'Content-Type': 'application/json' }
+  if (userToken) headers['X-User-Token'] = userToken
+  const res = await fetch(`${CIRCLE_API}${path}`, { method, headers, body: body ? JSON.stringify(body) : undefined })
+  const json = await res.json().catch(() => ({}))
+  if (!res.ok) throw new CircleError(res.status, json.code, path)
+  return json.data
 }
 
-async function createCircleWallet(userId: string): Promise<CircleWallet | undefined> {
-  const data = await circleRequest('/developer/wallets', {
-    method: 'POST',
-    body: JSON.stringify({
-      idempotencyKey: userId,
-      entitySecretCiphertext: await entitySecretCiphertext(),
-      walletSetId: CIRCLE_WALLET_SET_ID,
-      blockchains: [BLOCKCHAIN],
-      count: 1,
-      accountType: 'EOA',
-      metadata: [{ refId: userId }],
-    }),
-  })
-  return data?.wallets?.[0]
+let appId: string | undefined
+async function circleAppId() {
+  appId ??= (await circle('/config/entity')).appId as string
+  return appId
 }
 
-async function findCircleWallet(userId: string): Promise<CircleWallet | undefined> {
-  const params = new URLSearchParams({ walletSetId: CIRCLE_WALLET_SET_ID, refId: userId, blockchain: BLOCKCHAIN })
-  const data = await circleRequest(`/wallets?${params}`)
-  return data?.wallets?.[0]
+async function ensureCircleUser(userId: string) {
+  try {
+    await circle('/users', { method: 'POST', body: { userId } })
+  } catch (err) {
+    if (!(err instanceof CircleError && err.code === 155101)) throw err // 155101: user already exists
+  }
 }
 
-function reply(status: number, body: unknown) {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { ...cors, 'Content-Type': 'application/json' },
-  })
+async function userSession(userId: string): Promise<{ userToken: string; encryptionKey: string }> {
+  return await circle('/users/token', { method: 'POST', body: { userId } })
+}
+
+// Without a valid user token Circle lists every wallet on the account, so each wallet is
+// checked to be this user's own end-user wallet before it is trusted.
+async function findUserWallet(userId: string, userToken: string): Promise<CircleWallet | undefined> {
+  const { wallets } = await circle(`/wallets?blockchain=${BLOCKCHAIN}`, { userToken })
+  return (wallets as CircleWallet[]).find((w) =>
+    w.custodyType === 'ENDUSER' && w.state === 'LIVE' && w.blockchain === BLOCKCHAIN && (w.userId ?? userId) === userId
+  )
+}
+
+async function saveWallet(userId: string, wallet: CircleWallet): Promise<WalletRow> {
+  const { error } = await admin.from('wallets').upsert(
+    { user_id: userId, circle_wallet_id: wallet.id, address: wallet.address, blockchain: wallet.blockchain },
+    { onConflict: 'user_id', ignoreDuplicates: true },
+  )
+  if (error) throw error
+  const { data } = await admin.from('wallets').select('address, blockchain').eq('user_id', userId).single()
+  return data!
 }
 
 // USDC is Arc's native token, so the native balance is the USDC balance (18 decimals).
@@ -90,13 +99,79 @@ async function usdcBalance(address: string): Promise<string | null> {
   }
 }
 
-async function walletResponse(row: { address: string; blockchain: string }, created: boolean) {
+function reply(status: number, body: unknown) {
+  return new Response(JSON.stringify(body), { status, headers: { ...cors, 'Content-Type': 'application/json' } })
+}
+
+async function ready(row: WalletRow) {
+  return reply(200, { status: 'ready', address: row.address, blockchain: row.blockchain, usdc_balance: await usdcBalance(row.address) })
+}
+
+async function savedWallet(userId: string) {
+  const { data, error } = await admin.from('wallets').select('address, blockchain').eq('user_id', userId).maybeSingle()
+  if (error) throw error
+  return data as WalletRow | null
+}
+
+async function start(userId: string) {
+  const saved = await savedWallet(userId)
+  if (saved) return ready(saved)
+
+  await ensureCircleUser(userId)
+  const session = await userSession(userId)
+  const user = await circle('/user', { userToken: session.userToken })
+
+  let challengeId: string
+  if (user.pinStatus === 'ENABLED') {
+    // PIN already set: they may already have the wallet (confirm was missed), or need one on Arc.
+    const existing = await findUserWallet(userId, session.userToken)
+    if (existing) return ready(await saveWallet(userId, existing))
+    challengeId = (await circle('/user/wallets', {
+      method: 'POST',
+      userToken: session.userToken,
+      body: { idempotencyKey: crypto.randomUUID(), blockchains: [BLOCKCHAIN], accountType: 'EOA' },
+    })).challengeId
+  } else {
+    challengeId = (await circle('/user/initialize', {
+      method: 'POST',
+      userToken: session.userToken,
+      body: { idempotencyKey: crypto.randomUUID(), blockchains: [BLOCKCHAIN], accountType: 'EOA' },
+    })).challengeId
+  }
+
   return reply(200, {
-    address: row.address,
-    blockchain: row.blockchain,
-    usdc_balance: await usdcBalance(row.address),
-    created,
+    status: 'challenge',
+    appId: await circleAppId(),
+    userToken: session.userToken,
+    encryptionKey: session.encryptionKey,
+    challengeId,
   })
+}
+
+async function confirm(userId: string, challengeId: unknown) {
+  const saved = await savedWallet(userId)
+  if (saved) return ready(saved)
+  if (typeof challengeId !== 'string' || !challengeId) return reply(400, { error: 'challengeId is required' })
+
+  const { userToken } = await userSession(userId)
+  const challenge = await circle(`/user/challenges/${encodeURIComponent(challengeId)}`, { userToken })
+    .then((data) => data.challenge)
+    .catch((err) => {
+      if (err instanceof CircleError && err.status < 500) return null // not this user's challenge, or no such challenge
+      throw err
+    })
+  if (!challenge || challenge.status === 'FAILED' || challenge.status === 'EXPIRED') {
+    return reply(409, { status: 'failed', error: 'Wallet setup did not finish, start again' })
+  }
+  if (challenge.status !== 'COMPLETE') return reply(409, { status: 'pending', error: 'Finish the PIN step first' })
+
+  // The wallet can take a moment to go live after the PIN step.
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const wallet = await findUserWallet(userId, userToken)
+    if (wallet) return ready(await saveWallet(userId, wallet))
+    await new Promise((resolve) => setTimeout(resolve, 1000))
+  }
+  return reply(409, { status: 'pending', error: 'Wallet is still being created, try again in a few seconds' })
 }
 
 Deno.serve(async (req) => {
@@ -107,30 +182,19 @@ Deno.serve(async (req) => {
   const { data: { user } } = token ? await admin.auth.getUser(token) : { data: { user: null } }
   if (!user) return reply(401, { error: 'Sign in first' })
 
-  const { data: existing, error: readError } = await admin
-    .from('wallets').select('address, blockchain').eq('user_id', user.id).maybeSingle()
-  if (readError) return reply(500, { error: 'Could not read wallet' })
-  if (existing) return walletResponse(existing, false)
+  const body = req.method === 'POST' ? await req.json().catch(() => ({})) : {}
+  const action = body.action ?? 'status'
 
-  // The user's ID doubles as Circle's idempotency key, so two calls at once
-  // still make only one wallet. The losing call finds it by refId instead.
-  let wallet = await createCircleWallet(user.id).catch((err) => {
-    console.error(err)
-    return undefined
-  })
-  for (let attempt = 0; !wallet && attempt < 5; attempt++) {
-    await new Promise((resolve) => setTimeout(resolve, 1000))
-    wallet = await findCircleWallet(user.id).catch(() => undefined)
+  try {
+    if (action === 'status') {
+      const saved = await savedWallet(user.id)
+      return saved ? ready(saved) : reply(200, { status: 'none' })
+    }
+    if (action === 'start') return await start(user.id)
+    if (action === 'confirm') return await confirm(user.id, body.challengeId)
+    return reply(400, { error: 'action must be status, start or confirm' })
+  } catch (err) {
+    console.error(err instanceof Error ? err.message : 'wallet error')
+    return reply(502, { error: 'Wallet service is unavailable, try again' })
   }
-  if (!wallet) return reply(502, { error: 'Wallet service is unavailable, try again' })
-
-  const { error: insertError } = await admin.from('wallets').upsert(
-    { user_id: user.id, circle_wallet_id: wallet.id, address: wallet.address, blockchain: wallet.blockchain },
-    { onConflict: 'user_id', ignoreDuplicates: true },
-  )
-  if (insertError) return reply(500, { error: 'Could not save wallet' })
-
-  const { data: saved } = await admin
-    .from('wallets').select('address, blockchain').eq('user_id', user.id).single()
-  return walletResponse(saved!, true)
 })
