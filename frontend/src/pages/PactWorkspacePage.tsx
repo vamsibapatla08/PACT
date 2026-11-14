@@ -10,6 +10,7 @@ import { PactPilotPanel } from '../components/PactPilotPanel'
 import { askPactPilot } from '../lib/pactPilotService'
 import { listPactMessages, sendPactMessage, subscribeToPactMessages } from '../lib/chatService'
 import type { PactChatMessage } from '../types/chat'
+import { PactMoneyPanel } from '../components/PactMoneyPanel'
 
 type Props = { user: User; profile: Profile | null; pactId: string; onNavigate: (path: string) => void; onSignOut: () => Promise<void>; signingOut: boolean }
 
@@ -91,6 +92,7 @@ export function PactWorkspacePage({ user, profile, pactId, onNavigate, onSignOut
             <PactPilotPanel pactId={pact.id} pactName={pact.name} onAsk={askPactPilot} />
           </div>
         </div>
+        <PactMoneyPanel pactName={pact.name} />
         <section className="workspace-coming"><span>PACT / NEXT LAYER</span><strong>Conversation, decisions, and payments will live here.</strong><p>Chat, plans, votes, and payment features are not in the current backend migration yet.</p></section>
       </> : null}
     </motion.section>
