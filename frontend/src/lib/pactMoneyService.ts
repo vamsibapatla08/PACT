@@ -1,4 +1,3 @@
-import { W3SSdk } from '@circle-fin/w3s-pw-web-sdk'
 import { supabase } from './supabase'
 import type { PactMoneyWallet } from '../types/pactMoney'
 
@@ -35,7 +34,9 @@ export async function getPactMoneyWalletStatus(): Promise<PactMoneyWallet | null
   throw new Error(data.error || 'Wallet status is not ready.')
 }
 
-function executeChallenge(sdk: W3SSdk, challengeId: string): Promise<void> {
+type CircleSdk = { getDeviceId: () => Promise<string>; setAuthentication: (auth: { userToken: string; encryptionKey: string }) => void; execute: (challengeId: string, onCompleted: (error?: { message?: string }) => void) => void }
+
+function executeChallenge(sdk: CircleSdk, challengeId: string): Promise<void> {
   return new Promise((resolve, reject) => {
     sdk.execute(challengeId, (error) => error ? reject(new Error(error.message || 'Circle wallet setup failed.')) : resolve())
   })
@@ -47,6 +48,7 @@ export async function createPactMoneyWallet(): Promise<PactMoneyWallet> {
   if (challenge.status !== 'challenge') throw new Error('Wallet setup did not return a Circle challenge.')
 
   // These short-lived values stay in this function's memory and are passed directly to Circle's SDK.
+  const { W3SSdk } = await import('@circle-fin/w3s-pw-web-sdk')
   const sdk = new W3SSdk({ appSettings: { appId: challenge.appId } })
   await sdk.getDeviceId()
   sdk.setAuthentication({ userToken: challenge.userToken, encryptionKey: challenge.encryptionKey })
