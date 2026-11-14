@@ -8,6 +8,8 @@ import type { PactWorkspace, Profile } from '../types/pact'
 import { ChatPanel } from '../components/ChatPanel'
 import { PactPilotPanel } from '../components/PactPilotPanel'
 import { askPactPilot } from '../lib/pactPilotService'
+import { listPactMessages, sendPactMessage, subscribeToPactMessages } from '../lib/chatService'
+import type { PactChatMessage } from '../types/chat'
 
 type Props = { user: User; profile: Profile | null; pactId: string; onNavigate: (path: string) => void; onSignOut: () => Promise<void>; signingOut: boolean }
 
@@ -21,12 +23,35 @@ export function PactWorkspacePage({ user, profile, pactId, onNavigate, onSignOut
   const [inviteError, setInviteError] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
   const [activeTool, setActiveTool] = useState<'chat' | 'pilot'>('chat')
+  const [chatMessages, setChatMessages] = useState<PactChatMessage[]>([])
+  const [chatLoading, setChatLoading] = useState(false)
+  const [chatError, setChatError] = useState<string | null>(null)
+  const [chatLive, setChatLive] = useState(false)
 
   useEffect(() => {
     let active = true
     getPactWorkspace(pactId).then((value) => { if (active) setPact(value) }).catch((reason) => { if (active) setError(friendlyError(reason, 'This Pact could not be opened.')) }).finally(() => { if (active) setLoading(false) })
     return () => { active = false }
   }, [pactId])
+
+  useEffect(() => {
+    if (!pact) return
+    let active = true
+    setChatLoading(true); setChatError(null); setChatLive(false); setChatMessages([])
+    const unsubscribe = subscribeToPactMessages(pact.id, (message) => {
+      if (!active) return
+      setChatMessages((current) => current.some((item) => item.id === message.id) ? current : [...current, message].sort((a, b) => a.created_at.localeCompare(b.created_at) || a.id.localeCompare(b.id)))
+    }, (status) => {
+      if (!active) return
+      setChatLive(status === 'SUBSCRIBED')
+      if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') setChatError('Live updates are unavailable. Your conversation can still be refreshed.')
+    })
+    listPactMessages(pact.id).then((history) => {
+      if (!active) return
+      setChatMessages((current) => [...history, ...current].filter((message, index, all) => all.findIndex((item) => item.id === message.id) === index).sort((a, b) => a.created_at.localeCompare(b.created_at) || a.id.localeCompare(b.id)))
+    }).catch((reason) => { if (active) setChatError(friendlyError(reason, 'The Pact conversation could not be loaded.')) }).finally(() => { if (active) setChatLoading(false) })
+    return () => { active = false; unsubscribe(); setChatLive(false) }
+  }, [pact?.id])
 
   async function handleInvite() {
     if (inviteCode) {
@@ -60,7 +85,7 @@ export function PactWorkspacePage({ user, profile, pactId, onNavigate, onSignOut
         </div>
         <div className="workspace-assist-grid">
           <div className={`workspace-assist-panel workspace-assist-chat ${activeTool === 'chat' ? 'is-mobile-active' : ''}`} id="pact-chat-panel">
-            <ChatPanel pactId={pact.id} pactName={pact.name} currentUserId={user.id} currentUserName={displayName(user, profile)} currentUserAvatar={avatarUrl(user, profile)} />
+            <ChatPanel pactId={pact.id} pactName={pact.name} currentUserId={user.id} currentUserName={displayName(user, profile)} currentUserAvatar={avatarUrl(user, profile)} members={pact.members} messages={chatMessages} loading={chatLoading} error={chatError} backendReady={chatLive} onSend={sendPactMessage} />
           </div>
           <div className={`workspace-assist-panel workspace-assist-pilot ${activeTool === 'pilot' ? 'is-mobile-active' : ''}`} id="pact-pilot-panel">
             <PactPilotPanel pactId={pact.id} pactName={pact.name} onAsk={askPactPilot} />

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
 import type { PactChatMessage } from '../types/chat'
+import type { PactMember } from '../types/pact'
 
 type Props = {
   pactId: string
@@ -7,6 +8,7 @@ type Props = {
   currentUserId: string
   currentUserName: string
   currentUserAvatar?: string | null
+  members?: PactMember[]
   messages?: PactChatMessage[]
   loading?: boolean
   error?: string | null
@@ -18,7 +20,7 @@ function formatTime(value: string) {
   return new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' }).format(new Date(value))
 }
 
-export function ChatPanel({ pactId, pactName, currentUserId, currentUserName, currentUserAvatar, messages = [], loading = false, error = null, backendReady = false, onSend }: Props) {
+export function ChatPanel({ pactId, pactName, currentUserId, currentUserName, currentUserAvatar, members = [], messages = [], loading = false, error = null, backendReady = false, onSend }: Props) {
   const [draft, setDraft] = useState('')
   const [sendError, setSendError] = useState<string | null>(null)
   const [sending, setSending] = useState(false)
@@ -54,8 +56,9 @@ export function ChatPanel({ pactId, pactName, currentUserId, currentUserName, cu
       {!loading && !error && messages.length === 0 ? <div className="chat-state"><span className="chat-empty-mark">•</span><strong>No messages yet</strong><span>Your Pact conversation will appear here.</span></div> : null}
       {!loading && !error && messages.length > 0 ? messages.map((message) => {
         const mine = message.sender_id === currentUserId
-        const name = message.sender_name || (mine ? currentUserName : 'Pact member')
-        const avatar = message.sender_avatar_url || (mine ? currentUserAvatar : null)
+        const rosterMember = members.find((member) => member.user_id === message.sender_id)
+        const name = message.sender_name || rosterMember?.profile?.full_name || (mine ? currentUserName : 'Pact member')
+        const avatar = message.sender_avatar_url || rosterMember?.profile?.avatar_url || (mine ? currentUserAvatar : null)
         return <article className={`chat-message${mine ? ' is-mine' : ''}`} key={message.id}><div className="chat-avatar">{avatar ? <img src={avatar} alt="" referrerPolicy="no-referrer" /> : <span>{name.charAt(0).toUpperCase()}</span>}</div><div className="chat-message-body"><div className="chat-message-meta"><strong>{name}{mine ? ' · you' : ''}</strong><time dateTime={message.created_at}>{formatTime(message.created_at)}</time></div><p>{message.body}</p></div></article>
       }) : null}
     </div>
