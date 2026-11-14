@@ -99,7 +99,7 @@ export async function createPactInvitation(pactId: string): Promise<string> {
   return inviteCode
 }
 
-type PactMemberRpcRow = { user_id?: string; id?: string; role?: string; joined_at?: string | null; name?: string | null; avatar_url?: string | null }
+type PactMemberRpcRow = { user_id: string; role?: string; joined_at?: string | null; name?: string | null; avatar_url?: string | null }
 
 export async function listPactMembers(pactId: string): Promise<PactMemberRpcRow[]> {
   const { data, error } = await client().rpc('list_pact_members', { p_pact_id: pactId })
@@ -114,7 +114,7 @@ export async function getPactWorkspace(pactId: string): Promise<PactWorkspace> {
   if (!userId) throw new Error('Your sign-in session has expired. Please sign in again.')
 
   const memberRows = await listPactMembers(pactId)
-  if (!memberRows.some((member) => (member.user_id || member.id) === userId)) {
+  if (!memberRows.some((member) => member.user_id === userId)) {
     logRetrievalFailure('membership denied', { userId, pactId }, { code: 'PACT_NOT_ACTIVE_MEMBER', message: 'No active membership found for the authenticated user.' })
     throw new Error('This Pact does not exist or you do not have active membership.')
   }
@@ -137,10 +137,10 @@ export async function getPactWorkspace(pactId: string): Promise<PactWorkspace> {
   // Do not make authorized Pact retrieval depend on optional profile columns.
   // Member display names can be added once the live profile contract is known.
   const members = memberRows.map((member) => ({
-    user_id: member.user_id || member.id || '',
+    user_id: member.user_id,
     role: member.role === 'host' ? 'host' : 'member',
     joined_at: member.joined_at || pact.created_at,
-    profile: member.name || member.avatar_url ? { id: member.user_id || member.id || '', full_name: member.name || null, avatar_url: member.avatar_url || null } : null,
+    profile: member.name || member.avatar_url ? { id: member.user_id, full_name: member.name || null, avatar_url: member.avatar_url || null } : null,
   })) as PactMember[]
   return { id: pact.pact_id, name: pact.name, created_by: pact.created_by, created_at: pact.created_at, member_count: members.length, members }
 }
