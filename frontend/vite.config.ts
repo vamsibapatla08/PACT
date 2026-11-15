@@ -4,6 +4,5 @@ import { nodePolyfills } from 'vite-plugin-node-polyfills'
 
 export default defineConfig({
   plugins: [react(), nodePolyfills({ globals: { process: true, Buffer: true, global: true } })],
-  define: { process: { env: {} } },
   build: { target: 'es2022' },
 })
