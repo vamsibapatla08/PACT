@@ -11,7 +11,7 @@ import { askPactPilot } from '../lib/pactPilotService'
 import { listPactMessages, sendPactMessage, subscribeToPactMessages } from '../lib/chatService'
 import type { PactChatMessage } from '../types/chat'
 import { PactMoneyPanel } from '../components/PactMoneyPanel'
-import { createPactMoneyWallet, getPactMoneyWalletStatus, getPactPaymentStatus, isPaymentBackendUnavailable, pactMoneyWalletEnabled } from '../lib/pactMoneyService'
+import { createPactFundingPlan, createPactMoneyWallet, getPactMoneyWalletStatus, getPactPaymentStatus, isPaymentBackendUnavailable, pactMoneyWalletEnabled } from '../lib/pactMoneyService'
 import type { PactMoneyStatus, PactMoneyWallet, PactPaymentStatusRow } from '../types/pactMoney'
 import { PactFlowPanel } from '../components/PactFlowPanel'
 import { PactDecidePanel } from '../components/PactDecidePanel'
@@ -126,6 +126,11 @@ export function PactWorkspacePage({ user, profile, pactId, onNavigate, onSignOut
     }
   }
 
+  async function handleCreateFundingPlan(input: { shareUsdc: string; deadline: string; payeeAddress: string; contractAddress: string }) {
+    await createPactFundingPlan({ pactId, ...input })
+    setPaymentRows(await getPactPaymentStatus(pactId))
+  }
+
   async function handleVote(decisionId: string, vote: 'approve' | 'reject') {
     try { await castPactDecisionVote(decisionId, vote); setFlow(await loadPactFlow(pactId)) }
     catch (reason) { setFlowError(reason instanceof Error ? reason.message : 'Your vote could not be recorded.') }
@@ -173,7 +178,7 @@ export function PactWorkspacePage({ user, profile, pactId, onNavigate, onSignOut
             <PactPilotPanel pactId={pact.id} pactName={pact.name} onAsk={askAndPersist} />
           </div>
         </div>
-        <PactMoneyPanel pactName={pact.name} memberCount={pact.members.length} status={moneyStatus} wallet={moneyWallet} error={moneyError} walletEnabled={pactMoneyWalletEnabled} onCreateWallet={handleCreateWallet} paymentRows={paymentRows} />
+        <PactMoneyPanel pactName={pact.name} memberCount={pact.members.length} isHost={pact.members.some((member) => member.user_id === user.id && member.role === 'host')} status={moneyStatus} wallet={moneyWallet} error={moneyError} walletEnabled={pactMoneyWalletEnabled} onCreateWallet={handleCreateWallet} paymentRows={paymentRows} onCreateFundingPlan={handleCreateFundingPlan} />
         <div className="workspace-decision-grid"><PactFlowPanel milestones={flow.milestones} recommendations={flow.recommendations} decisions={flow.decisions} loading={flowLoading} error={flowError} onSubmitRecommendation={handleSubmitRecommendation} /><PactDecidePanel decisions={flow.decisions} onVote={handleVote} onCreate={handleCreateDecision} error={flowError} /></div>
         <section className="workspace-coming"><span>PACT / NEXT LAYER</span><strong>Conversation, decisions, and payments will live here.</strong><p>Chat, plans, votes, and payment features are not in the current backend migration yet.</p></section>
       </> : null}

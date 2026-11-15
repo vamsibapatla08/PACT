@@ -25,6 +25,13 @@ export async function getPactPaymentStatus(pactId: string): Promise<PactPaymentS
   return data as PactPaymentStatusRow[]
 }
 
+export async function createPactFundingPlan(input: { pactId: string; shareUsdc: string; deadline: string; payeeAddress: string; contractAddress: string }): Promise<{ paymentId: string; sharesNeeded: number }> {
+  const { data, error } = await client().functions.invoke('create-pact-payment-plan', { body: input })
+  if (error) throw error
+  if (!data || typeof data.paymentId !== 'string' || typeof data.sharesNeeded !== 'number') throw new Error('Funding plan service returned an invalid response.')
+  return data as { paymentId: string; sharesNeeded: number }
+}
+
 export function isPaymentBackendUnavailable(error: unknown): boolean {
   const value = error as { code?: string; message?: string } | null
   return value?.code === '42883' || value?.code === '42P01' || value?.code === 'PGRST202' || /function .*get_pact_payment_status|relation .*pact_(payments|shares)/i.test(value?.message || '')
