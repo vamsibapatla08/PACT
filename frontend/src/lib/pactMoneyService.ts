@@ -1,8 +1,9 @@
 import { supabase } from './supabase'
 import type { PactMoneyWallet } from '../types/pactMoney'
 
-// Keep live wallet creation off until Rory confirms deployment and the full PIN flow.
-export const pactMoneyWalletEnabled = false
+// Local development is enabled; deployed builds require an explicit opt-in.
+export const pactMoneyWalletEnabled = import.meta.env.DEV
+  || import.meta.env.VITE_PACTMONEY_WALLET_TEST === 'true'
 
 type WalletStatusResponse =
   | { status: 'none' }
