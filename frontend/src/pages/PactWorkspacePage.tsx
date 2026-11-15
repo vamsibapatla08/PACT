@@ -10,6 +10,9 @@ import { PactPilotPanel } from '../components/PactPilotPanel'
 import { askPactPilot } from '../lib/pactPilotService'
 import { listPactMessages, sendPactMessage, subscribeToPactMessages } from '../lib/chatService'
 import type { PactChatMessage } from '../types/chat'
+import { PactMoneyPanel } from '../components/PactMoneyPanel'
+import { createPactMoneyWallet, getPactMoneyWalletStatus, pactMoneyWalletEnabled } from '../lib/pactMoneyService'
+import type { PactMoneyStatus, PactMoneyWallet } from '../types/pactMoney'
 
 type Props = { user: User; profile: Profile | null; pactId: string; onNavigate: (path: string) => void; onSignOut: () => Promise<void>; signingOut: boolean }
 
@@ -27,6 +30,9 @@ export function PactWorkspacePage({ user, profile, pactId, onNavigate, onSignOut
   const [chatLoading, setChatLoading] = useState(false)
   const [chatError, setChatError] = useState<string | null>(null)
   const [chatLive, setChatLive] = useState(false)
+  const [moneyStatus, setMoneyStatus] = useState<PactMoneyStatus>('unavailable')
+  const [moneyWallet, setMoneyWallet] = useState<PactMoneyWallet | null>(null)
+  const [moneyError, setMoneyError] = useState<string | null>(null)
 
   useEffect(() => {
     let active = true
@@ -52,6 +58,19 @@ export function PactWorkspacePage({ user, profile, pactId, onNavigate, onSignOut
     }).catch((reason) => { if (active) setChatError(friendlyError(reason, 'The Pact conversation could not be loaded.')) }).finally(() => { if (active) setChatLoading(false) })
     return () => { active = false; unsubscribe(); setChatLive(false) }
   }, [pact?.id])
+
+  useEffect(() => {
+    let active = true
+    setMoneyStatus('loading'); setMoneyWallet(null); setMoneyError(null)
+    getPactMoneyWalletStatus().then((wallet) => {
+      if (!active) return
+      setMoneyWallet(wallet); setMoneyStatus(wallet ? 'ready' : 'unavailable')
+    }).catch((reason) => {
+      if (!active) return
+      setMoneyStatus('error'); setMoneyError(reason instanceof Error ? reason.message : 'Wallet status could not be checked.')
+    })
+    return () => { active = false }
+  }, [user.id])
 
   async function handleInvite() {
     if (inviteCode) {
@@ -91,6 +110,7 @@ export function PactWorkspacePage({ user, profile, pactId, onNavigate, onSignOut
             <PactPilotPanel pactId={pact.id} pactName={pact.name} onAsk={askPactPilot} />
           </div>
         </div>
+        <PactMoneyPanel pactName={pact.name} status={moneyStatus} wallet={moneyWallet} error={moneyError} walletEnabled={pactMoneyWalletEnabled} onCreateWallet={createPactMoneyWallet} />
         <section className="workspace-coming"><span>PACT / NEXT LAYER</span><strong>Conversation, decisions, and payments will live here.</strong><p>Chat, plans, votes, and payment features are not in the current backend migration yet.</p></section>
       </> : null}
     </motion.section>
