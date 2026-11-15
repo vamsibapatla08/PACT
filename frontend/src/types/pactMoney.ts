@@ -11,3 +11,26 @@ export type PactMoneyDataSource = {
   getWallet: () => Promise<PactMoneyWallet | null>
 }
 
+export type PactPaymentStatus = 'open' | 'released' | 'cancelled'
+export type PactShareStatus = 'owed' | 'paid' | 'refunded'
+
+export type PactPaymentStatusRow = {
+  payment_id: string
+  pact_id: string
+  payee_address: string
+  share_usdc: number | string
+  shares_needed: number
+  deadline: string
+  chain_id: number
+  contract_address: string
+  payment_status: PactPaymentStatus
+  share_id: string | null
+  user_id: string | null
+  wallet_address: string | null
+  share_status: PactShareStatus | null
+  amount_usdc: number | string | null
+  tx_hash: string | null
+  paid_at: string | null
+  refunded_at: string | null
+}
+

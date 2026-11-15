@@ -1,5 +1,5 @@
 import { supabase } from './supabase'
-import type { PactMoneyWallet } from '../types/pactMoney'
+import type { PactMoneyWallet, PactPaymentStatusRow } from '../types/pactMoney'
 
 // Local development is enabled; deployed builds require an explicit opt-in.
 export const pactMoneyWalletEnabled = import.meta.env.DEV
@@ -16,6 +16,18 @@ type WalletStartResponse = WalletChallengeResponse | Extract<WalletStatusRespons
 function client() {
   if (!supabase) throw new Error('Pact is not connected to Supabase yet.')
   return supabase
+}
+
+export async function getPactPaymentStatus(pactId: string): Promise<PactPaymentStatusRow[]> {
+  const { data, error } = await client().rpc('get_pact_payment_status', { p_pact_id: pactId })
+  if (error) throw error
+  if (!Array.isArray(data)) throw new Error('Payment service returned an invalid response.')
+  return data as PactPaymentStatusRow[]
+}
+
+export function isPaymentBackendUnavailable(error: unknown): boolean {
+  const value = error as { code?: string; message?: string } | null
+  return value?.code === '42883' || value?.code === '42P01' || value?.code === 'PGRST202' || /function .*get_pact_payment_status|relation .*pact_(payments|shares)/i.test(value?.message || '')
 }
 
 async function invokeWallet<T>(action: 'status' | 'start' | 'confirm', challengeId?: string): Promise<T> {

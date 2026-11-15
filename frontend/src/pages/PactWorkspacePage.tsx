@@ -11,8 +11,8 @@ import { askPactPilot } from '../lib/pactPilotService'
 import { listPactMessages, sendPactMessage, subscribeToPactMessages } from '../lib/chatService'
 import type { PactChatMessage } from '../types/chat'
 import { PactMoneyPanel } from '../components/PactMoneyPanel'
-import { createPactMoneyWallet, getPactMoneyWalletStatus, pactMoneyWalletEnabled } from '../lib/pactMoneyService'
-import type { PactMoneyStatus, PactMoneyWallet } from '../types/pactMoney'
+import { createPactMoneyWallet, getPactMoneyWalletStatus, getPactPaymentStatus, isPaymentBackendUnavailable, pactMoneyWalletEnabled } from '../lib/pactMoneyService'
+import type { PactMoneyStatus, PactMoneyWallet, PactPaymentStatusRow } from '../types/pactMoney'
 import { PactFlowPanel } from '../components/PactFlowPanel'
 import { PactDecidePanel } from '../components/PactDecidePanel'
 import { loadPactFlow, castPactDecisionVote, createPactDecision, savePactRecommendation, seedPactMilestones } from '../lib/pactFlowService'
@@ -37,9 +37,20 @@ export function PactWorkspacePage({ user, profile, pactId, onNavigate, onSignOut
   const [moneyStatus, setMoneyStatus] = useState<PactMoneyStatus>('unavailable')
   const [moneyWallet, setMoneyWallet] = useState<PactMoneyWallet | null>(null)
   const [moneyError, setMoneyError] = useState<string | null>(null)
+  const [paymentRows, setPaymentRows] = useState<PactPaymentStatusRow[] | null>(null)
   const [flow, setFlow] = useState<{ milestones: PactMilestone[]; recommendations: PactRecommendation[]; decisions: PactDecision[] }>({ milestones: [], recommendations: [], decisions: [] })
   const [flowLoading, setFlowLoading] = useState(false)
   const [flowError, setFlowError] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!pact) return
+    let active = true
+    setPaymentRows(null)
+    getPactPaymentStatus(pact.id).then((rows) => { if (active) setPaymentRows(rows) }).catch((reason) => {
+      if (active && !isPaymentBackendUnavailable(reason)) setMoneyError(reason instanceof Error ? reason.message : 'Payment status could not be loaded.')
+    })
+    return () => { active = false }
+  }, [pact?.id])
 
   useEffect(() => {
     let active = true
@@ -162,7 +173,7 @@ export function PactWorkspacePage({ user, profile, pactId, onNavigate, onSignOut
             <PactPilotPanel pactId={pact.id} pactName={pact.name} onAsk={askAndPersist} />
           </div>
         </div>
-        <PactMoneyPanel pactName={pact.name} status={moneyStatus} wallet={moneyWallet} error={moneyError} walletEnabled={pactMoneyWalletEnabled} onCreateWallet={handleCreateWallet} />
+        <PactMoneyPanel pactName={pact.name} memberCount={pact.members.length} status={moneyStatus} wallet={moneyWallet} error={moneyError} walletEnabled={pactMoneyWalletEnabled} onCreateWallet={handleCreateWallet} paymentRows={paymentRows} />
         <div className="workspace-decision-grid"><PactFlowPanel milestones={flow.milestones} recommendations={flow.recommendations} decisions={flow.decisions} loading={flowLoading} error={flowError} onSubmitRecommendation={handleSubmitRecommendation} /><PactDecidePanel decisions={flow.decisions} onVote={handleVote} onCreate={handleCreateDecision} error={flowError} /></div>
         <section className="workspace-coming"><span>PACT / NEXT LAYER</span><strong>Conversation, decisions, and payments will live here.</strong><p>Chat, plans, votes, and payment features are not in the current backend migration yet.</p></section>
       </> : null}
