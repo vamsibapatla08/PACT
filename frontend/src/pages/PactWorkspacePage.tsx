@@ -125,6 +125,13 @@ export function PactWorkspacePage({ user, profile, pactId, onNavigate, onSignOut
     catch (reason) { setFlowError(reason instanceof Error ? reason.message : 'The decision could not be created.') }
   }
 
+  async function handleSubmitRecommendation(recommendation: PactRecommendation) {
+    const optionTitles = recommendation.options.map((option) => typeof option === 'string' ? option : option && typeof option === 'object' && 'title' in option && typeof option.title === 'string' ? option.title : '').filter(Boolean)
+    if (optionTitles.length < 2) { setFlowError('This recommendation does not contain two valid options to vote on.'); return }
+    try { await createPactDecision(pactId, `Approve recommendation: ${recommendation.summary}`, optionTitles, 'majority', recommendation.recommendation_id); setFlow(await loadPactFlow(pactId)) }
+    catch (reason) { setFlowError(reason instanceof Error ? reason.message : 'The recommendation could not be submitted for approval.') }
+  }
+
   async function askAndPersist(request: Parameters<typeof askPactPilot>[0]) {
     const response = await askPactPilot(request)
     await savePactRecommendation(request.context.pactId, { summary: response.summary || response.body, options: response.options, tasks: response.tasks, costs: response.costs, next_steps: response.next_steps })
@@ -156,7 +163,7 @@ export function PactWorkspacePage({ user, profile, pactId, onNavigate, onSignOut
           </div>
         </div>
         <PactMoneyPanel pactName={pact.name} status={moneyStatus} wallet={moneyWallet} error={moneyError} walletEnabled={pactMoneyWalletEnabled} onCreateWallet={handleCreateWallet} />
-        <div className="workspace-decision-grid"><PactFlowPanel milestones={flow.milestones} recommendations={flow.recommendations} loading={flowLoading} error={flowError} /><PactDecidePanel decisions={flow.decisions} onVote={handleVote} onCreate={handleCreateDecision} error={flowError} /></div>
+        <div className="workspace-decision-grid"><PactFlowPanel milestones={flow.milestones} recommendations={flow.recommendations} decisions={flow.decisions} loading={flowLoading} error={flowError} onSubmitRecommendation={handleSubmitRecommendation} /><PactDecidePanel decisions={flow.decisions} onVote={handleVote} onCreate={handleCreateDecision} error={flowError} /></div>
         <section className="workspace-coming"><span>PACT / NEXT LAYER</span><strong>Conversation, decisions, and payments will live here.</strong><p>Chat, plans, votes, and payment features are not in the current backend migration yet.</p></section>
       </> : null}
     </motion.section>

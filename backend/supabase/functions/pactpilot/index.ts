@@ -47,12 +47,14 @@ const planSchema = {
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["item", "estimated_amount", "currency", "per_person_amount"],
+        required: ["item", "estimated_amount", "currency", "per_person_amount", "option_title", "is_shared"],
         properties: {
           item: { type: "string" },
           estimated_amount: { type: "number" },
           currency: { type: "string" },
           per_person_amount: { type: "number" },
+          option_title: { type: ["string", "null"] },
+          is_shared: { type: "boolean" },
         },
       },
     },
@@ -124,6 +126,10 @@ function cleanExtras(plan: Fields, pactBudget: unknown) {
           : groupSize
           ? round(amount / groupSize)
           : null,
+        option_title: typeof cost.option_title === "string" && cost.option_title.trim()
+          ? cost.option_title.trim()
+          : null,
+        is_shared: cost.is_shared === true || cost.option_title == null,
         is_estimate: true as const,
       }
     })
@@ -138,8 +144,15 @@ function cleanExtras(plan: Fields, pactBudget: unknown) {
       ? savedBudget
       : null)
 
-  const total = round(costs.reduce((sum, cost) => sum + cost.estimated_amount, 0))
-  const perPerson = groupSize ? round(total / groupSize) : null
+  const hasAlternatives = costs.some((cost) => !cost.is_shared && cost.option_title)
+  const sharedTotal = round(costs.filter((cost) => cost.is_shared).reduce((sum, cost) => sum + cost.estimated_amount, 0))
+  const alternativeTitles = [...new Set(costs.filter((cost) => !cost.is_shared && cost.option_title).map((cost) => cost.option_title as string))]
+  const alternatives = alternativeTitles.map((option_title) => {
+    const optionTotal = round(sharedTotal + costs.filter((cost) => !cost.is_shared && cost.option_title === option_title).reduce((sum, cost) => sum + cost.estimated_amount, 0))
+    return { option_title, total: optionTotal, per_person: groupSize ? round(optionTotal / groupSize) : null }
+  })
+  const total = hasAlternatives ? null : sharedTotal
+  const perPerson = total !== null && groupSize ? round(total / groupSize) : null
 
   const nextSteps = (Array.isArray(plan.next_steps) ? plan.next_steps : [])
     .filter((step): step is string => typeof step === "string" && step.trim() !== "")
@@ -150,11 +163,13 @@ function cleanExtras(plan: Fields, pactBudget: unknown) {
     estimate: {
       currency,
       group_size: groupSize,
+      mode: hasAlternatives ? "alternatives" : "combined",
       total,
       per_person: perPerson,
+      alternatives,
       budget,
-      within_budget: budget === null ? null : total <= budget,
-      difference: budget === null ? null : round(budget - total),
+      within_budget: budget === null || total === null ? null : total <= budget,
+      difference: budget === null || total === null ? null : round(budget - total),
       label: estimateLabel,
     },
     next_steps: nextSteps,
@@ -265,7 +280,10 @@ Deno.serve(async (request) => {
               "like 'one person' or a member name if given, or an empty " +
               "string; due_hint is relative, like '2 weeks before'), costs " +
               "(rough estimates in one currency, per_person_amount is the " +
-              "estimated_amount split across the group), estimate (currency, " +
+              "estimated_amount split across the group; set is_shared=true " +
+              "and option_title=null for whole-plan expenses, or set " +
+              "is_shared=false and option_title to the exact alternative " +
+              "title for option-specific expenses), estimate (currency, " +
               "group_size from the question or 0 if unknown, budget from the " +
               "question or 0 if none is stated) and next_steps (short actions " +
               "the group can take). Keep the total of costs within any budget " +
