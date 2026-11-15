@@ -6,6 +6,13 @@ export function usdcString(wei: bigint) {
   return frac ? `${wei / 10n ** 18n}.${frac}` : `${wei / 10n ** 18n}`
 }
 
+// A USDC amount like "25.50" (up to 6 decimals) as the 18-decimal wei PactSplit stores. Null if not one.
+export function usdcWei(amount: unknown): bigint | null {
+  if (typeof amount !== 'string' || !/^\d+(\.\d{1,6})?$/.test(amount)) return null
+  const [whole, frac = ''] = amount.split('.')
+  return BigInt(whole) * 10n ** 18n + BigInt(frac.padEnd(18, '0'))
+}
+
 // A pact's uuid as the bytes32 key PactSplit stores it under: the 16 uuid bytes, left-aligned.
 export function pactKey(pactId: string) {
   return `0x${pactId.replace(/-/g, '').toLowerCase()}${'0'.repeat(32)}`

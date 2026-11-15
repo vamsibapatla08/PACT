@@ -49,27 +49,55 @@ How money moves in Pact, and what each of us builds for it. Written by Rory for 
 | Set up | `{ "action": "start" }` then `{ "action": "confirm", "challengeId" }` | A PIN challenge, then `ready` |
 | Send USDC | `{ "action": "transfer", "to": "0x...", "amount": "1.50" }` | A PIN challenge |
 | Pay my share | `{ "action": "pay_share", "pactId": "<uuid>" }` | A PIN challenge |
+| Open the pact (host) | `{ "action": "create_pact", "pactId": "<uuid>", "payee": "0x...", "shareUsdc": "25.00", "sharesNeeded": 4, "deadline": 1795000000 }` | A PIN challenge |
+| Pay the payee (host) | `{ "action": "release", "pactId": "<uuid>" }` | A PIN challenge |
+| Cancel the pact (host) | `{ "action": "cancel", "pactId": "<uuid>" }` | A PIN challenge |
+| Get my share back after a cancel | `{ "action": "claim_refund", "pactId": "<uuid>" }` | A PIN challenge |
 
 - A PIN challenge is `{ appId, userToken, encryptionKey, challengeId }`. The app passes these to Circle's web SDK, which asks for the PIN. Nothing moves until the PIN is entered
 - `pay_share` checks the user is an active member, checks the pact on chain was opened by the pact's real host, and reads the share amount from the contract, so the app never sends an amount
+- `create_pact`, `release` and `cancel` only work for the pact's active host (`role = 'host'` in `pact_members`). `shareUsdc` is a USDC amount with up to 6 decimals, turned into 18-decimal wei by the function. `deadline` is unix seconds and must be in the future
+- `release` and `cancel` also check the pact is open on chain and was opened from the host's own wallet
 
 ## PactSplit contract
 
 - Code: `backend/contracts/src/PactSplit.sol`, tests in `backend/contracts/test/`
 - One contract for every pact. A pact's key is its Supabase uuid as bytes32: the 32 hex digits of the uuid, then 32 zeros
 - Address on Arc Testnet: not deployed yet
+- Deploy script: `backend/contracts/script/DeployPactSplit.s.sol`
 
 | Function | Who | What |
 |---|---|---|
 | `createPact(pactId, payee, share, sharesNeeded, deadline)` | Host | Opens the pact |
 | `payShare(pactId)` with the share as value | Each member | Pays one share. One per wallet |
 | `release(pactId)` | Host | Sends the total to the payee once every share is in |
-| `cancel(pactId)` | Host any time, anyone after the deadline if short | Stops the pact |
+| `cancel(pactId)` | Host any time, anyone after the deadline | Stops the pact. The host must release before the deadline |
 | `claimRefund(pactId)` | Each payer | Gets their share back after a cancel |
+
+## Deploy PactSplit
+
+Rory runs this himself. The deployer key never goes in a file in git.
+
+- Make a throwaway deployer wallet and lock it behind a password: `cast wallet new`, then `cast wallet import pact-deployer --interactive`
+- Fund it with a little test USDC for gas from faucet.circle.com
+- From `backend/contracts`, run this. It asks for the password and never stores the key in a file:
+
+```
+forge script script/DeployPactSplit.s.sol:DeployPactSplit --rpc-url https://rpc.testnet.arc.network --broadcast --account pact-deployer
+```
+
+- The address is printed as the return value and saved in `broadcast/DeployPactSplit.s.sol/5042002/run-latest.json`
+- Then set it on the function: `supabase secrets set PACT_SPLIT_ADDRESS=0x... --workdir backend`, and fill it in above and in "For Dimple"
 
 ## For Dimple: what to stream
 
-- Filter on the PactSplit address only, once it is deployed
+| Thing | Value |
+|---|---|
+| Contract address | `0x...` (fill in after deploy) |
+| Chain ID | 5042002 |
+| RPC | `https://rpc.testnet.arc.network` |
+
+- Filter on the PactSplit address only
 - `pactId` is the first topic after the event signature on every event
 
 | Event | Topic 0 |
@@ -81,7 +109,8 @@ How money moves in Pact, and what each of us builds for it. Written by Rory for 
 | `PactCreated(bytes32 pactId, address host, address payee, uint256 share, uint32 sharesNeeded, uint64 deadline)` | `0x4bab31bdedd112598af597948003d37acdc3c94059b8b7f68ea7f5b9ed81f09c` |
 
 - `payer` and `payee` are indexed too, so they are the second topic. `amount` is in the data
-- To match a payer to a person, look up `payer` in `wallets.address`
+- To match a payer to a person, take the last 40 hex digits of topic 2, add `0x`, and look it up in `wallets.address` (lowercase both sides, Circle may save it checksummed). That row's `user_id` is the person
+- To match `pactId` to a pact, take the first 32 hex digits of topic 1 and put the dashes back (8-4-4-4-12). That is `pacts.id`
 
 ## For Vamsi: what to store
 
@@ -95,6 +124,5 @@ A suggestion, change it as you need:
 ## Not done yet
 
 - Deploy PactSplit to Arc Testnet and set `PACT_SPLIT_ADDRESS` on the `wallet` function
-- A `create_pact` call so the host opens the pact from their Circle wallet
 - Test one real transfer and one real `pay_share` with two funded wallets
 - Fallback by Nov 17 if the contract is not ready: direct transfers plus Circle's webhook

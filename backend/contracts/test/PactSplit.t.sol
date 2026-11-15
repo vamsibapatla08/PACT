@@ -102,7 +102,7 @@ contract PactSplitTest {
         split.claimRefund(ID);
     }
 
-    function test_strangerCancelsOnlyWhenExpiredShort() public {
+    function test_strangerCancelsOnlyAfterDeadline() public {
         pay(friend1);
         vm.prank(friend2);
         vm.expectRevert(PactSplit.CannotCancel.selector);
@@ -110,6 +110,20 @@ contract PactSplitTest {
         vm.warp(deadline + 1);
         vm.prank(friend2);
         split.cancel(ID);
+    }
+
+    function test_fullPactRefundsIfHostNeverReleases() public {
+        pay(friend1);
+        pay(friend2);
+        vm.prank(friend1);
+        vm.expectRevert(PactSplit.CannotCancel.selector);
+        split.cancel(ID);
+        vm.warp(deadline + 1);
+        vm.prank(friend1);
+        split.cancel(ID);
+        vm.prank(friend2);
+        split.claimRefund(ID);
+        require(friend2.balance == 100e18, "friend got share back");
     }
 
     function test_noCancelAfterRelease() public {

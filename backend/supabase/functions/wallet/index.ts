@@ -7,10 +7,15 @@
 //   POST /functions/v1/wallet { "action": "confirm", "challengeId": "..." }
 //   POST /functions/v1/wallet { "action": "transfer", "to": "0x...", "amount": "1.50" }   send USDC, returns a PIN challenge
 //   POST /functions/v1/wallet { "action": "pay_share", "pactId": "<uuid>" }               pay my share into PactSplit
+//   POST /functions/v1/wallet { "action": "create_pact", "pactId": "<uuid>", "payee": "0x...", "shareUsdc": "25.00",
+//                               "sharesNeeded": 4, "deadline": <unix seconds> }          host opens the pact on chain
+//   POST /functions/v1/wallet { "action": "release", "pactId": "<uuid>" }                 host pays the payee once full
+//   POST /functions/v1/wallet { "action": "cancel", "pactId": "<uuid>" }                  host stops the pact
+//   POST /functions/v1/wallet { "action": "claim_refund", "pactId": "<uuid>" }            payer takes their share back after a cancel
 //
 // Calls Circle's REST API directly: its Node SDK fails to boot in the Edge runtime.
 import { createClient } from 'npm:@supabase/supabase-js@2'
-import { decodeOpenPact, type OnChainPact, pactKey, PACTS_SELECTOR, usdcString } from './chain.ts'
+import { decodeOpenPact, type OnChainPact, pactKey, PACTS_SELECTOR, usdcString, usdcWei } from './chain.ts'
 
 const BLOCKCHAIN = 'ARC-TESTNET'
 const ARC_RPC = 'https://rpc.testnet.arc.network'
@@ -165,16 +170,20 @@ async function transfer(userId: string, to: unknown, amount: unknown) {
 
 // list_pact_members runs as the caller and returns rows only to active members, so it checks
 // membership and finds the real host in one call.
-async function payShare(userId: string, userJwt: string, pactId: unknown) {
-  if (!PACT_SPLIT_ADDRESS) return reply(503, { error: 'Payments are not set up yet' })
-  if (typeof pactId !== 'string' || !UUID.test(pactId)) return reply(400, { error: 'pactId must be a pact id' })
-
+async function pactRoster(userJwt: string, pactId: string) {
   const asUser = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_ANON_KEY')!, {
     global: { headers: { Authorization: `Bearer ${userJwt}` } },
   })
   const { data: members, error } = await asUser.rpc('list_pact_members', { p_pact_id: pactId })
   if (error) throw error
-  const roster = (members ?? []) as { user_id: string; role: string }[]
+  return (members ?? []) as { user_id: string; role: string }[]
+}
+
+async function payShare(userId: string, userJwt: string, pactId: unknown) {
+  if (!PACT_SPLIT_ADDRESS) return reply(503, { error: 'Payments are not set up yet' })
+  if (typeof pactId !== 'string' || !UUID.test(pactId)) return reply(400, { error: 'pactId must be a pact id' })
+
+  const roster = await pactRoster(userJwt, pactId)
   if (!roster.some((m) => m.user_id === userId)) return reply(403, { error: 'You are not in this pact' })
   const hostId = roster.find((m) => m.role === 'host')?.user_id
   const hostWallet = hostId ? await savedWallet(hostId) : null
@@ -195,6 +204,84 @@ async function payShare(userId: string, userJwt: string, pactId: unknown) {
     abiFunctionSignature: 'payShare(bytes32)',
     abiParameters: [key],
     amount: usdcString(pact.share),
+  })
+}
+
+// Only the pact's active host may open, release or cancel it. Returns their Circle wallet id, or the error reply.
+async function hostWalletId(userId: string, userJwt: string, pactId: string): Promise<string | Response> {
+  const roster = await pactRoster(userJwt, pactId)
+  if (!roster.some((m) => m.user_id === userId && m.role === 'host')) return reply(403, { error: 'Only the host can do this' })
+  const id = await walletId(userId)
+  return id ?? reply(409, { error: 'Set up your wallet first' })
+}
+
+// The host opens the pact from their own wallet, so PactSplit records that wallet as the host,
+// which is what pay_share checks before anyone pays in.
+async function createPact(userId: string, userJwt: string, body: Record<string, unknown>) {
+  if (!PACT_SPLIT_ADDRESS) return reply(503, { error: 'Payments are not set up yet' })
+  const { pactId, payee, shareUsdc, sharesNeeded, deadline } = body
+  if (typeof pactId !== 'string' || !UUID.test(pactId)) return reply(400, { error: 'pactId must be a pact id' })
+  if (typeof payee !== 'string' || !ADDRESS.test(payee)) return reply(400, { error: 'payee must be a 0x address' })
+  const share = usdcWei(shareUsdc)
+  if (!share || share >= 2n ** 128n) return reply(400, { error: 'shareUsdc must be a USDC amount like "25.00"' })
+  if (typeof sharesNeeded !== 'number' || !Number.isInteger(sharesNeeded) || sharesNeeded < 1 || sharesNeeded > 2 ** 32 - 1) {
+    return reply(400, { error: 'sharesNeeded must be a whole number of shares' })
+  }
+  if (typeof deadline !== 'number' || !Number.isSafeInteger(deadline) || deadline <= Date.now() / 1000) {
+    return reply(400, { error: 'deadline must be a future time in unix seconds' })
+  }
+
+  const id = await hostWalletId(userId, userJwt, pactId)
+  if (id instanceof Response) return id
+  const key = pactKey(pactId)
+  if (await openPact(key)) return reply(409, { error: 'This pact is already open on chain' })
+
+  return await challenge(userId, '/user/transactions/contractExecution', {
+    walletId: id,
+    contractAddress: PACT_SPLIT_ADDRESS,
+    abiFunctionSignature: 'createPact(bytes32,address,uint128,uint32,uint64)',
+    abiParameters: [key, payee, share.toString(), String(sharesNeeded), String(deadline)],
+  })
+}
+
+// release sends the total to the payee once every share is in; cancel lets each payer claim their share back.
+async function closePact(userId: string, userJwt: string, pactId: unknown, fn: 'release' | 'cancel') {
+  if (!PACT_SPLIT_ADDRESS) return reply(503, { error: 'Payments are not set up yet' })
+  if (typeof pactId !== 'string' || !UUID.test(pactId)) return reply(400, { error: 'pactId must be a pact id' })
+
+  const id = await hostWalletId(userId, userJwt, pactId)
+  if (id instanceof Response) return id
+  const key = pactKey(pactId)
+  const pact = await openPact(key)
+  if (!pact) return reply(409, { error: 'This pact is not open' })
+  const wallet = await savedWallet(userId)
+  if (!wallet || pact.host.toLowerCase() !== wallet.address.toLowerCase()) {
+    return reply(409, { error: 'This pact was opened from another wallet' })
+  }
+
+  return await challenge(userId, '/user/transactions/contractExecution', {
+    walletId: id,
+    contractAddress: PACT_SPLIT_ADDRESS,
+    abiFunctionSignature: `${fn}(bytes32)`,
+    abiParameters: [key],
+  })
+}
+
+// After a cancel, each payer pulls their own share back. PactSplit itself refuses anyone who did not pay.
+async function claimRefund(userId: string, userJwt: string, pactId: unknown) {
+  if (!PACT_SPLIT_ADDRESS) return reply(503, { error: 'Payments are not set up yet' })
+  if (typeof pactId !== 'string' || !UUID.test(pactId)) return reply(400, { error: 'pactId must be a pact id' })
+
+  const roster = await pactRoster(userJwt, pactId)
+  if (!roster.some((m) => m.user_id === userId)) return reply(403, { error: 'You are not in this pact' })
+  const id = await walletId(userId)
+  if (!id) return reply(409, { error: 'Set up your wallet first' })
+
+  return await challenge(userId, '/user/transactions/contractExecution', {
+    walletId: id,
+    contractAddress: PACT_SPLIT_ADDRESS,
+    abiFunctionSignature: 'claimRefund(bytes32)',
+    abiParameters: [pactKey(pactId)],
   })
 }
 
@@ -285,7 +372,10 @@ Deno.serve(async (req) => {
     if (action === 'confirm') return await confirm(user.id, body.challengeId)
     if (action === 'transfer') return await transfer(user.id, body.to, body.amount)
     if (action === 'pay_share') return await payShare(user.id, token!, body.pactId)
-    return reply(400, { error: 'action must be status, start, confirm, transfer or pay_share' })
+    if (action === 'create_pact') return await createPact(user.id, token!, body)
+    if (action === 'release' || action === 'cancel') return await closePact(user.id, token!, body.pactId, action)
+    if (action === 'claim_refund') return await claimRefund(user.id, token!, body.pactId)
+    return reply(400, { error: 'action must be status, start, confirm, transfer, pay_share, create_pact, release, cancel or claim_refund' })
   } catch (err) {
     console.error(err instanceof Error ? err.message : 'wallet error')
     return reply(502, { error: 'Wallet service is unavailable, try again' })

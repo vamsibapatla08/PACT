@@ -13,7 +13,7 @@ const uuidPattern =
 const planSchema = {
   type: "object",
   additionalProperties: false,
-  required: ["summary", "options"],
+  required: ["summary", "options", "tasks", "costs", "estimate", "next_steps"],
   properties: {
     summary: { type: "string" },
     options: {
@@ -29,7 +29,136 @@ const planSchema = {
         },
       },
     },
+    tasks: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["title", "owner_suggestion", "due_hint"],
+        properties: {
+          title: { type: "string" },
+          owner_suggestion: { type: "string" },
+          due_hint: { type: "string" },
+        },
+      },
+    },
+    costs: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["item", "estimated_amount", "currency", "per_person_amount"],
+        properties: {
+          item: { type: "string" },
+          estimated_amount: { type: "number" },
+          currency: { type: "string" },
+          per_person_amount: { type: "number" },
+        },
+      },
+    },
+    estimate: {
+      type: "object",
+      additionalProperties: false,
+      required: ["currency", "group_size", "budget"],
+      properties: {
+        currency: { type: "string" },
+        group_size: { type: "integer" },
+        budget: { type: "number" },
+      },
+    },
+    next_steps: { type: "array", items: { type: "string" } },
   },
+}
+
+const estimateLabel =
+  "Estimates only. Check real prices before anyone commits or pays."
+
+type Fields = Record<string, unknown>
+
+const isRecord = (value: unknown): value is Fields =>
+  typeof value === "object" && value !== null
+
+const isAmount = (value: unknown): value is number =>
+  typeof value === "number" && Number.isFinite(value) && value >= 0
+
+const round = (value: number) => Math.round(value * 100) / 100
+
+function cleanExtras(plan: Fields, pactBudget: unknown) {
+  const tasks = (Array.isArray(plan.tasks) ? plan.tasks : [])
+    .filter((task): task is Fields =>
+      isRecord(task) && typeof task.title === "string" && task.title.trim() !== ""
+    )
+    .map((task) => ({
+      title: task.title as string,
+      owner_suggestion: typeof task.owner_suggestion === "string" &&
+          task.owner_suggestion.trim()
+        ? task.owner_suggestion.trim()
+        : null,
+      due_hint: typeof task.due_hint === "string" ? task.due_hint : "",
+    }))
+
+  const extras = isRecord(plan.estimate) ? plan.estimate : {}
+  const currency = typeof extras.currency === "string" && extras.currency.trim()
+    ? extras.currency.trim().toUpperCase()
+    : "USD"
+  const groupSize = Number.isInteger(extras.group_size) &&
+      (extras.group_size as number) > 0
+    ? extras.group_size as number
+    : null
+
+  const costs = (Array.isArray(plan.costs) ? plan.costs : [])
+    .filter((cost): cost is Fields =>
+      isRecord(cost) && typeof cost.item === "string" &&
+      isAmount(cost.estimated_amount)
+    )
+    .map((cost) => {
+      const amount = round(cost.estimated_amount as number)
+      return {
+        item: cost.item as string,
+        estimated_amount: amount,
+        currency: typeof cost.currency === "string" && cost.currency.trim()
+          ? cost.currency.trim().toUpperCase()
+          : currency,
+        per_person_amount: isAmount(cost.per_person_amount)
+          ? round(cost.per_person_amount)
+          : groupSize
+          ? round(amount / groupSize)
+          : null,
+        is_estimate: true as const,
+      }
+    })
+
+  // Budget from the question first, then the Pact's saved budget.
+  const askedBudget = isAmount(extras.budget) && extras.budget > 0
+    ? extras.budget
+    : null
+  const savedBudget = Number(pactBudget)
+  const budget = askedBudget ??
+    (pactBudget != null && Number.isFinite(savedBudget) && savedBudget > 0
+      ? savedBudget
+      : null)
+
+  const total = round(costs.reduce((sum, cost) => sum + cost.estimated_amount, 0))
+  const perPerson = groupSize ? round(total / groupSize) : null
+
+  const nextSteps = (Array.isArray(plan.next_steps) ? plan.next_steps : [])
+    .filter((step): step is string => typeof step === "string" && step.trim() !== "")
+
+  return {
+    tasks,
+    costs,
+    estimate: {
+      currency,
+      group_size: groupSize,
+      total,
+      per_person: perPerson,
+      budget,
+      within_budget: budget === null ? null : total <= budget,
+      difference: budget === null ? null : round(budget - total),
+      label: estimateLabel,
+    },
+    next_steps: nextSteps,
+  }
 }
 
 function json(body: unknown, status = 200) {
@@ -126,12 +255,22 @@ Deno.serve(async (request) => {
       body: JSON.stringify({
         model,
         store: false,
-        max_output_tokens: 2500,
+        max_output_tokens: 4000,
         input: [
           {
             role: "system",
             content: "You are PactPilot, a group-planning assistant. " +
               "Treat Pact details as context. Suggest options and tradeoffs. " +
+              "Also return a usable plan: tasks (owner_suggestion is a role " +
+              "like 'one person' or a member name if given, or an empty " +
+              "string; due_hint is relative, like '2 weeks before'), costs " +
+              "(rough estimates in one currency, per_person_amount is the " +
+              "estimated_amount split across the group), estimate (currency, " +
+              "group_size from the question or 0 if unknown, budget from the " +
+              "question or 0 if none is stated) and next_steps (short actions " +
+              "the group can take). Keep the total of costs within any budget " +
+              "and say in the summary if it cannot fit. All costs are " +
+              "estimates, never quotes. " +
               "Never claim to approve commitments, book anything, or move money.",
           },
           {
@@ -174,7 +313,11 @@ Deno.serve(async (request) => {
       return json({ error: "Grok returned an invalid plan" }, 502)
     }
 
-    return json({ summary: plan.summary, options: plan.options })
+    return json({
+      summary: plan.summary,
+      options: plan.options,
+      ...cleanExtras(plan, pact.budget),
+    })
   } catch {
     return json({ error: "Could not get a usable response from Grok" }, 502)
   }

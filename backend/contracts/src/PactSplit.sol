@@ -77,12 +77,12 @@ contract PactSplit {
         emit Released(pactId, p.payee, total);
     }
 
-    /// The host can cancel any time before release. Anyone can cancel a pact still short of shares after its deadline.
+    /// The host can cancel any time before release. Anyone can cancel after the deadline, so shares are never
+    /// stuck if the host disappears. The host must release before the deadline.
     function cancel(bytes32 pactId) external {
         Pact storage p = pacts[pactId];
         if (p.state != State.Open) revert NotOpen();
-        bool expiredShort = block.timestamp > p.deadline && p.sharesPaid < p.sharesNeeded;
-        if (msg.sender != p.host && !expiredShort) revert CannotCancel();
+        if (msg.sender != p.host && block.timestamp <= p.deadline) revert CannotCancel();
         p.state = State.Cancelled;
         emit Cancelled(pactId);
     }
