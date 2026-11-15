@@ -63,7 +63,7 @@ How money moves in Pact, and what each of us builds for it. Written by Rory for 
 
 - Code: `backend/contracts/src/PactSplit.sol`, tests in `backend/contracts/test/`
 - One contract for every pact. A pact's key is its Supabase uuid as bytes32: the 32 hex digits of the uuid, then 32 zeros
-- Address on Arc Testnet: not deployed yet
+- Address on Arc Testnet: `0x6eadb2b3829e6d9c30208ff4122c40df7682d79d`
 - Deploy script: `backend/contracts/script/DeployPactSplit.s.sol`
 
 | Function | Who | What |
@@ -93,7 +93,7 @@ forge script script/DeployPactSplit.s.sol:DeployPactSplit --rpc-url https://rpc.
 
 | Thing | Value |
 |---|---|
-| Contract address | `0x...` (fill in after deploy) |
+| Contract address | `0x6eadb2b3829e6d9c30208ff4122c40df7682d79d` |
 | Chain ID | 5042002 |
 | RPC | `https://rpc.testnet.arc.network` |
 
@@ -123,6 +123,6 @@ A suggestion, change it as you need:
 
 ## Not done yet
 
-- Deploy PactSplit to Arc Testnet and set `PACT_SPLIT_ADDRESS` on the `wallet` function
+- Set `PACT_SPLIT_ADDRESS` on the `wallet` function
 - Test one real transfer and one real `pay_share` with two funded wallets
 - Fallback by Nov 17 if the contract is not ready: direct transfers plus Circle's webhook
