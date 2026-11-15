@@ -11,8 +11,12 @@ import { askPactPilot } from '../lib/pactPilotService'
 import { listPactMessages, sendPactMessage, subscribeToPactMessages } from '../lib/chatService'
 import type { PactChatMessage } from '../types/chat'
 import { PactMoneyPanel } from '../components/PactMoneyPanel'
-import { createPactMoneyWallet, getPactMoneyWalletStatus, pactMoneyWalletEnabled, resetPactMoneyPin, sendPactMoney } from '../lib/pactMoneyService'
-import type { PactMoneyStatus, PactMoneyTransfer, PactMoneyWallet } from '../types/pactMoney'
+import { createPactMoneyWallet, getPactMoneyWalletStatus, getPactPaymentStatus, isPaymentBackendUnavailable, pactMoneyWalletEnabled, resetPactMoneyPin, sendPactMoney } from '../lib/pactMoneyService'
+import type { PactMoneyStatus, PactMoneyTransfer, PactMoneyWallet, PactPaymentStatusRow } from '../types/pactMoney'
+import { PactFlowPanel } from '../components/PactFlowPanel'
+import { PactDecidePanel } from '../components/PactDecidePanel'
+import { loadPactFlow, castPactDecisionVote, createPactDecision, savePactRecommendation, seedPactMilestones } from '../lib/pactFlowService'
+import type { PactDecision, PactMilestone, PactRecommendation } from '../types/pactFlow'
 
 type Props = { user: User; profile: Profile | null; pactId: string; onNavigate: (path: string) => void; onSignOut: () => Promise<void>; signingOut: boolean }
 
@@ -33,6 +37,20 @@ export function PactWorkspacePage({ user, profile, pactId, onNavigate, onSignOut
   const [moneyStatus, setMoneyStatus] = useState<PactMoneyStatus>('unavailable')
   const [moneyWallet, setMoneyWallet] = useState<PactMoneyWallet | null>(null)
   const [moneyError, setMoneyError] = useState<string | null>(null)
+  const [paymentRows, setPaymentRows] = useState<PactPaymentStatusRow[] | null>(null)
+  const [flow, setFlow] = useState<{ milestones: PactMilestone[]; recommendations: PactRecommendation[]; decisions: PactDecision[] }>({ milestones: [], recommendations: [], decisions: [] })
+  const [flowLoading, setFlowLoading] = useState(false)
+  const [flowError, setFlowError] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!pact) return
+    let active = true
+    setPaymentRows(null)
+    getPactPaymentStatus(pact.id).then((rows) => { if (active) setPaymentRows(rows) }).catch((reason) => {
+      if (active && !isPaymentBackendUnavailable(reason)) setMoneyError(reason instanceof Error ? reason.message : 'Payment status could not be loaded.')
+    })
+    return () => { active = false }
+  }, [pact?.id])
 
   useEffect(() => {
     let active = true
@@ -72,6 +90,14 @@ export function PactWorkspacePage({ user, profile, pactId, onNavigate, onSignOut
     return () => { active = false }
   }, [user.id])
 
+  useEffect(() => {
+    if (!pact) return
+    let active = true
+    setFlowLoading(true); setFlowError(null)
+    seedPactMilestones(pact.id).then(() => loadPactFlow(pact.id)).then((value) => { if (active) setFlow(value) }).catch((reason) => { if (active) setFlowError(reason instanceof Error ? reason.message : 'Pact flow could not be loaded.') }).finally(() => { if (active) setFlowLoading(false) })
+    return () => { active = false }
+  }, [pact?.id])
+
   async function handleInvite() {
     if (inviteCode) {
       try {
@@ -106,6 +132,30 @@ export function PactWorkspacePage({ user, profile, pactId, onNavigate, onSignOut
     return transfer
   }
 
+  async function handleVote(decisionId: string, vote: 'approve' | 'reject') {
+    try { await castPactDecisionVote(decisionId, vote); setFlow(await loadPactFlow(pactId)) }
+    catch (reason) { setFlowError(reason instanceof Error ? reason.message : 'Your vote could not be recorded.') }
+  }
+
+  async function handleCreateDecision(question: string, options: string[], rule: PactDecision['approval_rule']) {
+    try { await createPactDecision(pactId, question, options, rule); setFlow(await loadPactFlow(pactId)) }
+    catch (reason) { setFlowError(reason instanceof Error ? reason.message : 'The decision could not be created.') }
+  }
+
+  async function handleSubmitRecommendation(recommendation: PactRecommendation) {
+    const optionTitles = recommendation.options.map((option) => typeof option === 'string' ? option : option && typeof option === 'object' && 'title' in option && typeof option.title === 'string' ? option.title : '').filter(Boolean)
+    if (optionTitles.length < 2) { setFlowError('This recommendation does not contain two valid options to vote on.'); return }
+    try { await createPactDecision(pactId, `Approve recommendation: ${recommendation.summary}`, optionTitles, 'majority', recommendation.recommendation_id); setFlow(await loadPactFlow(pactId)) }
+    catch (reason) { setFlowError(reason instanceof Error ? reason.message : 'The recommendation could not be submitted for approval.') }
+  }
+
+  async function askAndPersist(request: Parameters<typeof askPactPilot>[0]) {
+    const response = await askPactPilot(request)
+    await savePactRecommendation(request.context.pactId, { summary: response.summary || response.body, options: response.options, tasks: response.tasks, costs: response.costs, next_steps: response.next_steps })
+    setFlow(await loadPactFlow(request.context.pactId))
+    return response
+  }
+
   return <AppShell user={user} profile={profile} current="pacts" onNavigate={onNavigate} onSignOut={onSignOut} signingOut={signingOut}>
     <motion.section className="workspace-page" initial={reduceMotion ? false : { opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: .65 }}>
       <button className="back-link" type="button" onClick={() => onNavigate('/dashboard')}>← My Pacts</button>
@@ -126,10 +176,11 @@ export function PactWorkspacePage({ user, profile, pactId, onNavigate, onSignOut
             <ChatPanel pactId={pact.id} pactName={pact.name} currentUserId={user.id} currentUserName={displayName(user, profile)} currentUserAvatar={avatarUrl(user, profile)} members={pact.members} messages={chatMessages} loading={chatLoading} error={chatError} backendReady={chatLive} onSend={sendPactMessage} />
           </div>
           <div className={`workspace-assist-panel workspace-assist-pilot ${activeTool === 'pilot' ? 'is-mobile-active' : ''}`} id="pact-pilot-panel">
-            <PactPilotPanel pactId={pact.id} pactName={pact.name} onAsk={askPactPilot} />
+            <PactPilotPanel pactId={pact.id} pactName={pact.name} onAsk={askAndPersist} />
           </div>
         </div>
-        <PactMoneyPanel pactName={pact.name} status={moneyStatus} wallet={moneyWallet} error={moneyError} walletEnabled={pactMoneyWalletEnabled} onCreateWallet={handleCreateWallet} onResetPin={pactMoneyWalletEnabled ? resetPactMoneyPin : undefined} recipients={pact.members.filter((m) => m.user_id !== user.id).map((m) => ({ userId: m.user_id, name: m.profile?.full_name || 'Pact member' }))} onSend={pactMoneyWalletEnabled ? handleSendMoney : undefined} />
+        <PactMoneyPanel pactName={pact.name} memberCount={pact.members.length} status={moneyStatus} wallet={moneyWallet} error={moneyError} walletEnabled={pactMoneyWalletEnabled} onCreateWallet={handleCreateWallet} onResetPin={pactMoneyWalletEnabled ? resetPactMoneyPin : undefined} recipients={pact.members.filter((m) => m.user_id !== user.id).map((m) => ({ userId: m.user_id, name: m.profile?.full_name || 'Pact member' }))} onSend={pactMoneyWalletEnabled ? handleSendMoney : undefined} paymentRows={paymentRows} />
+        <div className="workspace-decision-grid"><PactFlowPanel milestones={flow.milestones} recommendations={flow.recommendations} decisions={flow.decisions} loading={flowLoading} error={flowError} onSubmitRecommendation={handleSubmitRecommendation} /><PactDecidePanel decisions={flow.decisions} onVote={handleVote} onCreate={handleCreateDecision} error={flowError} /></div>
         <section className="workspace-coming"><span>PACT / NEXT LAYER</span><strong>Conversation, decisions, and payments will live here.</strong><p>Chat, plans, votes, and payment features are not in the current backend migration yet.</p></section>
       </> : null}
     </motion.section>

@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react'
-import type { PactMoneyStatus, PactMoneyTransfer, PactMoneyWallet } from '../types/pactMoney'
+import type { PactMoneyStatus, PactMoneyTransfer, PactMoneyWallet, PactPaymentStatusRow } from '../types/pactMoney'
 
 export type PactMoneyRecipient = { userId: string; name: string }
 
@@ -9,6 +9,7 @@ const TRANSFER_TEXT: Record<PactMoneyTransfer['status'], string> = { awaiting_pi
 
 type Props = {
   pactName: string
+  memberCount?: number
   status?: PactMoneyStatus
   wallet?: PactMoneyWallet | null
   error?: string | null
@@ -17,9 +18,10 @@ type Props = {
   onResetPin?: () => Promise<void>
   recipients?: PactMoneyRecipient[]
   onSend?: (toUserId: string, amount: string, onUpdate: (transfer: PactMoneyTransfer) => void) => Promise<PactMoneyTransfer>
+  paymentRows?: PactPaymentStatusRow[] | null
 }
 
-export function PactMoneyPanel({ pactName, status = 'unavailable', wallet = null, error = null, walletEnabled = false, onCreateWallet, onResetPin, recipients = [], onSend }: Props) {
+export function PactMoneyPanel({ pactName, memberCount = 0, status = 'unavailable', wallet = null, error = null, walletEnabled = false, onCreateWallet, onResetPin, recipients = [], onSend, paymentRows = null }: Props) {
   const hasWallet = Boolean(wallet)
   const [toUserId, setToUserId] = useState('')
   const [amount, setAmount] = useState('')
@@ -58,6 +60,11 @@ export function PactMoneyPanel({ pactName, status = 'unavailable', wallet = null
 
   const isLoading = status === 'loading'
   const statusText = status === 'ready' && hasWallet ? 'CONNECTED' : status === 'error' ? 'ATTENTION' : 'PREPARING'
+  const plan = paymentRows?.[0] || null
+  const paidCount = paymentRows?.filter((row) => row.share_status === 'paid').length || 0
+  const totalShares = plan?.shares_needed || paymentRows?.length || 0
+  const fundingGoal = plan ? Number(plan.share_usdc) * plan.shares_needed : null
+  const receiptCount = paymentRows?.filter((row) => row.tx_hash).length || 0
 
   return <section className="workspace-card money-panel" aria-labelledby="pact-money-heading">
     <div className="money-header"><div><p className="section-kicker">PACT / TREASURY</p><h2 id="pact-money-heading">PactMoney</h2><p>Shared funds and contributions for <strong>{pactName}</strong>.</p></div><span className={`money-status is-${status}`}><i />{statusText}</span></div>
@@ -71,8 +78,8 @@ export function PactMoneyPanel({ pactName, status = 'unavailable', wallet = null
       {sendError ? <p className="form-error money-send-result" role="alert">{sendError}</p> : null}
       {transfer ? <p className={`money-send-result is-${transfer.status}`} role="status">{TRANSFER_TEXT[transfer.status]}: {transfer.amount} USDC to {recipientName(transfer.recipientId)}{transfer.txHash ? <> · <a href={ARC_EXPLORER + transfer.txHash} target="_blank" rel="noreferrer">View on Arc explorer</a></> : null}</p> : null}
     </form> : null}
-    <div className="money-sections"><div><p className="money-label">SHARED EXPENSES</p><strong>No expenses recorded</strong><span>Expense tracking will appear when the payment backend is connected.</span></div><div><p className="money-label">MEMBER CONTRIBUTIONS</p><strong>Contributions unavailable</strong><span>Member balances require the confirmed wallet contract.</span></div><div><p className="money-label">PAYMENT STATUS</p><strong>Payments not connected</strong><span>No transfers or confirmations are being displayed.</span></div><div><p className="money-label">RECEIPTS</p><strong>No receipts yet</strong><span>Receipts will be available after transaction support is live.</span></div></div>
-    <small className="money-note">Wallet creation and payment actions remain disabled until Rory’s user-controlled wallet contract is confirmed and deployed.</small>
+    <div className="money-sections"><div><p className="money-label">FUNDING GOAL</p><strong>{plan ? `${fundingGoal?.toFixed(2)} USDC` : 'Not configured'}</strong><span>{plan ? `Arc Testnet · ${plan.payment_status}` : 'No verified PactSplit funding target is available yet.'}</span></div><div><p className="money-label">MEMBER SHARES</p><strong>{plan ? `${plan.share_usdc} USDC each` : `${memberCount} eligible member${memberCount === 1 ? '' : 's'}`}</strong><span>{plan ? `${totalShares} share${totalShares === 1 ? '' : 's'} · ${paidCount} verified paid` : 'Share amounts will appear after the payment plan is created.'}</span></div><div><p className="money-label">PAYMENT STATUS</p><strong>{plan ? `${paidCount}/${totalShares} paid` : 'Awaiting verification'}</strong><span>{plan ? 'Only persisted verified payment events count.' : 'Wallet balance is not treated as contribution proof.'}</span></div><div><p className="money-label">RECEIPTS</p><strong>{plan && receiptCount ? `${receiptCount} available` : 'Unavailable'}</strong><span>{plan && receiptCount ? 'Transaction references are available for verified shares.' : 'Receipts require persisted, verified transaction events.'}</span></div></div>
+    <small className="money-note">{plan ? 'Funding data is read from the authorized Pact payment status service.' : 'PactSplit payment data is unavailable until the payment migration and verified event path are deployed.'}</small>
   </section>
 }
 
