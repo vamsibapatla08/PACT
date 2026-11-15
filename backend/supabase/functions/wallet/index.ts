@@ -15,6 +15,7 @@
 //   POST /functions/v1/wallet { "action": "release", "pactId": "<uuid>" }                 host pays the payee once full
 //   POST /functions/v1/wallet { "action": "cancel", "pactId": "<uuid>" }                  host stops the pact
 //   POST /functions/v1/wallet { "action": "claim_refund", "pactId": "<uuid>" }            payer takes their share back after a cancel
+//   POST /functions/v1/wallet { "action": "reset_pin" }                                   new PIN after answering the security questions
 //
 // Calls Circle's REST API directly: its Node SDK fails to boot in the Edge runtime.
 import { createClient } from 'npm:@supabase/supabase-js@2'
@@ -412,6 +413,9 @@ async function start(userId: string) {
   const session = await userSession(userId)
   const user = await circle('/user', { userToken: session.userToken })
 
+  // Too many wrong PINs locks it, and /user/initialize refuses an initialized user.
+  if (user.pinStatus === 'LOCKED') return reply(409, { error: PIN_LOCKED })
+
   let challengeId: string
   if (user.pinStatus === 'ENABLED') {
     // PIN already set: they may already have the wallet (confirm was missed), or need one on Arc.
@@ -437,6 +441,26 @@ async function start(userId: string) {
     encryptionKey: session.encryptionKey,
     challengeId,
   })
+}
+
+const PIN_LOCKED = 'Your PIN is locked after too many tries. Reset your PIN to continue.'
+
+// Circle's own screen asks the security questions set with the first PIN, then takes a new PIN.
+// This also unlocks a PIN locked by wrong tries.
+async function resetPin(userId: string) {
+  const session = await userSession(userId).catch((err) => {
+    if (err instanceof CircleError && err.status < 500) return null // no Circle user yet
+    throw err
+  })
+  if (!session) return reply(409, { error: 'Set up your wallet first' })
+  const user = await circle('/user', { userToken: session.userToken })
+  if (user.pinStatus !== 'ENABLED' && user.pinStatus !== 'LOCKED') return reply(409, { error: 'Set up your wallet first' })
+  const { challengeId } = await circle('/user/pin/restore', {
+    method: 'POST',
+    userToken: session.userToken,
+    body: { idempotencyKey: crypto.randomUUID() },
+  })
+  return challengeReply({ ...session, challengeId })
 }
 
 async function confirm(userId: string, challengeId: unknown) {
@@ -491,9 +515,14 @@ Deno.serve(async (req) => {
     if (action === 'create_pact') return await createPact(user.id, token!, body)
     if (action === 'release' || action === 'cancel') return await closePact(user.id, token!, body.pactId, action)
     if (action === 'claim_refund') return await claimRefund(user.id, token!, body.pactId)
-    return reply(400, { error: 'action must be status, start, confirm, transfer, transfer_status, pay_share, create_pact, release, cancel or claim_refund' })
+    if (action === 'reset_pin') return await resetPin(user.id)
+    return reply(400, { error: 'action must be status, start, confirm, transfer, transfer_status, pay_share, create_pact, release, cancel, claim_refund or reset_pin' })
   } catch (err) {
     console.error(err instanceof Error ? err.message : 'wallet error')
+    // Circle's code (never its body) goes back so a failure can be looked up instead of guessed at.
+    if (err instanceof CircleError) {
+      return reply(502, { error: `Circle refused the request (code ${err.code ?? err.status}), try again`, circleCode: err.code ?? null })
+    }
     return reply(502, { error: 'Wallet service is unavailable, try again' })
   }
 })

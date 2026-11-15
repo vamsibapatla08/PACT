@@ -11,7 +11,7 @@ import { askPactPilot } from '../lib/pactPilotService'
 import { listPactMessages, sendPactMessage, subscribeToPactMessages } from '../lib/chatService'
 import type { PactChatMessage } from '../types/chat'
 import { PactMoneyPanel } from '../components/PactMoneyPanel'
-import { createPactMoneyWallet, getPactMoneyWalletStatus, pactMoneyWalletEnabled, sendPactMoney } from '../lib/pactMoneyService'
+import { createPactMoneyWallet, getPactMoneyWalletStatus, pactMoneyWalletEnabled, resetPactMoneyPin, sendPactMoney } from '../lib/pactMoneyService'
 import type { PactMoneyStatus, PactMoneyTransfer, PactMoneyWallet } from '../types/pactMoney'
 
 type Props = { user: User; profile: Profile | null; pactId: string; onNavigate: (path: string) => void; onSignOut: () => Promise<void>; signingOut: boolean }
@@ -129,7 +129,7 @@ export function PactWorkspacePage({ user, profile, pactId, onNavigate, onSignOut
             <PactPilotPanel pactId={pact.id} pactName={pact.name} onAsk={askPactPilot} />
           </div>
         </div>
-        <PactMoneyPanel pactName={pact.name} status={moneyStatus} wallet={moneyWallet} error={moneyError} walletEnabled={pactMoneyWalletEnabled} onCreateWallet={handleCreateWallet} recipients={pact.members.filter((m) => m.user_id !== user.id).map((m) => ({ userId: m.user_id, name: m.profile?.full_name || 'Pact member' }))} onSend={pactMoneyWalletEnabled ? handleSendMoney : undefined} />
+        <PactMoneyPanel pactName={pact.name} status={moneyStatus} wallet={moneyWallet} error={moneyError} walletEnabled={pactMoneyWalletEnabled} onCreateWallet={handleCreateWallet} onResetPin={pactMoneyWalletEnabled ? resetPactMoneyPin : undefined} recipients={pact.members.filter((m) => m.user_id !== user.id).map((m) => ({ userId: m.user_id, name: m.profile?.full_name || 'Pact member' }))} onSend={pactMoneyWalletEnabled ? handleSendMoney : undefined} />
         <section className="workspace-coming"><span>PACT / NEXT LAYER</span><strong>Conversation, decisions, and payments will live here.</strong><p>Chat, plans, votes, and payment features are not in the current backend migration yet.</p></section>
       </> : null}
     </motion.section>

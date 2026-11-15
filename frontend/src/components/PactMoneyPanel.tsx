@@ -14,17 +14,22 @@ type Props = {
   error?: string | null
   walletEnabled?: boolean
   onCreateWallet?: () => Promise<unknown>
+  onResetPin?: () => Promise<void>
   recipients?: PactMoneyRecipient[]
   onSend?: (toUserId: string, amount: string, onUpdate: (transfer: PactMoneyTransfer) => void) => Promise<PactMoneyTransfer>
 }
 
-export function PactMoneyPanel({ pactName, status = 'unavailable', wallet = null, error = null, walletEnabled = false, onCreateWallet, recipients = [], onSend }: Props) {
+export function PactMoneyPanel({ pactName, status = 'unavailable', wallet = null, error = null, walletEnabled = false, onCreateWallet, onResetPin, recipients = [], onSend }: Props) {
   const hasWallet = Boolean(wallet)
   const [toUserId, setToUserId] = useState('')
   const [amount, setAmount] = useState('')
   const [sending, setSending] = useState(false)
   const [sendError, setSendError] = useState<string | null>(null)
   const [transfer, setTransfer] = useState<PactMoneyTransfer | null>(null)
+  const [resetting, setResetting] = useState(false)
+  const [resetResult, setResetResult] = useState<{ ok: boolean; text: string } | null>(null)
+  // A locked PIN can also block wallet setup, so the button shows then too.
+  const canResetPin = Boolean(onResetPin) && (hasWallet || Boolean(error?.includes('Reset your PIN')))
   const recipientName = (userId: string) => recipients.find((r) => r.userId === userId)?.name ?? 'Pact member'
 
   async function handleSend(event: FormEvent) {
@@ -40,6 +45,17 @@ export function PactMoneyPanel({ pactName, status = 'unavailable', wallet = null
     } finally { setSending(false) }
   }
 
+  async function handleResetPin() {
+    if (!onResetPin || resetting) return
+    setResetting(true); setResetResult(null)
+    try {
+      await onResetPin()
+      setResetResult({ ok: true, text: 'Your new PIN is set.' })
+    } catch (reason) {
+      setResetResult({ ok: false, text: reason instanceof Error ? reason.message : 'The PIN reset could not be completed.' })
+    } finally { setResetting(false) }
+  }
+
   const isLoading = status === 'loading'
   const statusText = status === 'ready' && hasWallet ? 'CONNECTED' : status === 'error' ? 'ATTENTION' : 'PREPARING'
 
@@ -47,6 +63,7 @@ export function PactMoneyPanel({ pactName, status = 'unavailable', wallet = null
     <div className="money-header"><div><p className="section-kicker">PACT / TREASURY</p><h2 id="pact-money-heading">PactMoney</h2><p>Shared funds and contributions for <strong>{pactName}</strong>.</p></div><span className={`money-status is-${status}`}><i />{statusText}</span></div>
     <div className="money-wallet-card"><div><span className="money-label">WALLET NETWORK</span><strong>Arc Testnet</strong></div><div className="money-wallet-value"><span className="money-label">WALLET ADDRESS</span><code>{wallet?.address || 'Wallet not connected'}</code></div><div className="money-wallet-value"><span className="money-label">USDC BALANCE</span><strong>{wallet?.usdcBalance ?? '—'}</strong></div><button className="gold-button money-create-button" type="button" onClick={() => { if (onCreateWallet) void onCreateWallet() }} disabled={!walletEnabled || isLoading || hasWallet}>{isLoading ? 'Creating wallet…' : hasWallet ? 'Wallet connected' : walletEnabled ? 'Create wallet' : 'Create wallet · backend pending'}</button></div>
     {error ? <p className="form-error" role="alert">{error}</p> : null}
+    {canResetPin ? <div className="money-pin-reset"><button className="outline-button" type="button" onClick={() => { void handleResetPin() }} disabled={resetting || sending}>{resetting ? 'Resetting PIN…' : 'Reset PIN'}</button>{resetResult ? <p className={resetResult.ok ? 'money-send-result is-confirmed' : 'form-error money-send-result'} role={resetResult.ok ? 'status' : 'alert'}>{resetResult.text}</p> : <span>Forgot your PIN? Answer your security questions to set a new one.</span>}</div> : null}
     {hasWallet && onSend ? <form className="money-send-card" onSubmit={handleSend}>
       <div><span className="money-label">SEND USDC TO</span><select value={toUserId} onChange={(e) => setToUserId(e.target.value)} disabled={sending || recipients.length === 0}><option value="">{recipients.length ? 'Choose a member' : 'No one else in this Pact yet'}</option>{recipients.map((r) => <option key={r.userId} value={r.userId}>{r.name}</option>)}</select></div>
       <div><span className="money-label">AMOUNT (USDC)</span><input inputMode="decimal" placeholder="1.00" value={amount} onChange={(e) => setAmount(e.target.value.trim())} disabled={sending} /></div>

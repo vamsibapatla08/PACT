@@ -18,7 +18,7 @@ function client() {
   return supabase
 }
 
-async function invokeWallet<T>(action: 'status' | 'start' | 'confirm' | 'transfer' | 'transfer_status', params: Record<string, unknown> = {}): Promise<T> {
+async function invokeWallet<T>(action: 'status' | 'start' | 'confirm' | 'transfer' | 'transfer_status' | 'reset_pin', params: Record<string, unknown> = {}): Promise<T> {
   const { data, error } = await client().functions.invoke('wallet', { body: { action, ...params } })
   if (error) throw new Error(await walletErrorMessage(error))
   if (!data || typeof data !== 'object') throw new Error('Wallet service returned an invalid response.')
@@ -82,6 +82,13 @@ export async function createPactMoneyWallet(): Promise<PactMoneyWallet> {
   const confirmed = await invokeWallet<WalletStatusResponse>('confirm', { challengeId: challenge.challengeId })
   if (confirmed.status !== 'ready') throw new Error('error' in confirmed ? confirmed.error || 'Wallet setup is still pending confirmation.' : 'Wallet setup returned no wallet.')
   return toWallet(confirmed)
+}
+
+// Circle's screen asks the security questions from wallet setup, then takes a new PIN. Also unlocks a locked PIN.
+export async function resetPactMoneyPin(): Promise<void> {
+  const challenge = await invokeWallet<WalletChallengeResponse>('reset_pin')
+  if (challenge.status !== 'challenge') throw new Error('PIN reset did not return a Circle challenge.')
+  await runCircleChallenge(challenge)
 }
 
 type TransferReply = { transfer: PactMoneyTransfer }
