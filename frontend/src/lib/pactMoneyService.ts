@@ -1,12 +1,9 @@
 import { supabase } from './supabase'
 import type { PactMoneyWallet } from '../types/pactMoney'
 
-// Local development is enabled for the controlled test. Vercel requires an
-// explicit global opt-in and an explicit Preview or Production environment.
-const walletTestEnabled = import.meta.env.VITE_PACTMONEY_WALLET_TEST === 'true'
-const vercelEnvironment = import.meta.env.VITE_VERCEL_ENV || import.meta.env.VERCEL_ENV
+// Local development is enabled; deployed builds require an explicit opt-in.
 export const pactMoneyWalletEnabled = import.meta.env.DEV
-  || (walletTestEnabled && (vercelEnvironment === 'preview' || vercelEnvironment === 'production'))
+  || import.meta.env.VITE_PACTMONEY_WALLET_TEST === 'true'
 
 type WalletStatusResponse =
   | { status: 'none' }
