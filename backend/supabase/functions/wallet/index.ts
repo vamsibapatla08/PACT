@@ -5,14 +5,20 @@
 //   POST /functions/v1/wallet { "action": "status" }            same as GET
 //   POST /functions/v1/wallet { "action": "start" }             returns what Circle's web SDK needs
 //   POST /functions/v1/wallet { "action": "confirm", "challengeId": "..." }
+//   POST /functions/v1/wallet { "action": "transfer", "to": "0x...", "amount": "1.50" }   send USDC, returns a PIN challenge
+//   POST /functions/v1/wallet { "action": "pay_share", "pactId": "<uuid>" }               pay my share into PactSplit
 //
 // Calls Circle's REST API directly: its Node SDK fails to boot in the Edge runtime.
 import { createClient } from 'npm:@supabase/supabase-js@2'
+import { decodeOpenPact, type OnChainPact, pactKey, PACTS_SELECTOR, usdcString } from './chain.ts'
 
 const BLOCKCHAIN = 'ARC-TESTNET'
 const ARC_RPC = 'https://rpc.testnet.arc.network'
 const CIRCLE_API = 'https://api.circle.com/v1/w3s'
 const CIRCLE_API_KEY = Deno.env.get('CIRCLE_API_KEY')!
+const PACT_SPLIT_ADDRESS = Deno.env.get('PACT_SPLIT_ADDRESS')
+const ADDRESS = /^0x[0-9a-fA-F]{40}$/
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
@@ -99,12 +105,97 @@ async function usdcBalance(address: string): Promise<string | null> {
   }
 }
 
+// Reads PactSplit.pacts(key). Null when the pact is not open on chain.
+async function openPact(key: string): Promise<OnChainPact | null> {
+  const res = await fetch(ARC_RPC, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      jsonrpc: '2.0', id: 1, method: 'eth_call',
+      params: [{ to: PACT_SPLIT_ADDRESS, data: PACTS_SELECTOR + key.slice(2) }, 'latest'],
+    }),
+  })
+  const { result } = await res.json()
+  return decodeOpenPact(result)
+}
+
 function reply(status: number, body: unknown) {
   return new Response(JSON.stringify(body), { status, headers: { ...cors, 'Content-Type': 'application/json' } })
 }
 
 async function ready(row: WalletRow) {
   return reply(200, { status: 'ready', address: row.address, blockchain: row.blockchain, usdc_balance: await usdcBalance(row.address) })
+}
+
+async function walletId(userId: string): Promise<string | null> {
+  const { data, error } = await admin.from('wallets').select('circle_wallet_id').eq('user_id', userId).maybeSingle()
+  if (error) throw error
+  return data?.circle_wallet_id ?? null
+}
+
+// Hands the client a PIN challenge for its Circle SDK. Nothing moves until the user enters their PIN.
+async function challenge(userId: string, path: string, body: Record<string, unknown>) {
+  const session = await userSession(userId)
+  const { challengeId } = await circle(path, {
+    method: 'POST',
+    userToken: session.userToken,
+    body: { idempotencyKey: crypto.randomUUID(), feeLevel: 'MEDIUM', ...body },
+  })
+  return reply(200, {
+    status: 'challenge',
+    appId: await circleAppId(),
+    userToken: session.userToken,
+    encryptionKey: session.encryptionKey,
+    challengeId,
+  })
+}
+
+// USDC is Arc's native token, so a transfer sends the native token (empty tokenAddress).
+async function transfer(userId: string, to: unknown, amount: unknown) {
+  if (typeof to !== 'string' || !ADDRESS.test(to)) return reply(400, { error: 'to must be a 0x address' })
+  if (typeof amount !== 'string' || !/^\d+(\.\d{1,6})?$/.test(amount) || Number(amount) <= 0) {
+    return reply(400, { error: 'amount must be a USDC amount like "1.50"' })
+  }
+  const id = await walletId(userId)
+  if (!id) return reply(409, { error: 'Set up your wallet first' })
+  return await challenge(userId, '/user/transactions/transfer', {
+    walletId: id, destinationAddress: to, amounts: [amount], tokenAddress: '', blockchain: BLOCKCHAIN,
+  })
+}
+
+// list_pact_members runs as the caller and returns rows only to active members, so it checks
+// membership and finds the real host in one call.
+async function payShare(userId: string, userJwt: string, pactId: unknown) {
+  if (!PACT_SPLIT_ADDRESS) return reply(503, { error: 'Payments are not set up yet' })
+  if (typeof pactId !== 'string' || !UUID.test(pactId)) return reply(400, { error: 'pactId must be a pact id' })
+
+  const asUser = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_ANON_KEY')!, {
+    global: { headers: { Authorization: `Bearer ${userJwt}` } },
+  })
+  const { data: members, error } = await asUser.rpc('list_pact_members', { p_pact_id: pactId })
+  if (error) throw error
+  const roster = (members ?? []) as { user_id: string; role: string }[]
+  if (!roster.some((m) => m.user_id === userId)) return reply(403, { error: 'You are not in this pact' })
+  const hostId = roster.find((m) => m.role === 'host')?.user_id
+  const hostWallet = hostId ? await savedWallet(hostId) : null
+
+  const id = await walletId(userId)
+  if (!id) return reply(409, { error: 'Set up your wallet first' })
+  const key = pactKey(pactId)
+  const pact = await openPact(key)
+  if (!pact) return reply(409, { error: 'This pact is not open for payment' })
+  // Anyone can call createPact with a known id, so only pay into the one the real host opened.
+  if (!hostWallet || pact.host.toLowerCase() !== hostWallet.address.toLowerCase()) {
+    return reply(409, { error: 'This pact was not opened by its host' })
+  }
+
+  return await challenge(userId, '/user/transactions/contractExecution', {
+    walletId: id,
+    contractAddress: PACT_SPLIT_ADDRESS,
+    abiFunctionSignature: 'payShare(bytes32)',
+    abiParameters: [key],
+    amount: usdcString(pact.share),
+  })
 }
 
 async function savedWallet(userId: string) {
@@ -161,9 +252,9 @@ async function confirm(userId: string, challengeId: unknown) {
       throw err
     })
   if (!challenge || challenge.status === 'FAILED' || challenge.status === 'EXPIRED') {
-    return reply(409, { status: 'failed', error: 'Wallet setup did not finish, start again' })
+    return reply(200, { status: 'failed', error: 'Wallet setup did not finish, start again' })
   }
-  if (challenge.status !== 'COMPLETE') return reply(409, { status: 'pending', error: 'Finish the PIN step first' })
+  if (challenge.status !== 'COMPLETE') return reply(200, { status: 'pending', error: 'Finish the PIN step first' })
 
   // The wallet can take a moment to go live after the PIN step.
   for (let attempt = 0; attempt < 5; attempt++) {
@@ -171,7 +262,7 @@ async function confirm(userId: string, challengeId: unknown) {
     if (wallet) return ready(await saveWallet(userId, wallet))
     await new Promise((resolve) => setTimeout(resolve, 1000))
   }
-  return reply(409, { status: 'pending', error: 'Wallet is still being created, try again in a few seconds' })
+  return reply(200, { status: 'pending', error: 'Wallet is still being created, try again in a few seconds' })
 }
 
 Deno.serve(async (req) => {
@@ -192,7 +283,9 @@ Deno.serve(async (req) => {
     }
     if (action === 'start') return await start(user.id)
     if (action === 'confirm') return await confirm(user.id, body.challengeId)
-    return reply(400, { error: 'action must be status, start or confirm' })
+    if (action === 'transfer') return await transfer(user.id, body.to, body.amount)
+    if (action === 'pay_share') return await payShare(user.id, token!, body.pactId)
+    return reply(400, { error: 'action must be status, start, confirm, transfer or pay_share' })
   } catch (err) {
     console.error(err instanceof Error ? err.message : 'wallet error')
     return reply(502, { error: 'Wallet service is unavailable, try again' })
