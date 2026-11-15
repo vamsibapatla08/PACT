@@ -87,6 +87,19 @@ export function PactWorkspacePage({ user, profile, pactId, onNavigate, onSignOut
     finally { setInviteLoading(false) }
   }
 
+  async function handleCreateWallet() {
+    setMoneyStatus('loading')
+    setMoneyError(null)
+    try {
+      const wallet = await createPactMoneyWallet()
+      setMoneyWallet(wallet)
+      setMoneyStatus('ready')
+    } catch (reason) {
+      setMoneyStatus('error')
+      setMoneyError(reason instanceof Error ? reason.message : 'Wallet creation could not be completed.')
+    }
+  }
+
   return <AppShell user={user} profile={profile} current="pacts" onNavigate={onNavigate} onSignOut={onSignOut} signingOut={signingOut}>
     <motion.section className="workspace-page" initial={reduceMotion ? false : { opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: .65 }}>
       <button className="back-link" type="button" onClick={() => onNavigate('/dashboard')}>← My Pacts</button>
@@ -110,7 +123,7 @@ export function PactWorkspacePage({ user, profile, pactId, onNavigate, onSignOut
             <PactPilotPanel pactId={pact.id} pactName={pact.name} onAsk={askPactPilot} />
           </div>
         </div>
-        <PactMoneyPanel pactName={pact.name} status={moneyStatus} wallet={moneyWallet} error={moneyError} walletEnabled={pactMoneyWalletEnabled} onCreateWallet={createPactMoneyWallet} />
+        <PactMoneyPanel pactName={pact.name} status={moneyStatus} wallet={moneyWallet} error={moneyError} walletEnabled={pactMoneyWalletEnabled} onCreateWallet={handleCreateWallet} />
         <section className="workspace-coming"><span>PACT / NEXT LAYER</span><strong>Conversation, decisions, and payments will live here.</strong><p>Chat, plans, votes, and payment features are not in the current backend migration yet.</p></section>
       </> : null}
     </motion.section>
