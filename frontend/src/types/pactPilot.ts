@@ -1,4 +1,7 @@
 export type PactPilotOption = { title: string; description: string; tradeoff: string }
+export type PactPilotTask = { title: string; owner_suggestion: string | null; due_hint: string }
+export type PactPilotCost = { item: string; estimated_amount: number; currency: string; per_person_amount: number | null; is_estimate: true }
+export type PactPilotEstimate = { currency: string; group_size: number | null; total: number; per_person: number | null; budget: number | null; within_budget: boolean | null; difference: number | null; label: string }
 
 export type PactPilotMessage = {
   id: string
@@ -7,6 +10,10 @@ export type PactPilotMessage = {
   created_at: string
   summary?: string
   options?: PactPilotOption[]
+  tasks?: PactPilotTask[]
+  costs?: PactPilotCost[]
+  estimate?: PactPilotEstimate
+  next_steps?: string[]
 }
 
 export type PactPilotContext = { pactId: string; pactName: string }

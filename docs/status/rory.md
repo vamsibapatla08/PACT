@@ -1,8 +1,8 @@
 # Rory — Agent and blockchain
 
-- Status: Not started
-- Done: 0/17
-- Updated: 2026-11-13
+- Status: In progress
+- Done: 6/23
+- Updated: 2026-11-14
 
 ## Main goal
 
@@ -34,14 +34,23 @@
 
 ### Prepare Arc + Circle (3:30–4:00 PM)
 
-- [ ] Check Arc Testnet wallet support and the Circle integration options
-- [ ] Find the test USDC token and how the team gets test funds
-- [ ] Write up the payment flow for Vamsi and Dimple
+- [x] Check Arc Testnet wallet support and the Circle integration options
+- [x] Find the test USDC token and how the team gets test funds
+- [x] Write up the payment flow for Vamsi and Dimple ([payment-flow.md](../payment-flow.md))
 - [ ] Push working changes to GitHub and report any blockers
+
+### Wallets and payments (Nov 14)
+
+- [x] Wallet table and `wallet` Edge Function: each user gets a Circle wallet on Arc Testnet
+- [x] `transfer` and `pay_share` actions in the `wallet` function
+- [x] PactSplit contract with tests: holds shares, releases, refunds, emits `SharePaid`
+- [ ] Deploy PactSplit to Arc Testnet and give Dimple the address
+- [ ] Add a `create_pact` action so the host opens the pact on chain
+- [ ] Send the first real USDC payment between two team wallets
 
 ## Blockers
 
-- None
+- Waiting on Nihar's Connect wallet screen to test wallets and payments in the app
 
 ## Notes
 
