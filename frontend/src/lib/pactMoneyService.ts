@@ -56,7 +56,9 @@ export async function createPactMoneyWallet(): Promise<PactMoneyWallet> {
   if (challenge.status !== 'challenge') throw new Error('Wallet setup did not return a Circle challenge.')
 
   // These short-lived values stay in this function's memory and are passed directly to Circle's SDK.
-  const { W3SSdk } = await import('@circle-fin/w3s-pw-web-sdk')
+  // The SDK is CommonJS, so dev builds only expose it under `default`.
+  const circleModule = await import('@circle-fin/w3s-pw-web-sdk')
+  const W3SSdk = circleModule.W3SSdk ?? (circleModule as unknown as { default: typeof circleModule }).default.W3SSdk
   const sdk = new W3SSdk({ appSettings: { appId: challenge.appId } })
   await sdk.getDeviceId()
   sdk.setAuthentication({ userToken: challenge.userToken, encryptionKey: challenge.encryptionKey })
