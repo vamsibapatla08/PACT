@@ -27,11 +27,13 @@ Deno.test('usdcWei turns a USDC amount into 18-decimal wei', () => {
   assertEquals(usdcWei(25), null)
 })
 
-Deno.test('decodeOpenPact reads host, payee and share of an open pact', () => {
+Deno.test('decodeOpenPact reads host, payee, share and share counts of an open pact', () => {
   assertEquals(decodeOpenPact(OPEN), {
     host: '0x000000000000000000000000000000000000a11c',
     payee: '0x0000000000000000000000000000000000000b0b',
     share: 25n * 10n ** 18n,
+    sharesNeeded: 4,
+    sharesPaid: 1,
   })
 })
 

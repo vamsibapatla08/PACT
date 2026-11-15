@@ -20,7 +20,7 @@ export function pactKey(pactId: string) {
 
 export const PACTS_SELECTOR = '0xf8bfca8b' // pacts(bytes32)
 
-export type OnChainPact = { host: string; payee: string; share: bigint }
+export type OnChainPact = { host: string; payee: string; share: bigint; sharesNeeded: number; sharesPaid: number }
 
 // Decodes the eth_call reply of pacts(key). Returns null unless the pact is open (state 1).
 export function decodeOpenPact(result: unknown): OnChainPact | null {
@@ -28,5 +28,11 @@ export function decodeOpenPact(result: unknown): OnChainPact | null {
   const word = (i: number) => result.slice(2 + 64 * i, 2 + 64 * (i + 1))
   // Words: host, payee, share, sharesNeeded, sharesPaid, deadline, state.
   if (BigInt('0x' + word(6)) !== 1n) return null
-  return { host: '0x' + word(0).slice(24), payee: '0x' + word(1).slice(24), share: BigInt('0x' + word(2)) }
+  return {
+    host: '0x' + word(0).slice(24),
+    payee: '0x' + word(1).slice(24),
+    share: BigInt('0x' + word(2)),
+    sharesNeeded: Number(BigInt('0x' + word(3))),
+    sharesPaid: Number(BigInt('0x' + word(4))),
+  }
 }

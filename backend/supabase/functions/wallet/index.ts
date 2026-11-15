@@ -5,7 +5,10 @@
 //   POST /functions/v1/wallet { "action": "status" }            same as GET
 //   POST /functions/v1/wallet { "action": "start" }             returns what Circle's web SDK needs
 //   POST /functions/v1/wallet { "action": "confirm", "challengeId": "..." }
-//   POST /functions/v1/wallet { "action": "transfer", "to": "0x...", "amount": "1.50" }   send USDC, returns a PIN challenge
+//   POST /functions/v1/wallet { "action": "transfer", "to": "0x...", "amount": "1.50" }   send USDC to any address (own-wallet tests)
+//   POST /functions/v1/wallet { "action": "transfer", "pactId": "<uuid>", "toUserId": "<uuid>", "amount": "1.50",
+//                               "requestId": "<uuid>" }                                   send USDC to another member of the pact
+//   POST /functions/v1/wallet { "action": "transfer_status", "transferId": "<uuid>" }     pending, confirmed or failed, with the tx hash
 //   POST /functions/v1/wallet { "action": "pay_share", "pactId": "<uuid>" }               pay my share into PactSplit
 //   POST /functions/v1/wallet { "action": "create_pact", "pactId": "<uuid>", "payee": "0x...", "shareUsdc": "25.00",
 //                               "sharesNeeded": 4, "deadline": <unix seconds> }          host opens the pact on chain
@@ -138,34 +141,141 @@ async function walletId(userId: string): Promise<string | null> {
   return data?.circle_wallet_id ?? null
 }
 
-// Hands the client a PIN challenge for its Circle SDK. Nothing moves until the user enters their PIN.
-async function challenge(userId: string, path: string, body: Record<string, unknown>) {
+type Challenge = { userToken: string; encryptionKey: string; challengeId: string }
+
+async function startChallenge(userId: string, path: string, body: Record<string, unknown>): Promise<Challenge> {
   const session = await userSession(userId)
   const { challengeId } = await circle(path, {
     method: 'POST',
     userToken: session.userToken,
     body: { idempotencyKey: crypto.randomUUID(), feeLevel: 'MEDIUM', ...body },
   })
+  return { ...session, challengeId }
+}
+
+// Hands the client a PIN challenge for its Circle SDK. Nothing moves until the user enters their PIN.
+// `details` goes back beside the challenge so the app can show what the PIN approves.
+async function challengeReply(c: Challenge, details: Record<string, unknown> = {}) {
   return reply(200, {
     status: 'challenge',
     appId: await circleAppId(),
-    userToken: session.userToken,
-    encryptionKey: session.encryptionKey,
-    challengeId,
+    userToken: c.userToken,
+    encryptionKey: c.encryptionKey,
+    challengeId: c.challengeId,
+    ...details,
   })
 }
+
+async function challenge(userId: string, path: string, body: Record<string, unknown>, details: Record<string, unknown> = {}) {
+  return challengeReply(await startChallenge(userId, path, body), details)
+}
+
+const isAmount = (amount: unknown): amount is string =>
+  typeof amount === 'string' && /^\d+(\.\d{1,6})?$/.test(amount) && Number(amount) > 0
 
 // USDC is Arc's native token, so a transfer sends the native token (empty tokenAddress).
 async function transfer(userId: string, to: unknown, amount: unknown) {
   if (typeof to !== 'string' || !ADDRESS.test(to)) return reply(400, { error: 'to must be a 0x address' })
-  if (typeof amount !== 'string' || !/^\d+(\.\d{1,6})?$/.test(amount) || Number(amount) <= 0) {
-    return reply(400, { error: 'amount must be a USDC amount like "1.50"' })
-  }
+  if (!isAmount(amount)) return reply(400, { error: 'amount must be a USDC amount like "1.50"' })
   const id = await walletId(userId)
   if (!id) return reply(409, { error: 'Set up your wallet first' })
   return await challenge(userId, '/user/transactions/transfer', {
     walletId: id, destinationAddress: to, amounts: [amount], tokenAddress: '', blockchain: BLOCKCHAIN,
   })
+}
+
+type TransferRow = {
+  transfer_id: string; pact_id: string; sender_id: string; recipient_id: string; recipient_address: string
+  amount_usdc: number; request_id: string; circle_challenge_id: string | null; circle_transaction_id: string | null
+  tx_hash: string | null; status: 'awaiting_pin' | 'pending' | 'confirmed' | 'failed'; created_at: string
+}
+
+const transferView = (t: TransferRow) => ({
+  transferId: t.transfer_id, pactId: t.pact_id, senderId: t.sender_id, recipientId: t.recipient_id,
+  to: t.recipient_address, amount: String(t.amount_usdc), status: t.status, txHash: t.tx_hash, createdAt: t.created_at,
+})
+
+// Both people must be active members of the pact, and the recipient's address comes from our wallets table,
+// never from the app. The requestId makes a retry or double tap reuse the same send instead of a second one.
+async function memberTransfer(userId: string, userJwt: string, body: Record<string, unknown>) {
+  const { pactId, toUserId, amount, requestId } = body
+  if (typeof pactId !== 'string' || !UUID.test(pactId)) return reply(400, { error: 'pactId must be a pact id' })
+  if (typeof toUserId !== 'string' || !UUID.test(toUserId)) return reply(400, { error: 'toUserId must be a member id' })
+  if (typeof requestId !== 'string' || !UUID.test(requestId)) return reply(400, { error: 'requestId must be a uuid made once per send' })
+  if (!isAmount(amount)) return reply(400, { error: 'amount must be a USDC amount like "1.50"' })
+  if (toUserId === userId) return reply(400, { error: 'You cannot send to yourself' })
+
+  const roster = await pactRoster(userJwt, pactId)
+  if (!roster.some((m) => m.user_id === userId)) return reply(403, { error: 'You are not in this pact' })
+  if (!roster.some((m) => m.user_id === toUserId)) return reply(403, { error: 'They are not in this pact' })
+  const id = await walletId(userId)
+  if (!id) return reply(409, { error: 'Set up your wallet first' })
+  const recipient = await savedWallet(toUserId)
+  if (!recipient) return reply(409, { error: 'They have not set up a wallet yet' })
+
+  const { error: insertError } = await admin.from('pact_transfers').insert({
+    pact_id: pactId, sender_id: userId, recipient_id: toUserId, recipient_address: recipient.address,
+    amount_usdc: amount, request_id: requestId,
+  })
+  if (insertError && insertError.code !== '23505') throw insertError // 23505: this requestId was already used
+  const { data: row, error } = await admin.from('pact_transfers').select('*')
+    .eq('sender_id', userId).eq('request_id', requestId).single()
+  if (error) throw error
+  const t = row as TransferRow
+  if (t.pact_id !== pactId || t.recipient_id !== toUserId || Number(t.amount_usdc) !== Number(amount)) {
+    return reply(409, { error: 'This requestId was used for a different send' })
+  }
+  if (t.status !== 'awaiting_pin') return reply(409, { error: 'This send was already approved', transfer: transferView(t) })
+
+  // Reuse the open challenge on a retry; Circle also dedupes on the requestId if the first call never saved one.
+  let c: Challenge
+  if (t.circle_challenge_id) {
+    c = { ...(await userSession(userId)), challengeId: t.circle_challenge_id }
+  } else {
+    c = await startChallenge(userId, '/user/transactions/transfer', {
+      idempotencyKey: requestId, walletId: id, destinationAddress: t.recipient_address,
+      amounts: [amount], tokenAddress: '', blockchain: BLOCKCHAIN,
+    })
+    const { error: saveError } = await admin.from('pact_transfers')
+      .update({ circle_challenge_id: c.challengeId, updated_at: new Date().toISOString() }).eq('transfer_id', t.transfer_id)
+    if (saveError) throw saveError
+  }
+  return challengeReply(c, { transferId: t.transfer_id, amount, to: t.recipient_address })
+}
+
+const CONFIRMED = new Set(['CONFIRMED', 'COMPLETE'])
+const FAILED = new Set(['FAILED', 'CANCELLED', 'DENIED'])
+
+// Follows the send through Circle: PIN challenge, then the transaction it made, then its on-chain state.
+async function transferStatus(userId: string, transferId: unknown) {
+  if (typeof transferId !== 'string' || !UUID.test(transferId)) return reply(400, { error: 'transferId must be a transfer id' })
+  const { data, error } = await admin.from('pact_transfers').select('*').eq('transfer_id', transferId)
+    .or(`sender_id.eq.${userId},recipient_id.eq.${userId}`).maybeSingle()
+  if (error) throw error
+  if (!data) return reply(404, { error: 'No such transfer' })
+  let t = data as TransferRow
+  if (t.status === 'confirmed' || t.status === 'failed' || !t.circle_challenge_id) return reply(200, { transfer: transferView(t) })
+
+  const { userToken } = await userSession(t.sender_id)
+  const update: Partial<TransferRow> = {}
+  let txId = t.circle_transaction_id
+  if (!txId) {
+    const { challenge } = await circle(`/user/challenges/${encodeURIComponent(t.circle_challenge_id)}`, { userToken })
+    if (challenge.status === 'FAILED' || challenge.status === 'EXPIRED') update.status = 'failed'
+    else if (challenge.status === 'COMPLETE') txId = update.circle_transaction_id = challenge.correlationIds?.[0] ?? null
+  }
+  if (txId) {
+    const { transaction } = await circle(`/transactions/${encodeURIComponent(txId)}`, { userToken })
+    update.status = CONFIRMED.has(transaction.state) ? 'confirmed' : FAILED.has(transaction.state) ? 'failed' : 'pending'
+    update.tx_hash = transaction.txHash ?? null
+  }
+  if (Object.keys(update).length) {
+    const { data: saved, error: saveError } = await admin.from('pact_transfers')
+      .update({ ...update, updated_at: new Date().toISOString() }).eq('transfer_id', t.transfer_id).select('*').single()
+    if (saveError) throw saveError
+    t = saved as TransferRow
+  }
+  return reply(200, { transfer: transferView(t) })
 }
 
 // list_pact_members runs as the caller and returns rows only to active members, so it checks
@@ -204,7 +314,7 @@ async function payShare(userId: string, userJwt: string, pactId: unknown) {
     abiFunctionSignature: 'payShare(bytes32)',
     abiParameters: [key],
     amount: usdcString(pact.share),
-  })
+  }, { amount: usdcString(pact.share), payee: pact.payee, sharesPaid: pact.sharesPaid, sharesNeeded: pact.sharesNeeded })
 }
 
 // Only the pact's active host may open, release or cancel it. Returns their Circle wallet id, or the error reply.
@@ -257,6 +367,9 @@ async function closePact(userId: string, userJwt: string, pactId: unknown, fn: '
   const wallet = await savedWallet(userId)
   if (!wallet || pact.host.toLowerCase() !== wallet.address.toLowerCase()) {
     return reply(409, { error: 'This pact was opened from another wallet' })
+  }
+  if (fn === 'release' && pact.sharesPaid < pact.sharesNeeded) {
+    return reply(409, { error: `Waiting for ${pact.sharesNeeded - pact.sharesPaid} more of ${pact.sharesNeeded} shares` })
   }
 
   return await challenge(userId, '/user/transactions/contractExecution', {
@@ -370,12 +483,15 @@ Deno.serve(async (req) => {
     }
     if (action === 'start') return await start(user.id)
     if (action === 'confirm') return await confirm(user.id, body.challengeId)
-    if (action === 'transfer') return await transfer(user.id, body.to, body.amount)
+    if (action === 'transfer') {
+      return body.pactId === undefined ? await transfer(user.id, body.to, body.amount) : await memberTransfer(user.id, token!, body)
+    }
+    if (action === 'transfer_status') return await transferStatus(user.id, body.transferId)
     if (action === 'pay_share') return await payShare(user.id, token!, body.pactId)
     if (action === 'create_pact') return await createPact(user.id, token!, body)
     if (action === 'release' || action === 'cancel') return await closePact(user.id, token!, body.pactId, action)
     if (action === 'claim_refund') return await claimRefund(user.id, token!, body.pactId)
-    return reply(400, { error: 'action must be status, start, confirm, transfer, pay_share, create_pact, release, cancel or claim_refund' })
+    return reply(400, { error: 'action must be status, start, confirm, transfer, transfer_status, pay_share, create_pact, release, cancel or claim_refund' })
   } catch (err) {
     console.error(err instanceof Error ? err.message : 'wallet error')
     return reply(502, { error: 'Wallet service is unavailable, try again' })

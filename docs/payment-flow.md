@@ -48,7 +48,9 @@ How money moves in Pact, and what each of us builds for it. Written by Rory for 
 | Status | `GET` or `{ "action": "status" }` | `none`, or `ready` with address and balance |
 | Set up | `{ "action": "start" }` then `{ "action": "confirm", "challengeId" }` | A PIN challenge, then `ready` |
 | Send USDC | `{ "action": "transfer", "to": "0x...", "amount": "1.50" }` | A PIN challenge |
-| Pay my share | `{ "action": "pay_share", "pactId": "<uuid>" }` | A PIN challenge |
+| Send USDC to a pact member | `{ "action": "transfer", "pactId", "toUserId", "amount": "1.50", "requestId": "<uuid>" }` | A PIN challenge, plus `transferId`, `amount` and `to` |
+| Check a send | `{ "action": "transfer_status", "transferId" }` | `{ transfer: { status, txHash, ... } }`. Status is `awaiting_pin`, `pending`, `confirmed` or `failed` |
+| Pay my share | `{ "action": "pay_share", "pactId": "<uuid>" }` | A PIN challenge, plus `amount`, `payee`, `sharesPaid` and `sharesNeeded` |
 | Open the pact (host) | `{ "action": "create_pact", "pactId": "<uuid>", "payee": "0x...", "shareUsdc": "25.00", "sharesNeeded": 4, "deadline": 1795000000 }` | A PIN challenge |
 | Pay the payee (host) | `{ "action": "release", "pactId": "<uuid>" }` | A PIN challenge |
 | Cancel the pact (host) | `{ "action": "cancel", "pactId": "<uuid>" }` | A PIN challenge |
@@ -56,6 +58,12 @@ How money moves in Pact, and what each of us builds for it. Written by Rory for 
 
 - A PIN challenge is `{ appId, userToken, encryptionKey, challengeId }`. The app passes these to Circle's web SDK, which asks for the PIN. Nothing moves until the PIN is entered
 - `pay_share` checks the user is an active member, checks the pact on chain was opened by the pact's real host, and reads the share amount from the contract, so the app never sends an amount
+- Show `amount` and `payee` before opening the PIN screen ("You pay 25 USDC to 0x12…"), and use `sharesPaid` of `sharesNeeded` for a "3 of 4 paid" bar
+- `release` returns 409 "Waiting for N more of M shares" until every share is in, so the host never gets a failed PIN step
+- Member sends: both people must be active members of the pact, and the server looks up the recipient's address from `wallets`. The app never sends an address
+- `requestId` is a uuid the app makes once per Send tap. Sending the same one again returns the same PIN challenge, so a retry or double tap never sends twice
+- Every member send is saved in `pact_transfers`. Sender and recipient can read it, and only the function writes it
+- After the PIN, call `transfer_status` every few seconds until it says `confirmed` or `failed`. `txHash` links to the Arc explorer
 - `create_pact`, `release` and `cancel` only work for the pact's active host (`role = 'host'` in `pact_members`). `shareUsdc` is a USDC amount with up to 6 decimals, turned into 18-decimal wei by the function. `deadline` is unix seconds and must be in the future
 - `release` and `cancel` also check the pact is open on chain and was opened from the host's own wallet
 

@@ -11,8 +11,8 @@ import { askPactPilot } from '../lib/pactPilotService'
 import { listPactMessages, sendPactMessage, subscribeToPactMessages } from '../lib/chatService'
 import type { PactChatMessage } from '../types/chat'
 import { PactMoneyPanel } from '../components/PactMoneyPanel'
-import { createPactMoneyWallet, getPactMoneyWalletStatus, pactMoneyWalletEnabled } from '../lib/pactMoneyService'
-import type { PactMoneyStatus, PactMoneyWallet } from '../types/pactMoney'
+import { createPactMoneyWallet, getPactMoneyWalletStatus, pactMoneyWalletEnabled, sendPactMoney } from '../lib/pactMoneyService'
+import type { PactMoneyStatus, PactMoneyTransfer, PactMoneyWallet } from '../types/pactMoney'
 
 type Props = { user: User; profile: Profile | null; pactId: string; onNavigate: (path: string) => void; onSignOut: () => Promise<void>; signingOut: boolean }
 
@@ -100,6 +100,12 @@ export function PactWorkspacePage({ user, profile, pactId, onNavigate, onSignOut
     }
   }
 
+  async function handleSendMoney(toUserId: string, amount: string, onUpdate: (transfer: PactMoneyTransfer) => void) {
+    const transfer = await sendPactMoney(pactId, toUserId, amount, crypto.randomUUID(), onUpdate)
+    if (transfer.status === 'confirmed') getPactMoneyWalletStatus().then((wallet) => { if (wallet) setMoneyWallet(wallet) }).catch(() => {})
+    return transfer
+  }
+
   return <AppShell user={user} profile={profile} current="pacts" onNavigate={onNavigate} onSignOut={onSignOut} signingOut={signingOut}>
     <motion.section className="workspace-page" initial={reduceMotion ? false : { opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: .65 }}>
       <button className="back-link" type="button" onClick={() => onNavigate('/dashboard')}>← My Pacts</button>
@@ -123,7 +129,7 @@ export function PactWorkspacePage({ user, profile, pactId, onNavigate, onSignOut
             <PactPilotPanel pactId={pact.id} pactName={pact.name} onAsk={askPactPilot} />
           </div>
         </div>
-        <PactMoneyPanel pactName={pact.name} status={moneyStatus} wallet={moneyWallet} error={moneyError} walletEnabled={pactMoneyWalletEnabled} onCreateWallet={handleCreateWallet} />
+        <PactMoneyPanel pactName={pact.name} status={moneyStatus} wallet={moneyWallet} error={moneyError} walletEnabled={pactMoneyWalletEnabled} onCreateWallet={handleCreateWallet} recipients={pact.members.filter((m) => m.user_id !== user.id).map((m) => ({ userId: m.user_id, name: m.profile?.full_name || 'Pact member' }))} onSend={pactMoneyWalletEnabled ? handleSendMoney : undefined} />
         <section className="workspace-coming"><span>PACT / NEXT LAYER</span><strong>Conversation, decisions, and payments will live here.</strong><p>Chat, plans, votes, and payment features are not in the current backend migration yet.</p></section>
       </> : null}
     </motion.section>
