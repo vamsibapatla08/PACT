@@ -10,6 +10,7 @@ type WalletStatusResponse =
   | { status: 'pending' | 'failed'; error?: string }
 
 type WalletChallengeResponse = { status: 'challenge'; appId: string; userToken: string; encryptionKey: string; challengeId: string }
+type WalletStartResponse = WalletChallengeResponse | Extract<WalletStatusResponse, { status: 'ready' }>
 
 function client() {
   if (!supabase) throw new Error('Pact is not connected to Supabase yet.')
@@ -34,17 +35,23 @@ export async function getPactMoneyWalletStatus(): Promise<PactMoneyWallet | null
   throw new Error(data.error || 'Wallet status is not ready.')
 }
 
-type CircleSdk = { getDeviceId: () => Promise<string>; setAuthentication: (auth: { userToken: string; encryptionKey: string }) => void; execute: (challengeId: string, onCompleted: (error?: { message?: string }) => void) => void }
+type CircleChallengeResult = { status?: 'COMPLETE' | 'FAILED' | 'EXPIRED' | 'PENDING' | string }
+type CircleSdk = { getDeviceId: () => Promise<string>; setAuthentication: (auth: { userToken: string; encryptionKey: string }) => void; execute: (challengeId: string, onCompleted: (error?: { message?: string }, result?: CircleChallengeResult) => void) => void }
 
 function executeChallenge(sdk: CircleSdk, challengeId: string): Promise<void> {
   return new Promise((resolve, reject) => {
-    sdk.execute(challengeId, (error) => error ? reject(new Error(error.message || 'Circle wallet setup failed.')) : resolve())
+    sdk.execute(challengeId, (error, result) => {
+      if (error) { reject(new Error(error.message || 'Circle wallet setup failed.')); return }
+      if (result?.status !== 'COMPLETE') { reject(new Error(result?.status ? `Circle wallet setup ended with ${result.status.toLowerCase()}.` : 'Circle wallet setup returned no successful result.')); return }
+      resolve()
+    })
   })
 }
 
 export async function createPactMoneyWallet(): Promise<PactMoneyWallet> {
   if (!pactMoneyWalletEnabled) throw new Error('Wallet creation is waiting for backend deployment and PIN-flow verification.')
-  const challenge = await invokeWallet<WalletChallengeResponse>('start')
+  const challenge = await invokeWallet<WalletStartResponse>('start')
+  if (challenge.status === 'ready') return toWallet(challenge)
   if (challenge.status !== 'challenge') throw new Error('Wallet setup did not return a Circle challenge.')
 
   // These short-lived values stay in this function's memory and are passed directly to Circle's SDK.
