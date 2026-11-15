@@ -1,8 +1,12 @@
 import { supabase } from './supabase'
 import type { PactMoneyWallet } from '../types/pactMoney'
 
-// Keep live wallet creation off until Rory confirms deployment and the full PIN flow.
-export const pactMoneyWalletEnabled = false
+// Local development is enabled for the controlled test. Vercel requires both
+// an explicit opt-in and an explicit Preview environment marker; production
+// builds remain disabled even if the test flag is accidentally copied there.
+const previewWalletTestEnabled = import.meta.env.VITE_PACTMONEY_WALLET_TEST === 'true'
+  && import.meta.env.VITE_VERCEL_ENV === 'preview'
+export const pactMoneyWalletEnabled = import.meta.env.DEV || previewWalletTestEnabled
 
 type WalletStatusResponse =
   | { status: 'none' }
