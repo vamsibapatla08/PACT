@@ -1,8 +1,8 @@
 # Rory — Agent and blockchain
 
 - Status: In progress
-- Done: 6/23
-- Updated: 2026-11-14
+- Done: 9/25
+- Updated: 2026-11-15
 
 ## Main goal
 
@@ -44,13 +44,15 @@
 - [x] Wallet table and `wallet` Edge Function: each user gets a Circle wallet on Arc Testnet
 - [x] `transfer` and `pay_share` actions in the `wallet` function
 - [x] PactSplit contract with tests: holds shares, releases, refunds, emits `SharePaid`
-- [ ] Deploy PactSplit to Arc Testnet and give Dimple the address
-- [ ] Add a `create_pact` action so the host opens the pact on chain
+- [x] Deploy PactSplit to Arc Testnet and give Dimple the address
+- [x] Add a `create_pact` action so the host opens the pact on chain
+- [x] Run `backend/contracts/script/smoke.sh` on Arc and save the tx hashes
+- [ ] Pay one share with a real PIN through the app
 - [ ] Send the first real USDC payment between two team wallets
 
 ## Blockers
 
-- Waiting on Nihar's Connect wallet screen to test wallets and payments in the app
+- None. The app has buttons for every PactSplit action now. What's left is running the live tests
 
 ## Notes
 
