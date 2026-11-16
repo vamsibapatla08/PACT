@@ -37,7 +37,7 @@ export function isPaymentBackendUnavailable(error: unknown): boolean {
   return value?.code === '42883' || value?.code === '42P01' || value?.code === 'PGRST202' || /function .*get_pact_payment_status|relation .*pact_(payments|shares)/i.test(value?.message || '')
 }
 
-async function invokeWallet<T>(action: 'status' | 'start' | 'confirm' | 'transfer' | 'pact_member_wallets', params: Record<string, unknown> = {}): Promise<T> {
+async function invokeWallet<T>(action: 'status' | 'start' | 'confirm' | 'transfer' | 'pay_share' | 'pact_member_wallets', params: Record<string, unknown> = {}): Promise<T> {
   const { data, error } = await client().functions.invoke('wallet', { body: { action, ...params } })
   if (error) throw error
   if (!data || typeof data !== 'object') throw new Error('Wallet service returned an invalid response.')
@@ -49,6 +49,12 @@ export async function transferPactMoney(to: string, amount: string): Promise<voi
   if (!/^\d+(\.\d{1,6})?$/.test(amount) || Number(amount) <= 0) throw new Error('Enter a positive USDC amount with up to 6 decimals.')
   const challenge = await invokeWallet<WalletChallengeResponse>('transfer', { to, amount })
   if (challenge.status !== 'challenge') throw new Error('The transfer did not return a Circle PIN challenge.')
+  await runCircleChallenge(challenge)
+}
+
+export async function payPactShare(pactId: string): Promise<void> {
+  const challenge = await invokeWallet<WalletChallengeResponse>('pay_share', { pactId })
+  if (challenge.status !== 'challenge') throw new Error('Paying your share did not return a Circle PIN challenge.')
   await runCircleChallenge(challenge)
 }
 
