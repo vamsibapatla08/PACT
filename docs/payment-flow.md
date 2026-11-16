@@ -51,10 +51,11 @@ How money moves in Pact, and what each of us builds for it. Written by Rory for 
 | Send USDC to a pact member | `{ "action": "transfer", "pactId", "toUserId", "amount": "1.50", "requestId": "<uuid>" }` | A PIN challenge, plus `transferId`, `amount` and `to` |
 | Check a send | `{ "action": "transfer_status", "transferId" }` | `{ transfer: { status, txHash, ... } }`. Status is `awaiting_pin`, `pending`, `confirmed` or `failed` |
 | Pay my share | `{ "action": "pay_share", "pactId": "<uuid>" }` | A PIN challenge, plus `amount`, `payee`, `sharesPaid` and `sharesNeeded` |
-| Open the pact (host) | `{ "action": "create_pact", "pactId": "<uuid>", "payee": "0x...", "shareUsdc": "25.00", "sharesNeeded": 4, "deadline": 1795000000 }` | A PIN challenge |
+| Open the pact (host) | `{ "action": "create_pact", "pactId": "<uuid>" }` | A PIN challenge. Payee, share, shares and deadline come from the saved funding plan |
 | Pay the payee (host) | `{ "action": "release", "pactId": "<uuid>" }` | A PIN challenge |
 | Cancel the pact (host) | `{ "action": "cancel", "pactId": "<uuid>" }` | A PIN challenge |
 | Get my share back after a cancel | `{ "action": "claim_refund", "pactId": "<uuid>" }` | A PIN challenge |
+| Members' wallets | `{ "action": "pact_member_wallets", "pactId": "<uuid>" }` | `{ members: [{ user_id, address }] }`, only members with a wallet. No PIN |
 
 - A PIN challenge is `{ appId, userToken, encryptionKey, challengeId }`. The app passes these to Circle's web SDK, which asks for the PIN. Nothing moves until the PIN is entered
 - `pay_share` checks the user is an active member, checks the pact on chain was opened by the pact's real host, and reads the share amount from the contract, so the app never sends an amount
@@ -64,7 +65,8 @@ How money moves in Pact, and what each of us builds for it. Written by Rory for 
 - `requestId` is a uuid the app makes once per Send tap. Sending the same one again returns the same PIN challenge, so a retry or double tap never sends twice
 - Every member send is saved in `pact_transfers`. Sender and recipient can read it, and only the function writes it
 - After the PIN, call `transfer_status` every few seconds until it says `confirmed` or `failed`. `txHash` links to the Arc explorer
-- `create_pact`, `release` and `cancel` only work for the pact's active host (`role = 'host'` in `pact_members`). `shareUsdc` is a USDC amount with up to 6 decimals, turned into 18-decimal wei by the function. `deadline` is unix seconds and must be in the future
+- `create_pact` and `release` only work for the pact's active host (`role = 'host'` in `pact_members`). `cancel` works for the host any time, and for any member after the deadline
+- `create_pact` reads the plan from `pact_payments`, so call `create-pact-payment-plan` first. The deadline must be at least 2 minutes away
 - `release` and `cancel` also check the pact is open on chain and was opened from the host's own wallet
 
 ## PactSplit contract
@@ -129,8 +131,78 @@ A suggestion, change it as you need:
 - Only the server (the QuickNode webhook) marks a share paid, never the app, so nobody can mark themselves paid
 - Row level security: members of a pact can read its rows, nobody writes from the app
 
+## Handoff: how to use it
+
+Everything goes through two Edge Functions, called with the signed-in user's session. The app never sends an amount or an address for a pact payment. The server reads them from the plan and the contract.
+
+```ts
+await supabase.functions.invoke('create-pact-payment-plan', { body: { pactId, shareUsdc: '25.00', deadline: '2026-11-20T23:00:00Z', payeeAddress: '0x...' } })
+await supabase.functions.invoke('wallet', { body: { action: 'pact_status', pactId } })
+```
+
+### The full flow, in order
+
+| Step | Who | Call | Then |
+|---|---|---|---|
+| 1. Save the plan | Host | `create-pact-payment-plan` with `pactId`, `shareUsdc`, `deadline` (ISO date, within 90 days), `payeeAddress` | Returns `paymentId` and `sharesNeeded`, which is the number of members with a wallet. It can be replaced until the pact is on chain |
+| 2. Open on chain | Host | `wallet` `create_pact` | PIN, then `PactCreated` |
+| 3. Pay a share | Each member | `wallet` `pay_share` | Show `amount` and `payee`, PIN, then `SharePaid` |
+| 4. Check progress | Any member | `wallet` `pact_status` | No PIN. See below |
+| 5a. Pay out | Host | `wallet` `release` | Only once `funded` is true. PIN, then `Released` |
+| 5b. Call it off | Host any time, anyone after the deadline | `wallet` `cancel` | PIN, then `Cancelled` |
+| 6. Get money back | Each payer after a cancel | `wallet` `claim_refund` | PIN, then `Refunded` |
+
+- After each PIN step, poll `{ "action": "challenge_status", "challengeId" }` every few seconds. It returns `status` (`awaiting_pin`, `pending`, `confirmed` or `failed`), `txHash` and, on a failure, `error`. Only call it done on `confirmed`, because that means the receipt on Arc says success
+
+### Funded or not: `pact_status`
+
+For Vamsi's backend and PactMoney. It reads the contract live, so it is always the truth, even before Dimple's stream lands.
+
+| Field | Meaning |
+|---|---|
+| `state` | `none` (not on chain yet), `open`, `released` or `cancelled` |
+| `funded` | `true` when every share is in (open or released). This is the one to show |
+| `sharesPaid`, `sharesNeeded` | For the "3 of 4 paid" bar |
+| `share`, `total`, `paidIn` | USDC amounts as strings |
+| `members` | Every member: `userId`, `role`, `address`, `paid` |
+| `payers` | Members who have paid, with `amount` |
+| `openedByHost` | `false` means someone else opened a pact with this id. Don't trust it |
+| `deadline`, `deadlineAt` | Unix seconds and ISO date |
+| `otherPayers` | Shares paid by wallets that aren't members. Should be 0 |
+
+### Errors the app should show
+
+Every check runs before the PIN, so a user is never asked for a PIN for a transaction that would fail. Show the `error` text as it is.
+
+| Code | When |
+|---|---|
+| 400 | Bad `pactId` or body |
+| 401 | Not signed in |
+| 403 | Not in the pact, or not the host for a host-only action |
+| 409 | `reason: "low_balance"` when the wallet can't cover the share plus gas. Also: already paid, every share already paid, deadline passed, pact not open, not opened by its host, release before every share is in, refund with nothing to refund, no funding plan, no wallet yet |
+| 502 | Circle or Arc failed. `circleCode` is set when Circle refused. Safe to retry |
+| 503 | `PACT_SPLIT_ADDRESS` isn't set on the function |
+
+### Live test on Arc
+
+- `backend/contracts/script/smoke.sh` runs the whole contract flow with `cast`: opens a 2-share pact, pays both shares, releases, then opens a second pact, cancels it and claims the refund. It also checks that a double pay, a wrong amount and a release by someone who isn't the host all fail
+- It saves each tx hash and its explorer link to `backend/contracts/script/smoke-results.md`
+- Ran on Nov 16 at 01:24 UTC: 32 passed, 0 failed. Host `0xc9c4…5aac`, payer 2 `0x2b5d…781b`, 0.01 USDC shares
+- Every must-fail check reverted with the right error: double pay (`AlreadyPaid`), wrong amount (`WrongAmount`), release by someone who isn't the host (`NotHost`), release before every share is in (`NotFull`), release twice (`NotOpen`), cancel by someone who isn't the host before the deadline (`CannotCancel`), pay after a cancel (`NotOpen`), refund twice or with no share (`NothingToRefund`)
+
+| Test | Tx hash |
+|---|---|
+| Pact 1 `createPact` | [`0x8af17e73…4c4756`](https://explorer.testnet.arc.io/tx/0x8af17e7375a9a2a2f8363d2a2de26f343ba62ee3cf505e9df429c2556a4c4756) |
+| Pact 1 `payShare` (host) | [`0x24d5c0fa…df8927`](https://explorer.testnet.arc.io/tx/0x24d5c0fa7a44f096875833fc9c23226035e9dec64123c7f0fac25d97d2df8927) |
+| Pact 1 `payShare` (payer 2) | [`0xb2a069b8…4cf7ca`](https://explorer.testnet.arc.io/tx/0xb2a069b87fda9b10906a2d3e0bcd68d9baf0bbce801a0c31aeedc3761e4cf7ca) |
+| Pact 1 `release` | [`0x1610adef…80623f`](https://explorer.testnet.arc.io/tx/0x1610adef756d1923ead0f4b0b30452ec642ea2a06a2924f3ab48f77a8280623f) |
+| Pact 2 `createPact` | [`0x566b8df3…0b9f6e`](https://explorer.testnet.arc.io/tx/0x566b8df3c4222fb7aff99d3cc8d23fd6c53f308d51f427aa3c69582e6e0b9f6e) |
+| Pact 2 `payShare` | [`0x1eaaa4f5…4d6ad6`](https://explorer.testnet.arc.io/tx/0x1eaaa4f5b7238a4da1460d7416ba8acc87f4e1825ec35a4b18dfbd99d84d6ad6) |
+| Pact 2 `cancel` | [`0xad1f8304…bcdc8b`](https://explorer.testnet.arc.io/tx/0xad1f8304b91238e95612b49fa92dfde3d29dd24b62561db90de4d2de5dbcdc8b) |
+| Pact 2 `claimRefund` | [`0xc6b93c0b…18a12f`](https://explorer.testnet.arc.io/tx/0xc6b93c0b24f233eb8331c204aeb1098c73795d46f9a7c9565137d4b13418a12f) |
+| `pay_share` through the app with a real PIN | _after the app test_ |
+
 ## Not done yet
 
-- Set `PACT_SPLIT_ADDRESS` on the `wallet` function
 - Test one real transfer and one real `pay_share` with two funded wallets
 - Fallback by Nov 17 if the contract is not ready: direct transfers plus Circle's webhook
