@@ -23,7 +23,8 @@ export type PactMoneyDataSource = {
   getWallet: () => Promise<PactMoneyWallet | null>
 }
 
-export type PactPaymentStatus = 'open' | 'released' | 'cancelled'
+// 'none': the plan is saved but the host has not opened it on PactSplit yet.
+export type PactPaymentStatus = 'none' | 'open' | 'released' | 'cancelled'
 export type PactShareStatus = 'owed' | 'paid' | 'refunded'
 
 export type PactPaymentStatusRow = {
