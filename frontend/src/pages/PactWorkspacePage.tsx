@@ -126,7 +126,7 @@ export function PactWorkspacePage({ user, profile, pactId, onNavigate, onSignOut
     }
   }
 
-  async function handleCreateFundingPlan(input: { shareUsdc: string; deadline: string; payeeAddress: string; contractAddress: string }) {
+  async function handleCreateFundingPlan(input: { shareUsdc: string; deadline: string; payeeAddress: string }) {
     await createPactFundingPlan({ pactId, ...input })
     setPaymentRows(await getPactPaymentStatus(pactId))
   }

@@ -7,6 +7,7 @@ const cors = {
 }
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const ADDRESS = /^0x[0-9a-fA-F]{40}$/
+const ARC_CHAIN_ID = 5042002
 
 const reply = (status: number, body: unknown) =>
   new Response(JSON.stringify(body), { status, headers: { ...cors, 'Content-Type': 'application/json' } })
@@ -23,6 +24,8 @@ async function main(req: Request) {
   if (!authorization?.startsWith('Bearer ')) return reply(401, { error: 'Authentication required' })
 
   const supabaseUrl = Deno.env.get('SUPABASE_URL')!
+  const pactSplitAddress = Deno.env.get('PACT_SPLIT_ADDRESS')?.trim()
+  if (!pactSplitAddress || !ADDRESS.test(pactSplitAddress)) return reply(503, { error: 'PactSplit is not configured for Arc Testnet' })
   const userClient = createClient(supabaseUrl, Deno.env.get('SUPABASE_ANON_KEY')!, {
     global: { headers: { Authorization: authorization } },
   })
@@ -34,12 +37,10 @@ async function main(req: Request) {
   const shareUsdc = body?.shareUsdc
   const deadline = body?.deadline
   const payeeAddress = body?.payeeAddress
-  const contractAddress = body?.contractAddress
   if (typeof pactId !== 'string' || !UUID.test(pactId)) return reply(400, { error: 'Invalid Pact ID' })
   if (typeof shareUsdc !== 'string' || !/^\d+(\.\d{1,6})?$/.test(shareUsdc) || Number(shareUsdc) <= 0) return reply(400, { error: 'Share amount must be a positive USDC amount with up to 6 decimals' })
   if (typeof deadline !== 'string' || Number.isNaN(Date.parse(deadline)) || Date.parse(deadline) <= Date.now()) return reply(400, { error: 'Deadline must be a future date' })
   if (typeof payeeAddress !== 'string' || !ADDRESS.test(payeeAddress)) return reply(400, { error: 'Invalid payee address' })
-  if (typeof contractAddress !== 'string' || !ADDRESS.test(contractAddress)) return reply(400, { error: 'Invalid PactSplit contract address' })
 
   const admin = adminClient()
   const { data: membership, error: membershipError } = await admin
@@ -83,8 +84,8 @@ async function main(req: Request) {
     p_share_usdc: shareUsdc,
     p_shares_needed: count,
     p_deadline: deadline,
-    p_chain_id: 5042002,
-    p_contract_address: contractAddress,
+    p_chain_id: ARC_CHAIN_ID,
+    p_contract_address: pactSplitAddress,
   })
   if (rpcError) {
     if (rpcError.code === '23505') return reply(409, { error: 'This Pact already has a funding plan' })

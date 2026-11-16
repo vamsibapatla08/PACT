@@ -25,7 +25,7 @@ export async function getPactPaymentStatus(pactId: string): Promise<PactPaymentS
   return data as PactPaymentStatusRow[]
 }
 
-export async function createPactFundingPlan(input: { pactId: string; shareUsdc: string; deadline: string; payeeAddress: string; contractAddress: string }): Promise<{ paymentId: string; sharesNeeded: number }> {
+export async function createPactFundingPlan(input: { pactId: string; shareUsdc: string; deadline: string; payeeAddress: string }): Promise<{ paymentId: string; sharesNeeded: number }> {
   const { data, error } = await client().functions.invoke('create-pact-payment-plan', { body: input })
   if (error) throw error
   if (!data || typeof data.paymentId !== 'string' || typeof data.sharesNeeded !== 'number') throw new Error('Funding plan service returned an invalid response.')
