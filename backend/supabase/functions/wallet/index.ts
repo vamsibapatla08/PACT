@@ -519,6 +519,16 @@ async function pactStatus(userId: string, userJwt: string, pactId: unknown) {
   return reply(200, pactStatusView(pactId, PACT_SPLIT_ADDRESS, pact, members, hostAddress))
 }
 
+// Read only, so no PIN. Each member's saved wallet address, so the app can show who can be paid.
+async function pactMemberWallets(userId: string, userJwt: string, pactId: unknown) {
+  if (typeof pactId !== 'string' || !UUID.test(pactId)) return reply(400, { error: 'pactId must be a pact id' })
+  const roster = await pactRoster(userJwt, pactId)
+  if (!roster.some((m) => m.user_id === userId)) return reply(403, { error: 'You are not in this pact' })
+  const { data, error } = await admin.from('wallets').select('user_id, address').in('user_id', roster.map((m) => m.user_id))
+  if (error) throw error
+  return reply(200, { members: data ?? [] })
+}
+
 async function savedWallet(userId: string) {
   const { data, error } = await admin.from('wallets').select('address, blockchain').eq('user_id', userId).maybeSingle()
   if (error) throw error
@@ -638,9 +648,10 @@ Deno.serve(async (req) => {
     if (action === 'release' || action === 'cancel') return await closePact(user.id, token!, body.pactId, action)
     if (action === 'claim_refund') return await claimRefund(user.id, token!, body.pactId)
     if (action === 'pact_status') return await pactStatus(user.id, token!, body.pactId)
+    if (action === 'pact_member_wallets') return await pactMemberWallets(user.id, token!, body.pactId)
     if (action === 'challenge_status') return await challengeStatus(user.id, body.challengeId)
     if (action === 'reset_pin') return await resetPin(user.id)
-    return reply(400, { error: 'action must be status, start, confirm, transfer, transfer_status, pay_share, create_pact, release, cancel, claim_refund, pact_status, challenge_status or reset_pin' })
+    return reply(400, { error: 'action must be status, start, confirm, transfer, transfer_status, pay_share, create_pact, release, cancel, claim_refund, pact_status, pact_member_wallets, challenge_status or reset_pin' })
   } catch (err) {
     console.error(err instanceof Error ? err.message : 'wallet error')
     // Circle's code (never its body) goes back so a failure can be looked up instead of guessed at.
