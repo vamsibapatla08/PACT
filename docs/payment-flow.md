@@ -188,6 +188,7 @@ Every check runs before the PIN, so a user is never asked for a PIN for a transa
 - `backend/contracts/script/smoke.sh` runs the whole contract flow with `cast`: opens a 2-share pact, pays both shares, releases, then opens a second pact, cancels it and claims the refund. It also checks that a double pay, a wrong amount and a release by someone who isn't the host all fail
 - It saves each tx hash and its explorer link to `backend/contracts/script/smoke-results.md`
 - Ran on Nov 16 at 01:24 UTC: 32 passed, 0 failed. Host `0xc9c4…5aac`, payer 2 `0x2b5d…781b`, 0.01 USDC shares
+- On Nov 16 the team ran the whole flow through the app with real Circle PINs: the host opened the "austin trip" pact (1 USDC a share), and 3 members paid, so it reads 3 of 3 and funded, waiting for the host to release
 - Every must-fail check reverted with the right error: double pay (`AlreadyPaid`), wrong amount (`WrongAmount`), release by someone who isn't the host (`NotHost`), release before every share is in (`NotFull`), release twice (`NotOpen`), cancel by someone who isn't the host before the deadline (`CannotCancel`), pay after a cancel (`NotOpen`), refund twice or with no share (`NothingToRefund`)
 
 | Test | Tx hash |
@@ -200,7 +201,10 @@ Every check runs before the PIN, so a user is never asked for a PIN for a transa
 | Pact 2 `payShare` | [`0x1eaaa4f5…4d6ad6`](https://explorer.testnet.arc.io/tx/0x1eaaa4f5b7238a4da1460d7416ba8acc87f4e1825ec35a4b18dfbd99d84d6ad6) |
 | Pact 2 `cancel` | [`0xad1f8304…bcdc8b`](https://explorer.testnet.arc.io/tx/0xad1f8304b91238e95612b49fa92dfde3d29dd24b62561db90de4d2de5dbcdc8b) |
 | Pact 2 `claimRefund` | [`0xc6b93c0b…18a12f`](https://explorer.testnet.arc.io/tx/0xc6b93c0b24f233eb8331c204aeb1098c73795d46f9a7c9565137d4b13418a12f) |
-| `pay_share` through the app with a real PIN | _after the app test_ |
+| `create_pact` through the app (host `0x6d99…1307`) | [`0xc56bd6e1…b47ab8`](https://explorer.testnet.arc.io/tx/0xc56bd6e121a8b86876c33ab9fdfae45e8406e6df9e2154f3d47e6b1fceb47ab8) |
+| `pay_share` through the app, PIN (`0x5d56…7748`) | [`0x8bd594b3…5e3071`](https://explorer.testnet.arc.io/tx/0x8bd594b33f35db70ae3f7605aa1806c50281d2f90ed3e8e785bd68d9065e3071) |
+| `pay_share` through the app, PIN (`0xdaf1…89bf`) | [`0x5b31a7f4…b756a7`](https://explorer.testnet.arc.io/tx/0x5b31a7f410a92f8de43401da49d57a4d5ac971053199c3e1e8f58bc3c6b756a7) |
+| `pay_share` through the app, PIN (host) | [`0x130eec41…ffa3ff`](https://explorer.testnet.arc.io/tx/0x130eec4173bd23de361bc9c890d075c2a405d7e73491d56eccb5828975ffa3ff) |
 
 ## Not done yet
 
