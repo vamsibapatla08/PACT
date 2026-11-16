@@ -516,7 +516,18 @@ async function pactStatus(userId: string, userJwt: string, pactId: unknown) {
   }))
   const hostId = roster.find((m) => m.role === 'host')?.user_id
   const hostAddress = hostId ? addressOf.get(hostId) ?? null : null
-  return reply(200, pactStatusView(pactId, PACT_SPLIT_ADDRESS, pact, members, hostAddress))
+  const view = pactStatusView(pactId, PACT_SPLIT_ADDRESS, pact, members, hostAddress)
+  // Save what the contract says so pact_shares and the Fund step follow real payments. Only for a pact the
+  // real host opened, and a failed save never breaks the read.
+  if (view.openedByHost) {
+    const { error: syncError } = await admin.rpc('sync_pact_chain_status', {
+      p_pact_id: pactId,
+      p_state: pact.state,
+      p_paid_user_ids: members.filter((m) => m.paid).map((m) => m.userId),
+    })
+    if (syncError) console.error('sync_pact_chain_status failed', syncError)
+  }
+  return reply(200, view)
 }
 
 // Read only, so no PIN. Each member's saved wallet address, so the app can show who can be paid.

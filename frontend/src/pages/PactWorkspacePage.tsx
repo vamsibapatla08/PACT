@@ -47,10 +47,18 @@ export function PactWorkspacePage({ user, profile, pactId, onNavigate, onSignOut
     if (!pact) return
     let active = true
     setPaymentRows(null)
-    getPactPaymentStatus(pact.id).then((rows) => { if (active) setPaymentRows(rows) }).catch((reason) => {
+    // pact_status saves what PactSplit says, so Progress is reloaded after it. Polling keeps both current
+    // while other members pay.
+    const refresh = () => getPactPaymentStatus(pact.id).then((rows) => {
+      if (!active) return
+      setPaymentRows(rows)
+      return loadPactFlow(pact.id).then((value) => { if (active) setFlow(value) }, () => {})
+    }).catch((reason) => {
       if (active && !isPaymentBackendUnavailable(reason)) setMoneyError(reason instanceof Error ? reason.message : 'Payment status could not be loaded.')
     })
-    return () => { active = false }
+    void refresh()
+    const timer = window.setInterval(() => { void refresh() }, 20000)
+    return () => { active = false; window.clearInterval(timer) }
   }, [pact?.id])
 
   useEffect(() => {
@@ -145,11 +153,13 @@ export function PactWorkspacePage({ user, profile, pactId, onNavigate, onSignOut
   async function handleCreateFundingPlan(input: { shareUsdc: string; deadline: string; payeeAddress: string }) {
     await createPactFundingPlan({ pactId, ...input, deadline: new Date(input.deadline).toISOString() })
     setPaymentRows(await getPactPaymentStatus(pactId))
+    setFlow(await loadPactFlow(pactId))
   }
 
   async function handlePactAction(action: PactAction) {
     const txHash = await runPactAction(action, pactId)
     setPaymentRows(await getPactPaymentStatus(pactId))
+    loadPactFlow(pactId).then(setFlow).catch(() => {})
     getPactMoneyWalletStatus().then((wallet) => { if (wallet) setMoneyWallet(wallet) }).catch(() => {})
     return txHash
   }
