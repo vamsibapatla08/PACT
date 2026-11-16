@@ -1,8 +1,9 @@
-import { useState, type FormEvent } from 'react'
+import { useEffect, useState, type FormEvent } from 'react'
 import type { PactMoneyStatus, PactMoneyTransfer, PactMoneyWallet, PactPaymentStatusRow } from '../types/pactMoney'
 import type { PactAction } from '../lib/pactMoneyService'
 
 export type PactMoneyRecipient = { userId: string; name: string; hasWallet?: boolean; address?: string }
+export type PactMoneyMember = { userId: string; name: string }
 
 const OTHER_PAYEE = 'other'
 const pad = (n: number) => String(n).padStart(2, '0')
@@ -66,10 +67,11 @@ type Props = {
   isHost?: boolean
   onCreateFundingPlan?: (input: { shareUsdc: string; deadline: string; payeeAddress: string }) => Promise<void>
   currentUserId?: string
+  members?: PactMoneyMember[]
   onPactAction?: (action: PactAction) => Promise<string | null>
 }
 
-export function PactMoneyPanel({ pactName, memberCount = 0, status = 'unavailable', wallet = null, error = null, walletEnabled = false, onCreateWallet, onResetPin, recipients = [], onSend, paymentRows = null, isHost = false, onCreateFundingPlan, currentUserId, onPactAction }: Props) {
+export function PactMoneyPanel({ pactName, memberCount = 0, status = 'unavailable', wallet = null, error = null, walletEnabled = false, onCreateWallet, onResetPin, recipients = [], onSend, paymentRows = null, isHost = false, onCreateFundingPlan, currentUserId, members = [], onPactAction }: Props) {
   const [shareUsdc, setShareUsdc] = useState('')
   const [deadlineMonth, setDeadlineMonth] = useState(() => tomorrow().month)
   const [deadlineDay, setDeadlineDay] = useState(() => tomorrow().day)
@@ -98,12 +100,21 @@ export function PactMoneyPanel({ pactName, memberCount = 0, status = 'unavailabl
   // A new one only after that send finished, or when who or how much changes.
   const [requestId, setRequestId] = useState(() => crypto.randomUUID())
   const [acting, setActing] = useState<PactAction | null>(null)
-  const [actionResult, setActionResult] = useState<{ ok: boolean; text: string; txHash?: string | null } | null>(null)
+  const [actionResult, setActionResult] = useState<{ ok: boolean; pending?: boolean; text: string; txHash?: string | null } | null>(null)
+  const [confirmingAction, setConfirmingAction] = useState<PactAction | null>(null)
+  const [now, setNow] = useState(() => Date.now())
   const [resetting, setResetting] = useState(false)
   const [resetResult, setResetResult] = useState<{ ok: boolean; text: string } | null>(null)
   // A locked PIN can also block wallet setup, so the button shows then too.
   const canResetPin = Boolean(onResetPin) && (hasWallet || Boolean(error?.includes('Reset your PIN')))
   const recipientName = (userId: string) => recipients.find((r) => r.userId === userId)?.name ?? 'Pact member'
+
+  // Deadline eligibility must change while the workspace remains open.
+  // The server still makes the final authorization decision.
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 1000)
+    return () => window.clearInterval(timer)
+  }, [])
 
   async function handleSend(event: FormEvent) {
     event.preventDefault()
@@ -122,12 +133,18 @@ export function PactMoneyPanel({ pactName, memberCount = 0, status = 'unavailabl
 
   async function handlePactAction(action: PactAction) {
     if (!onPactAction || acting) return
+    if ((action === 'release' || action === 'cancel') && confirmingAction !== action) {
+      setConfirmingAction(action)
+      return
+    }
+    setConfirmingAction(null)
     setActing(action); setActionResult(null)
     try {
       const txHash = await onPactAction(action)
       setActionResult({ ok: true, text: ACTION_DONE[action], txHash })
     } catch (reason) {
-      setActionResult({ ok: false, text: reason instanceof Error ? reason.message : 'That did not go through.' })
+      const text = reason instanceof Error ? reason.message : 'That did not go through.'
+      setActionResult({ ok: false, pending: /^Approved, but Arc has not confirmed/i.test(text), text })
     } finally { setActing(null) }
   }
 
@@ -151,7 +168,7 @@ export function PactMoneyPanel({ pactName, memberCount = 0, status = 'unavailabl
   const receiptCount = paymentRows?.filter((row) => row.tx_hash).length || 0
   const chainState = plan?.payment_status
   const iPaid = paymentRows?.some((row) => row.user_id === currentUserId && row.share_status === 'paid') || false
-  const pastDeadline = plan ? Date.parse(plan.deadline) < Date.now() : false
+  const pastDeadline = plan ? Date.parse(plan.deadline) <= now : false
   const actions: PactAction[] = !plan || !hasWallet || !onPactAction ? []
     : chainState === 'none' ? (isHost ? ['create_pact'] : [])
     : chainState === 'open' ? [
@@ -176,9 +193,15 @@ export function PactMoneyPanel({ pactName, memberCount = 0, status = 'unavailabl
     {plan && onPactAction && hasWallet ? <div className="money-send-card">
       <span className="money-label">PACTSPLIT ON ARC</span>
       <span>{CHAIN_TEXT[chainState ?? 'none']}</span>
-      {actions.map((action) => <button key={action} className={action === 'cancel' ? 'outline-button' : 'gold-button money-create-button'} type="button" onClick={() => { void handlePactAction(action) }} disabled={Boolean(acting) || sending}>{acting === action ? 'Waiting for Arc…' : ACTION_LABEL[action](plan.share_usdc)}</button>)}
-      {actionResult ? <p className={actionResult.ok ? 'money-send-result is-confirmed' : 'form-error money-send-result'} role={actionResult.ok ? 'status' : 'alert'}>{actionResult.text}{actionResult.txHash ? <> · <a href={ARC_EXPLORER + actionResult.txHash} target="_blank" rel="noreferrer">View on Arc explorer</a></> : null}</p> : null}
+      {chainState === 'open' && paidCount < totalShares ? <span className="money-action-note">Waiting for {totalShares - paidCount} more of {totalShares} shares.</span> : null}
+      {pastDeadline && chainState === 'open' ? <span className="money-action-note">Deadline passed. Anyone can cancel.</span> : null}
+      {confirmingAction === 'release' ? <div className="money-action-confirm"><strong>You send {(Number(plan.share_usdc) * plan.shares_needed).toFixed(2)} USDC to {shortAddress(plan.payee_address)}.</strong><span>Confirm to continue to the Circle PIN screen.</span><button className="gold-button money-create-button" type="button" onClick={() => { void handlePactAction('release') }} disabled={Boolean(acting) || sending}>Confirm release</button><button className="outline-button" type="button" onClick={() => setConfirmingAction(null)} disabled={Boolean(acting)}>Back</button></div> : null}
+      {confirmingAction === 'cancel' ? <div className="money-action-confirm"><strong>{pastDeadline ? 'Deadline passed. Anyone can cancel.' : 'Cancel this Pact before the deadline?'}</strong><span>{pastDeadline ? 'The deadline has passed, so any active member may request cancellation.' : 'Before the deadline, only the host can cancel. The backend will verify this rule.'}</span><button className="gold-button money-create-button" type="button" onClick={() => { void handlePactAction('cancel') }} disabled={Boolean(acting) || sending}>Confirm cancellation</button><button className="outline-button" type="button" onClick={() => setConfirmingAction(null)} disabled={Boolean(acting)}>Back</button></div> : null}
+      {confirmingAction === null ? actions.map((action) => <button key={action} className={action === 'cancel' ? 'outline-button' : 'gold-button money-create-button'} type="button" onClick={() => { void handlePactAction(action) }} disabled={Boolean(acting) || sending}>{acting === action ? 'Waiting for Arc…' : ACTION_LABEL[action](plan.share_usdc)}</button>) : null}
+      {actionResult ? <p className={actionResult.ok ? 'money-send-result is-confirmed' : actionResult.pending ? 'money-send-result' : 'form-error money-send-result'} role={actionResult.ok || actionResult.pending ? 'status' : 'alert'}>{actionResult.text}{actionResult.txHash ? <> · <a href={ARC_EXPLORER + actionResult.txHash} target="_blank" rel="noreferrer">View on Arc explorer</a></> : null}</p> : null}
+      {actionResult && !actionResult.ok && /low_balance/i.test(actionResult.text) ? <a className="money-faucet-link" href="https://faucet.circle.com/" target="_blank" rel="noreferrer">Get Arc Testnet USDC from the faucet</a> : null}
     </div> : null}
+    {plan && members.length ? <div className="money-member-list"><span className="money-label">MEMBER CONTRIBUTIONS</span>{members.map((member) => { const row = paymentRows?.find((item) => item.user_id === member.userId); const state = row?.share_status === 'paid' ? 'Paid' : row?.share_status === 'refunded' ? 'Refunded' : "Didn't pay"; return <div className="money-member-row" key={member.userId}><span>{member.name}</span><strong>{state}</strong>{state === 'Refunded' && row?.amount_usdc ? <small>Refunded {row.amount_usdc} USDC.</small> : state === "Didn't pay" ? <small>Nothing to refund.</small> : null}</div> })}</div> : null}
     {(!plan || chainState === 'none') && isHost && onCreateFundingPlan ? <form className="money-plan-form" onSubmit={(event) => { event.preventDefault(); setPlanLoading(true); setPlanError(null); void onCreateFundingPlan({ shareUsdc, deadline, payeeAddress }).catch((reason) => setPlanError(reason instanceof Error ? reason.message : 'Funding plan could not be created.')).finally(() => setPlanLoading(false)) }}><p className="money-label">{plan ? 'REPLACE FUNDING PLAN (until it is opened on chain)' : 'CREATE FUNDING PLAN'}</p><span className="money-label">SHARE PER PERSON (USDC)</span><input aria-label="Share amount in USDC" inputMode="decimal" placeholder="0.01" value={shareUsdc} onChange={(event) => setShareUsdc(event.target.value)} disabled={planLoading} required /><span className="money-label">DEADLINE</span><div className="money-plan-row"><select aria-label="Deadline month" value={deadlineMonth} onChange={(event) => setDeadlineMonth(event.target.value)} disabled={planLoading}>{deadlineMonths().map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}</select><select aria-label="Deadline day" value={pad(day)} onChange={(event) => setDeadlineDay(event.target.value)} disabled={planLoading}>{Array.from({ length: daysInMonth }, (_, i) => <option key={i} value={pad(i + 1)}>{i + 1}</option>)}</select><select aria-label="Deadline time" value={deadlineTime} onChange={(event) => setDeadlineTime(event.target.value)} disabled={planLoading}>{DEADLINE_TIMES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}</select></div><span className="money-label">PAID TO</span><select aria-label="Payee" value={payeeValue} onChange={(event) => setPayeeChoice(event.target.value)} disabled={planLoading}>{payeeOptions.map((o) => <option key={o.address} value={o.address}>{o.label}</option>)}<option value={OTHER_PAYEE}>Another wallet address…</option></select>{payeeValue === OTHER_PAYEE ? <input aria-label="Payee wallet address" placeholder="0x… wallet address" value={otherPayee} onChange={(event) => setOtherPayee(event.target.value)} disabled={planLoading} required /> : null}<button className="gold-button" type="submit" disabled={planLoading || !wallet}>{planLoading ? 'Saving plan…' : plan ? 'Replace funding plan' : 'Create funding plan'}</button>{!wallet ? <span>Connect the host wallet before configuring funding.</span> : null}{planError ? <p className="form-error" role="alert">{planError}</p> : null}</form> : null}
     <div className="money-sections"><div><p className="money-label">FUNDING GOAL</p><strong>{plan ? `${fundingGoal?.toFixed(2)} USDC` : 'Not configured'}</strong><span>{plan ? `Arc Testnet · ${plan.payment_status === 'none' ? 'not opened on chain yet' : plan.payment_status}` : 'No verified PactSplit funding target is available yet.'}</span></div><div><p className="money-label">MEMBER SHARES</p><strong>{plan ? `${plan.share_usdc} USDC each` : `${memberCount} eligible member${memberCount === 1 ? '' : 's'}`}</strong><span>{plan ? `${totalShares} share${totalShares === 1 ? '' : 's'} · ${paidCount} verified paid` : 'Share amounts will appear after the payment plan is created.'}</span></div><div><p className="money-label">PAYMENT STATUS</p><strong>{plan ? `${paidCount}/${totalShares} paid` : 'Awaiting verification'}</strong><span>{plan ? 'Only persisted verified payment events count.' : 'Wallet balance is not treated as contribution proof.'}</span></div><div><p className="money-label">RECEIPTS</p><strong>{plan && receiptCount ? `${receiptCount} available` : 'Unavailable'}</strong><span>{plan && receiptCount ? 'Transaction references are available for verified shares.' : 'Receipts require persisted, verified transaction events.'}</span></div></div>
     <small className="money-note">{plan ? 'Funding data is read from the authorized Pact payment status service.' : 'PactSplit payment data is unavailable until the payment migration and verified event path are deployed.'}</small>
