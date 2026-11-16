@@ -11,7 +11,7 @@ import { askPactPilot } from '../lib/pactPilotService'
 import { listPactMessages, sendPactMessage, subscribeToPactMessages } from '../lib/chatService'
 import type { PactChatMessage } from '../types/chat'
 import { PactMoneyPanel } from '../components/PactMoneyPanel'
-import { createPactFundingPlan, createPactMoneyWallet, getPactMoneyWalletStatus, getPactPaymentStatus, isPaymentBackendUnavailable, pactMoneyWalletEnabled, transferPactMoney } from '../lib/pactMoneyService'
+import { createPactFundingPlan, createPactMoneyWallet, getPactMemberWallets, getPactMoneyWalletStatus, getPactPaymentStatus, isPaymentBackendUnavailable, pactMoneyWalletEnabled, transferPactMoney } from '../lib/pactMoneyService'
 import type { PactMoneyStatus, PactMoneyWallet, PactPaymentStatusRow } from '../types/pactMoney'
 import { PactFlowPanel } from '../components/PactFlowPanel'
 import { PactDecidePanel } from '../components/PactDecidePanel'
@@ -38,6 +38,7 @@ export function PactWorkspacePage({ user, profile, pactId, onNavigate, onSignOut
   const [moneyWallet, setMoneyWallet] = useState<PactMoneyWallet | null>(null)
   const [moneyError, setMoneyError] = useState<string | null>(null)
   const [paymentRows, setPaymentRows] = useState<PactPaymentStatusRow[] | null>(null)
+  const [memberWallets, setMemberWallets] = useState<{ user_id: string; address: string }[]>([])
   const [flow, setFlow] = useState<{ milestones: PactMilestone[]; recommendations: PactRecommendation[]; decisions: PactDecision[] }>({ milestones: [], recommendations: [], decisions: [] })
   const [flowLoading, setFlowLoading] = useState(false)
   const [flowError, setFlowError] = useState<string | null>(null)
@@ -49,6 +50,14 @@ export function PactWorkspacePage({ user, profile, pactId, onNavigate, onSignOut
     getPactPaymentStatus(pact.id).then((rows) => { if (active) setPaymentRows(rows) }).catch((reason) => {
       if (active && !isPaymentBackendUnavailable(reason)) setMoneyError(reason instanceof Error ? reason.message : 'Payment status could not be loaded.')
     })
+    return () => { active = false }
+  }, [pact?.id])
+
+  useEffect(() => {
+    if (!pact) return
+    let active = true
+    setMemberWallets([])
+    getPactMemberWallets(pact.id).then((wallets) => { if (active) setMemberWallets(wallets) }).catch(() => { if (active) setMemberWallets([]) })
     return () => { active = false }
   }, [pact?.id])
 
@@ -182,7 +191,7 @@ export function PactWorkspacePage({ user, profile, pactId, onNavigate, onSignOut
             <PactPilotPanel pactId={pact.id} pactName={pact.name} onAsk={askAndPersist} />
           </div>
         </div>
-        <PactMoneyPanel pactName={pact.name} memberCount={pact.members.length} isHost={pact.members.some((member) => member.user_id === user.id && member.role === 'host')} status={moneyStatus} wallet={moneyWallet} error={moneyError} walletEnabled={pactMoneyWalletEnabled} onCreateWallet={handleCreateWallet} onTransfer={handleTransfer} paymentRows={paymentRows} onCreateFundingPlan={handleCreateFundingPlan} />
+        <PactMoneyPanel pactName={pact.name} memberCount={pact.members.length} isHost={pact.members.some((member) => member.user_id === user.id && member.role === 'host')} status={moneyStatus} wallet={moneyWallet} error={moneyError} walletEnabled={pactMoneyWalletEnabled} onCreateWallet={handleCreateWallet} onTransfer={handleTransfer} transferRecipients={pact.members.filter((member) => member.user_id !== user.id).map((member) => ({ userId: member.user_id, name: member.profile?.full_name || 'Pact member', walletAddress: memberWallets.find((wallet) => wallet.user_id === member.user_id)?.address || null }))} paymentRows={paymentRows} onCreateFundingPlan={handleCreateFundingPlan} />
         <div className="workspace-decision-grid"><PactFlowPanel milestones={flow.milestones} recommendations={flow.recommendations} decisions={flow.decisions} loading={flowLoading} error={flowError} onSubmitRecommendation={handleSubmitRecommendation} /><PactDecidePanel decisions={flow.decisions} onVote={handleVote} onCreate={handleCreateDecision} error={flowError} /></div>
         <section className="workspace-coming"><span>PACT / NEXT LAYER</span><strong>Conversation, decisions, and payments will live here.</strong><p>Chat, plans, votes, and payment features are not in the current backend migration yet.</p></section>
       </> : null}

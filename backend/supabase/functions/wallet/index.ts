@@ -168,6 +168,18 @@ async function transfer(userId: string, to: unknown, amount: unknown) {
   })
 }
 
+async function pactMemberWallets(userId: string, userJwt: string, pactId: unknown) {
+  if (typeof pactId !== 'string' || !UUID.test(pactId)) return reply(400, { error: 'pactId must be a pact id' })
+  const roster = await pactRoster(userJwt, pactId)
+  if (!roster.some((member) => member.user_id === userId)) return reply(403, { error: 'You are not in this pact' })
+  const { data, error } = await admin
+    .from('wallets')
+    .select('user_id, address')
+    .in('user_id', roster.map((member) => member.user_id))
+  if (error) throw error
+  return reply(200, { members: data ?? [] })
+}
+
 // list_pact_members runs as the caller and returns rows only to active members, so it checks
 // membership and finds the real host in one call.
 async function pactRoster(userJwt: string, pactId: string) {
@@ -368,6 +380,7 @@ Deno.serve(async (req) => {
       const saved = await savedWallet(user.id)
       return saved ? ready(saved) : reply(200, { status: 'none' })
     }
+    if (action === 'pact_member_wallets') return await pactMemberWallets(user.id, token!, body.pactId)
     if (action === 'start') return await start(user.id)
     if (action === 'confirm') return await confirm(user.id, body.challengeId)
     if (action === 'transfer') return await transfer(user.id, body.to, body.amount)

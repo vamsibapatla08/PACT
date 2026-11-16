@@ -37,7 +37,7 @@ export function isPaymentBackendUnavailable(error: unknown): boolean {
   return value?.code === '42883' || value?.code === '42P01' || value?.code === 'PGRST202' || /function .*get_pact_payment_status|relation .*pact_(payments|shares)/i.test(value?.message || '')
 }
 
-async function invokeWallet<T>(action: 'status' | 'start' | 'confirm' | 'transfer', params: Record<string, unknown> = {}): Promise<T> {
+async function invokeWallet<T>(action: 'status' | 'start' | 'confirm' | 'transfer' | 'pact_member_wallets', params: Record<string, unknown> = {}): Promise<T> {
   const { data, error } = await client().functions.invoke('wallet', { body: { action, ...params } })
   if (error) throw error
   if (!data || typeof data !== 'object') throw new Error('Wallet service returned an invalid response.')
@@ -61,6 +61,14 @@ export async function getPactMoneyWalletStatus(): Promise<PactMoneyWallet | null
   if (data.status === 'ready') return toWallet(data)
   if (data.status === 'none') return null
   throw new Error(data.error || 'Wallet status is not ready.')
+}
+
+export type PactMemberWallet = { user_id: string; address: string }
+
+export async function getPactMemberWallets(pactId: string): Promise<PactMemberWallet[]> {
+  const data = await invokeWallet<{ members: PactMemberWallet[] }>('pact_member_wallets', { pactId })
+  if (!Array.isArray(data.members)) throw new Error('Pact member wallet data was invalid.')
+  return data.members.filter((member) => typeof member?.user_id === 'string' && typeof member?.address === 'string')
 }
 
 type CircleChallengeResult = { status?: 'COMPLETE' | 'FAILED' | 'EXPIRED' | 'PENDING' | string }
