@@ -18,11 +18,32 @@ function client() {
   return supabase
 }
 
+type OnChainStatus = {
+  state: 'none' | 'open' | 'released' | 'cancelled'
+  members: { userId: string; address: string | null; paid: boolean }[]
+}
+
+// The plan comes from the database; who has paid comes live from PactSplit through the wallet's pact_status,
+// since nothing writes on-chain payments back to pact_shares. If the chain can't be read, the plan shows as saved.
 export async function getPactPaymentStatus(pactId: string): Promise<PactPaymentStatusRow[]> {
   const { data, error } = await client().rpc('get_pact_payment_status', { p_pact_id: pactId })
   if (error) throw error
   if (!Array.isArray(data)) throw new Error('Payment service returned an invalid response.')
-  return data as PactPaymentStatusRow[]
+  const rows = data as PactPaymentStatusRow[]
+  if (!rows.length) return rows
+  const chain = await invokeWallet<OnChainStatus>('pact_status', { pactId }).catch(() => null)
+  if (!chain || chain.state === 'none') return rows
+  const state = chain.state
+  const byUser = new Map(chain.members.map((m) => [m.userId, m]))
+  return rows.map((row) => {
+    const member = row.user_id ? byUser.get(row.user_id) : undefined
+    return {
+      ...row,
+      payment_status: state,
+      wallet_address: member?.address ?? row.wallet_address,
+      share_status: member?.paid ? 'paid' : row.share_status,
+    }
+  })
 }
 
 export async function createPactFundingPlan(input: { pactId: string; shareUsdc: string; deadline: string; payeeAddress: string }): Promise<{ paymentId: string; sharesNeeded: number }> {
@@ -37,7 +58,7 @@ export function isPaymentBackendUnavailable(error: unknown): boolean {
   return value?.code === '42883' || value?.code === '42P01' || value?.code === 'PGRST202' || /function .*get_pact_payment_status|relation .*pact_(payments|shares)/i.test(value?.message || '')
 }
 
-async function invokeWallet<T>(action: 'status' | 'start' | 'confirm' | 'transfer' | 'transfer_status' | 'reset_pin', params: Record<string, unknown> = {}): Promise<T> {
+async function invokeWallet<T>(action: 'status' | 'start' | 'confirm' | 'transfer' | 'transfer_status' | 'reset_pin' | 'pact_status', params: Record<string, unknown> = {}): Promise<T> {
   const { data, error } = await client().functions.invoke('wallet', { body: { action, ...params } })
   if (error) throw new Error(await walletErrorMessage(error))
   if (!data || typeof data !== 'object') throw new Error('Wallet service returned an invalid response.')
