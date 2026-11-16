@@ -6,7 +6,7 @@ Where everyone is at. Each person has their own checklist, and the group checkli
 
 | Person | Role | Status | Done | File |
 |---|---|---|---|---|
-| Rory | Agent and blockchain | In progress | 6/23 | [rory.md](rory.md) |
+| Rory | Agent and blockchain | In progress | 9/25 | [rory.md](rory.md) |
 | Nihar | Frontend | Not started | 0/9 | [nihar.md](nihar.md) |
 | Vamsi | Backend (Supabase) | Not started | 0/6 | [vamsi.md](vamsi.md) |
 | Dimple | Onchain data (QuickNode) | Not started | 0/5 | [dimple.md](dimple.md) |
@@ -28,7 +28,7 @@ Day 1, Friday Nov 13. Tick one only when the whole team has seen it work.
 
 ## Blockers
 
-- Rory: waiting on Nihar's Connect wallet screen to test wallets and payments in the app
+- None right now
 
 ## How to update
 
