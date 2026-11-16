@@ -37,11 +37,19 @@ export function isPaymentBackendUnavailable(error: unknown): boolean {
   return value?.code === '42883' || value?.code === '42P01' || value?.code === 'PGRST202' || /function .*get_pact_payment_status|relation .*pact_(payments|shares)/i.test(value?.message || '')
 }
 
-async function invokeWallet<T>(action: 'status' | 'start' | 'confirm', challengeId?: string): Promise<T> {
-  const { data, error } = await client().functions.invoke('wallet', { body: challengeId ? { action, challengeId } : { action } })
+async function invokeWallet<T>(action: 'status' | 'start' | 'confirm' | 'transfer', params: Record<string, unknown> = {}): Promise<T> {
+  const { data, error } = await client().functions.invoke('wallet', { body: { action, ...params } })
   if (error) throw error
   if (!data || typeof data !== 'object') throw new Error('Wallet service returned an invalid response.')
   return data as T
+}
+
+export async function transferPactMoney(to: string, amount: string): Promise<void> {
+  if (!/^0x[0-9a-fA-F]{40}$/.test(to)) throw new Error('Enter a valid Arc wallet address.')
+  if (!/^\d+(\.\d{1,6})?$/.test(amount) || Number(amount) <= 0) throw new Error('Enter a positive USDC amount with up to 6 decimals.')
+  const challenge = await invokeWallet<WalletChallengeResponse>('transfer', { to, amount })
+  if (challenge.status !== 'challenge') throw new Error('The transfer did not return a Circle PIN challenge.')
+  await runCircleChallenge(challenge)
 }
 
 function toWallet(data: Extract<WalletStatusResponse, { status: 'ready' }>): PactMoneyWallet {
@@ -68,20 +76,24 @@ function executeChallenge(sdk: CircleSdk, challengeId: string): Promise<void> {
   })
 }
 
+async function runCircleChallenge(challenge: WalletChallengeResponse) {
+  const { W3SSdk } = await import('@circle-fin/w3s-pw-web-sdk')
+  const sdk = new W3SSdk({ appSettings: { appId: challenge.appId } })
+  await sdk.getDeviceId()
+  sdk.setAuthentication({ userToken: challenge.userToken, encryptionKey: challenge.encryptionKey })
+  await executeChallenge(sdk, challenge.challengeId)
+}
+
 export async function createPactMoneyWallet(): Promise<PactMoneyWallet> {
   if (!pactMoneyWalletEnabled) throw new Error('Wallet creation is waiting for backend deployment and PIN-flow verification.')
   const challenge = await invokeWallet<WalletStartResponse>('start')
   if (challenge.status === 'ready') return toWallet(challenge)
   if (challenge.status !== 'challenge') throw new Error('Wallet setup did not return a Circle challenge.')
 
-  // These short-lived values stay in this function's memory and are passed directly to Circle's SDK.
-  const { W3SSdk } = await import('@circle-fin/w3s-pw-web-sdk')
-  const sdk = new W3SSdk({ appSettings: { appId: challenge.appId } })
-  await sdk.getDeviceId()
-  sdk.setAuthentication({ userToken: challenge.userToken, encryptionKey: challenge.encryptionKey })
-  await executeChallenge(sdk, challenge.challengeId)
+  // These short-lived values stay in memory and are passed directly to Circle's SDK.
+  await runCircleChallenge(challenge)
 
-  const confirmed = await invokeWallet<WalletStatusResponse>('confirm', challenge.challengeId)
+  const confirmed = await invokeWallet<WalletStatusResponse>('confirm', { challengeId: challenge.challengeId })
   if (confirmed.status !== 'ready') throw new Error('error' in confirmed ? confirmed.error || 'Wallet setup is still pending confirmation.' : 'Wallet setup returned no wallet.')
   return toWallet(confirmed)
 }
