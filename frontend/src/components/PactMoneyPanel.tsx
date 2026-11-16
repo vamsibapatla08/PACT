@@ -2,7 +2,7 @@ import { useState, type FormEvent } from 'react'
 import type { PactMoneyStatus, PactMoneyTransfer, PactMoneyWallet, PactPaymentStatusRow } from '../types/pactMoney'
 import type { PactAction } from '../lib/pactMoneyService'
 
-export type PactMoneyRecipient = { userId: string; name: string }
+export type PactMoneyRecipient = { userId: string; name: string; hasWallet?: boolean }
 
 const ARC_EXPLORER = 'https://explorer.testnet.arc.io/tx/'
 const AMOUNT = /^\d+(\.\d{1,6})?$/
@@ -131,7 +131,7 @@ export function PactMoneyPanel({ pactName, memberCount = 0, status = 'unavailabl
     {error ? <p className="form-error" role="alert">{error}</p> : null}
     {canResetPin ? <div className="money-pin-reset"><button className="outline-button" type="button" onClick={() => { void handleResetPin() }} disabled={resetting || sending}>{resetting ? 'Resetting PIN…' : 'Reset PIN'}</button>{resetResult ? <p className={resetResult.ok ? 'money-send-result is-confirmed' : 'form-error money-send-result'} role={resetResult.ok ? 'status' : 'alert'}>{resetResult.text}</p> : <span>Forgot your PIN? Answer your security questions to set a new one.</span>}</div> : null}
     {hasWallet && onSend ? <form className="money-send-card" onSubmit={handleSend}>
-      <div><span className="money-label">SEND USDC TO</span><select value={toUserId} onChange={(e) => { setToUserId(e.target.value); setRequestId(crypto.randomUUID()) }} disabled={sending || recipients.length === 0}><option value="">{recipients.length ? 'Choose a member' : 'No one else in this Pact yet'}</option>{recipients.map((r) => <option key={r.userId} value={r.userId}>{r.name}</option>)}</select></div>
+      <div><span className="money-label">SEND USDC TO</span><select value={toUserId} onChange={(e) => { setToUserId(e.target.value); setRequestId(crypto.randomUUID()) }} disabled={sending || recipients.length === 0}><option value="">{recipients.length ? 'Choose a member' : 'No one else in this Pact yet'}</option>{recipients.map((r) => <option key={r.userId} value={r.userId} disabled={r.hasWallet === false}>{r.name}{r.hasWallet === false ? ' · wallet not connected' : ''}</option>)}</select></div>
       <div><span className="money-label">AMOUNT (USDC)</span><input inputMode="decimal" placeholder="1.00" value={amount} onChange={(e) => { setAmount(e.target.value.trim()); setRequestId(crypto.randomUUID()) }} disabled={sending} /></div>
       <button className="gold-button money-create-button" type="submit" disabled={sending || recipients.length === 0}>{sending ? 'Sending…' : 'Send USDC'}</button>
       {sendError ? <p className="form-error money-send-result" role="alert">{sendError}</p> : null}

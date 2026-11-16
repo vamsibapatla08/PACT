@@ -637,6 +637,7 @@ Deno.serve(async (req) => {
       const saved = await savedWallet(user.id)
       return saved ? ready(saved) : reply(200, { status: 'none' })
     }
+    if (action === 'pact_member_wallets') return await pactMemberWallets(user.id, token!, body.pactId)
     if (action === 'start') return await start(user.id)
     if (action === 'confirm') return await confirm(user.id, body.challengeId)
     if (action === 'transfer') {
@@ -648,7 +649,6 @@ Deno.serve(async (req) => {
     if (action === 'release' || action === 'cancel') return await closePact(user.id, token!, body.pactId, action)
     if (action === 'claim_refund') return await claimRefund(user.id, token!, body.pactId)
     if (action === 'pact_status') return await pactStatus(user.id, token!, body.pactId)
-    if (action === 'pact_member_wallets') return await pactMemberWallets(user.id, token!, body.pactId)
     if (action === 'challenge_status') return await challengeStatus(user.id, body.challengeId)
     if (action === 'reset_pin') return await resetPin(user.id)
     return reply(400, { error: 'action must be status, start, confirm, transfer, transfer_status, pay_share, create_pact, release, cancel, claim_refund, pact_status, pact_member_wallets, challenge_status or reset_pin' })
