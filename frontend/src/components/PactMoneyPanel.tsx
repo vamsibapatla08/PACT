@@ -2,7 +2,30 @@ import { useState, type FormEvent } from 'react'
 import type { PactMoneyStatus, PactMoneyTransfer, PactMoneyWallet, PactPaymentStatusRow } from '../types/pactMoney'
 import type { PactAction } from '../lib/pactMoneyService'
 
-export type PactMoneyRecipient = { userId: string; name: string; hasWallet?: boolean }
+export type PactMoneyRecipient = { userId: string; name: string; hasWallet?: boolean; address?: string }
+
+const OTHER_PAYEE = 'other'
+const pad = (n: number) => String(n).padStart(2, '0')
+const shortAddress = (a: string) => `${a.slice(0, 6)}…${a.slice(-4)}`
+
+// The server takes deadlines up to 90 days out, so the month list covers this month and the next three.
+function deadlineMonths(now = new Date()) {
+  return Array.from({ length: 4 }, (_, i) => {
+    const d = new Date(now.getFullYear(), now.getMonth() + i, 1)
+    return { value: `${d.getFullYear()}-${pad(d.getMonth() + 1)}`, label: d.toLocaleString(undefined, { month: 'long', year: 'numeric' }) }
+  })
+}
+
+const DEADLINE_TIMES = Array.from({ length: 48 }, (_, i) => {
+  const value = `${pad(Math.floor(i / 2))}:${i % 2 ? '30' : '00'}`
+  return { value, label: new Date(`2000-01-01T${value}`).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }) }
+})
+
+function tomorrow() {
+  const d = new Date()
+  d.setDate(d.getDate() + 1)
+  return { month: `${d.getFullYear()}-${pad(d.getMonth() + 1)}`, day: pad(d.getDate()) }
+}
 
 const ARC_EXPLORER = 'https://explorer.testnet.arc.io/tx/'
 const AMOUNT = /^\d+(\.\d{1,6})?$/
@@ -48,11 +71,24 @@ type Props = {
 
 export function PactMoneyPanel({ pactName, memberCount = 0, status = 'unavailable', wallet = null, error = null, walletEnabled = false, onCreateWallet, onResetPin, recipients = [], onSend, paymentRows = null, isHost = false, onCreateFundingPlan, currentUserId, onPactAction }: Props) {
   const [shareUsdc, setShareUsdc] = useState('')
-  const [deadline, setDeadline] = useState('')
-  const [payeeAddress, setPayeeAddress] = useState('')
+  const [deadlineMonth, setDeadlineMonth] = useState(() => tomorrow().month)
+  const [deadlineDay, setDeadlineDay] = useState(() => tomorrow().day)
+  const [deadlineTime, setDeadlineTime] = useState('19:00')
+  const [payeeChoice, setPayeeChoice] = useState('')
+  const [otherPayee, setOtherPayee] = useState('')
   const [planLoading, setPlanLoading] = useState(false)
   const [planError, setPlanError] = useState<string | null>(null)
   const hasWallet = Boolean(wallet)
+  const [year, month] = deadlineMonth.split('-').map(Number)
+  const daysInMonth = new Date(year, month, 0).getDate()
+  const day = Math.min(Number(deadlineDay), daysInMonth)
+  const deadline = `${deadlineMonth}-${pad(day)}T${deadlineTime}`
+  const payeeOptions = [
+    ...(wallet ? [{ address: wallet.address, label: `Me · ${shortAddress(wallet.address)}` }] : []),
+    ...recipients.filter((r) => r.address).map((r) => ({ address: r.address!, label: `${r.name} · ${shortAddress(r.address!)}` })),
+  ]
+  const payeeValue = payeeChoice || payeeOptions[0]?.address || OTHER_PAYEE
+  const payeeAddress = payeeValue === OTHER_PAYEE ? otherPayee.trim() : payeeValue
   const [toUserId, setToUserId] = useState('')
   const [amount, setAmount] = useState('')
   const [sending, setSending] = useState(false)
@@ -143,7 +179,7 @@ export function PactMoneyPanel({ pactName, memberCount = 0, status = 'unavailabl
       {actions.map((action) => <button key={action} className={action === 'cancel' ? 'outline-button' : 'gold-button money-create-button'} type="button" onClick={() => { void handlePactAction(action) }} disabled={Boolean(acting) || sending}>{acting === action ? 'Waiting for Arc…' : ACTION_LABEL[action](plan.share_usdc)}</button>)}
       {actionResult ? <p className={actionResult.ok ? 'money-send-result is-confirmed' : 'form-error money-send-result'} role={actionResult.ok ? 'status' : 'alert'}>{actionResult.text}{actionResult.txHash ? <> · <a href={ARC_EXPLORER + actionResult.txHash} target="_blank" rel="noreferrer">View on Arc explorer</a></> : null}</p> : null}
     </div> : null}
-    {(!plan || chainState === 'none') && isHost && onCreateFundingPlan ? <form className="money-plan-form" onSubmit={(event) => { event.preventDefault(); setPlanLoading(true); setPlanError(null); void onCreateFundingPlan({ shareUsdc, deadline, payeeAddress }).catch((reason) => setPlanError(reason instanceof Error ? reason.message : 'Funding plan could not be created.')).finally(() => setPlanLoading(false)) }}><p className="money-label">{plan ? 'REPLACE FUNDING PLAN (until it is opened on chain)' : 'CREATE FUNDING PLAN'}</p><input aria-label="Share amount in USDC" inputMode="decimal" placeholder="Share amount in USDC" value={shareUsdc} onChange={(event) => setShareUsdc(event.target.value)} disabled={planLoading} required /><input aria-label="Funding deadline" type="datetime-local" value={deadline} onChange={(event) => setDeadline(event.target.value)} disabled={planLoading} required /><input aria-label="Payee wallet address" placeholder="Payee wallet address" value={payeeAddress} onChange={(event) => setPayeeAddress(event.target.value)} disabled={planLoading} required /><button className="gold-button" type="submit" disabled={planLoading || !wallet}>{planLoading ? 'Saving plan…' : plan ? 'Replace funding plan' : 'Create funding plan'}</button>{!wallet ? <span>Connect the host wallet before configuring funding.</span> : null}{planError ? <p className="form-error" role="alert">{planError}</p> : null}</form> : null}
+    {(!plan || chainState === 'none') && isHost && onCreateFundingPlan ? <form className="money-plan-form" onSubmit={(event) => { event.preventDefault(); setPlanLoading(true); setPlanError(null); void onCreateFundingPlan({ shareUsdc, deadline, payeeAddress }).catch((reason) => setPlanError(reason instanceof Error ? reason.message : 'Funding plan could not be created.')).finally(() => setPlanLoading(false)) }}><p className="money-label">{plan ? 'REPLACE FUNDING PLAN (until it is opened on chain)' : 'CREATE FUNDING PLAN'}</p><span className="money-label">SHARE PER PERSON (USDC)</span><input aria-label="Share amount in USDC" inputMode="decimal" placeholder="0.01" value={shareUsdc} onChange={(event) => setShareUsdc(event.target.value)} disabled={planLoading} required /><span className="money-label">DEADLINE</span><div className="money-plan-row"><select aria-label="Deadline month" value={deadlineMonth} onChange={(event) => setDeadlineMonth(event.target.value)} disabled={planLoading}>{deadlineMonths().map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}</select><select aria-label="Deadline day" value={pad(day)} onChange={(event) => setDeadlineDay(event.target.value)} disabled={planLoading}>{Array.from({ length: daysInMonth }, (_, i) => <option key={i} value={pad(i + 1)}>{i + 1}</option>)}</select><select aria-label="Deadline time" value={deadlineTime} onChange={(event) => setDeadlineTime(event.target.value)} disabled={planLoading}>{DEADLINE_TIMES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}</select></div><span className="money-label">PAID TO</span><select aria-label="Payee" value={payeeValue} onChange={(event) => setPayeeChoice(event.target.value)} disabled={planLoading}>{payeeOptions.map((o) => <option key={o.address} value={o.address}>{o.label}</option>)}<option value={OTHER_PAYEE}>Another wallet address…</option></select>{payeeValue === OTHER_PAYEE ? <input aria-label="Payee wallet address" placeholder="0x… wallet address" value={otherPayee} onChange={(event) => setOtherPayee(event.target.value)} disabled={planLoading} required /> : null}<button className="gold-button" type="submit" disabled={planLoading || !wallet}>{planLoading ? 'Saving plan…' : plan ? 'Replace funding plan' : 'Create funding plan'}</button>{!wallet ? <span>Connect the host wallet before configuring funding.</span> : null}{planError ? <p className="form-error" role="alert">{planError}</p> : null}</form> : null}
     <div className="money-sections"><div><p className="money-label">FUNDING GOAL</p><strong>{plan ? `${fundingGoal?.toFixed(2)} USDC` : 'Not configured'}</strong><span>{plan ? `Arc Testnet · ${plan.payment_status === 'none' ? 'not opened on chain yet' : plan.payment_status}` : 'No verified PactSplit funding target is available yet.'}</span></div><div><p className="money-label">MEMBER SHARES</p><strong>{plan ? `${plan.share_usdc} USDC each` : `${memberCount} eligible member${memberCount === 1 ? '' : 's'}`}</strong><span>{plan ? `${totalShares} share${totalShares === 1 ? '' : 's'} · ${paidCount} verified paid` : 'Share amounts will appear after the payment plan is created.'}</span></div><div><p className="money-label">PAYMENT STATUS</p><strong>{plan ? `${paidCount}/${totalShares} paid` : 'Awaiting verification'}</strong><span>{plan ? 'Only persisted verified payment events count.' : 'Wallet balance is not treated as contribution proof.'}</span></div><div><p className="money-label">RECEIPTS</p><strong>{plan && receiptCount ? `${receiptCount} available` : 'Unavailable'}</strong><span>{plan && receiptCount ? 'Transaction references are available for verified shares.' : 'Receipts require persisted, verified transaction events.'}</span></div></div>
     <small className="money-note">{plan ? 'Funding data is read from the authorized Pact payment status service.' : 'PactSplit payment data is unavailable until the payment migration and verified event path are deployed.'}</small>
   </section>
