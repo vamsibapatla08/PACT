@@ -2,7 +2,8 @@
 // It reads pacts, adds itinerary items, posts to the chat and puts a booking up for approval. It never moves
 // money: paying a share always needs the person's own PIN in the Pact app.
 //
-// Auth: a personal token made in Pact (Connect Grok), sent as "Authorization: Bearer pact_…" or ?key=pact_…. The token is
+// Auth: "Continue with Google" (OAuth, see the bottom of this file) gives the client a pact_ token on its own. A token made
+// by hand in Pact (Connect Grok) works too, sent as "Authorization: Bearer pact_…" or ?key=pact_…. The token is
 // looked up by its hash, then the server signs in as that person, so every row level security rule and Pact
 // function behaves exactly as it does in the app.
 import { createClient, type SupabaseClient } from 'npm:@supabase/supabase-js@2'
@@ -14,7 +15,8 @@ const admin = createClient(SUPABASE_URL, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY
 const cors = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, content-type, mcp-protocol-version, mcp-session-id',
-  'Access-Control-Allow-Methods': 'POST, OPTIONS',
+  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+  'Access-Control-Expose-Headers': 'WWW-Authenticate',
 }
 const PROTOCOL = '2025-06-18'
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -331,11 +333,124 @@ async function handle(msg: Json, me: Me) {
   }
 }
 
+// ---- "Continue with Google": OAuth 2.1 with PKCE and dynamic client registration, as the MCP spec asks for.
+// The client registers, sends the person to /authorize, which hands over to the Pact app. They sign in with Google
+// and approve there, and the app sends them back with a one-time code. /token swaps the code for a pact_ token.
+
+const BASE = `${SUPABASE_URL.replace(/\/$/, '')}/functions/v1/pact-mcp`
+const APP_URL = (Deno.env.get('PACT_APP_URL') ?? 'https://pact-chi-nine.vercel.app').replace(/\/$/, '')
+
+const authServer = {
+  issuer: BASE,
+  authorization_endpoint: `${BASE}/authorize`,
+  token_endpoint: `${BASE}/token`,
+  registration_endpoint: `${BASE}/register`,
+  response_types_supported: ['code'],
+  grant_types_supported: ['authorization_code'],
+  code_challenge_methods_supported: ['S256'],
+  token_endpoint_auth_methods_supported: ['none'],
+  scopes_supported: ['pact'],
+}
+const resource = { resource: BASE, authorization_servers: [BASE], scopes_supported: ['pact'], bearer_methods_supported: ['header'] }
+
+const oauthError = (error: string, description: string, status = 400) => reply({ error, error_description: description }, status, { 'Cache-Control': 'no-store' })
+const page = (message: string, status = 400) => new Response(`<!doctype html><meta charset="utf-8"><title>Pact</title><p style="font:16px system-ui;margin:40px">${message}</p>`, { status, headers: { 'Content-Type': 'text/html; charset=utf-8' } })
+const hex = (bytes: Uint8Array) => [...bytes].map((b) => b.toString(16).padStart(2, '0')).join('')
+
+/** Redirects may go to https anywhere, or http on this computer for desktop and CLI clients. */
+function okRedirect(uri: unknown): uri is string {
+  if (typeof uri !== 'string' || uri.length > 500) return false
+  try {
+    const u = new URL(uri)
+    if (u.hash) return false
+    return u.protocol === 'https:' || (u.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(u.hostname))
+  } catch { return false }
+}
+
+async function register(request: Request) {
+  let body: Json
+  try { body = await request.json() } catch { return oauthError('invalid_client_metadata', 'Send JSON.') }
+  const uris = Array.isArray(body.redirect_uris) ? body.redirect_uris : []
+  if (!uris.length || uris.length > 10 || !uris.every(okRedirect)) return oauthError('invalid_redirect_uri', 'redirect_uris must be https links (or http on localhost).')
+  const clientName = text(body.client_name, 80) || 'Grok'
+  const clientId = `pactc_${hex(crypto.getRandomValues(new Uint8Array(16)))}`
+  const { error } = await admin.from('pact_mcp_oauth_clients').insert({ client_id: clientId, client_name: clientName, redirect_uris: uris })
+  if (error) { console.error('[pact-mcp] register', error); return oauthError('server_error', "Couldn't register.", 500) }
+  return reply({
+    client_id: clientId, client_id_issued_at: Math.floor(Date.now() / 1000), client_name: clientName, redirect_uris: uris,
+    grant_types: ['authorization_code'], response_types: ['code'], token_endpoint_auth_method: 'none',
+  }, 201)
+}
+
+async function authorize(url: URL) {
+  const q = url.searchParams
+  const { data: client } = await admin.from('pact_mcp_oauth_clients').select('client_id, redirect_uris').eq('client_id', q.get('client_id') ?? '').maybeSingle()
+  if (!client) return page("This app isn't registered with Pact. Try connecting again.")
+  const redirect = q.get('redirect_uri') ?? (client.redirect_uris.length === 1 ? client.redirect_uris[0] : '')
+  if (!client.redirect_uris.includes(redirect)) return page("This app's return link doesn't match what it registered. Try connecting again.")
+  const back = (error: string, description: string) => {
+    const to = new URL(redirect)
+    to.searchParams.set('error', error)
+    to.searchParams.set('error_description', description)
+    if (q.get('state')) to.searchParams.set('state', q.get('state')!)
+    return Response.redirect(to.toString(), 302)
+  }
+  if (q.get('response_type') !== 'code') return back('unsupported_response_type', 'Only response_type=code is supported.')
+  const challenge = q.get('code_challenge') ?? ''
+  if (q.get('code_challenge_method') !== 'S256' || !/^[A-Za-z0-9_-]{43}$/.test(challenge)) return back('invalid_request', 'PKCE with S256 is required.')
+  const { data: req, error } = await admin.from('pact_mcp_oauth_requests')
+    .insert({ client_id: client.client_id, redirect_uri: redirect, state: q.get('state')?.slice(0, 500) ?? null, code_challenge: challenge })
+    .select('request_id').single()
+  if (error || !req) { console.error('[pact-mcp] authorize', error); return back('server_error', "Pact couldn't start the sign-in.") }
+  return Response.redirect(`${APP_URL}/connect/authorize?request=${req.request_id}`, 302)
+}
+
+async function token(request: Request) {
+  const raw = await request.text()
+  const type = request.headers.get('Content-Type') ?? ''
+  let form: URLSearchParams
+  try { form = type.includes('json') ? new URLSearchParams(JSON.parse(raw) as Record<string, string>) : new URLSearchParams(raw) } catch { return oauthError('invalid_request', 'Send the form as application/x-www-form-urlencoded.') }
+  if (form.get('grant_type') !== 'authorization_code') return oauthError('unsupported_grant_type', 'Only authorization_code is supported.')
+  const code = form.get('code') ?? ''
+  const verifier = form.get('code_verifier') ?? ''
+  if (!/^[0-9a-f]{64}$/.test(code)) return oauthError('invalid_grant', 'That code is not valid.')
+  if (!/^[A-Za-z0-9._~-]{43,128}$/.test(verifier)) return oauthError('invalid_request', 'code_verifier is required.')
+  // Spend the code first, so the same code can never be swapped twice.
+  const { data: req } = await admin.from('pact_mcp_oauth_requests')
+    .update({ used_at: new Date().toISOString() })
+    .eq('code_hash', await sha256(code)).is('used_at', null).gt('expires_at', new Date().toISOString())
+    .select('client_id, redirect_uri, code_challenge, user_id').maybeSingle()
+  if (!req?.user_id) return oauthError('invalid_grant', 'That code is expired or already used.')
+  const basic = request.headers.get('Authorization')?.match(/^Basic\s+(.+)$/i)?.[1]
+  const clientId = form.get('client_id') ?? (basic ? atob(basic).split(':')[0] : '')
+  if (clientId !== req.client_id) return oauthError('invalid_grant', 'That code belongs to another app.')
+  if ((form.get('redirect_uri') ?? req.redirect_uri) !== req.redirect_uri) return oauthError('invalid_grant', 'redirect_uri does not match.')
+  const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier)))
+  const challenge = btoa(String.fromCharCode(...digest)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+  if (challenge !== req.code_challenge) return oauthError('invalid_grant', 'code_verifier does not match.')
+  const { data: client } = await admin.from('pact_mcp_oauth_clients').select('client_name').eq('client_id', req.client_id).single()
+  const access = `pact_${hex(crypto.getRandomValues(new Uint8Array(32)))}`
+  const { error } = await admin.from('pact_mcp_tokens').insert({
+    user_id: req.user_id, label: (client?.client_name ?? 'Grok').slice(0, 40), token_hash: await sha256(access), token_hint: access.slice(-4),
+  })
+  if (error) { console.error('[pact-mcp] token', error); return oauthError('server_error', "Couldn't make the token.", 500) }
+  return reply({ access_token: access, token_type: 'Bearer', scope: 'pact' }, 200, { 'Cache-Control': 'no-store', Pragma: 'no-cache' })
+}
+
 Deno.serve(async (request) => {
   if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: cors })
+  const url = new URL(request.url)
+  // Everything after the function name: "", "/token", "/.well-known/…". Works for /pact-mcp/… and /functions/v1/pact-mcp/….
+  const route = url.pathname.replace(/^.*?\/pact-mcp/, '').replace(/\/$/, '')
+  if (request.method === 'GET' && route.startsWith('/.well-known/oauth-protected-resource')) return reply(resource)
+  if (request.method === 'GET' && (route.startsWith('/.well-known/oauth-authorization-server') || route.startsWith('/.well-known/openid-configuration'))) return reply(authServer)
+  if (request.method === 'GET' && route === '/authorize') return authorize(url)
+  if (request.method === 'POST' && route === '/register') return register(request)
+  if (request.method === 'POST' && route === '/token') return token(request)
+  if (route !== '') return reply({ error: 'Not found' }, 404)
   if (request.method !== 'POST') return reply({ error: 'Pact MCP takes POST requests (Streamable HTTP).' }, 405, { Allow: 'POST, OPTIONS' })
   const me = await signIn(request)
-  if (!me) return reply({ jsonrpc: '2.0', id: null, error: { code: -32001, message: 'Make a token in Pact (Connect Grok) and send it as: Authorization: Bearer pact_…' } }, 401, { 'WWW-Authenticate': 'Bearer realm="pact"' })
+  if (!me) return reply({ jsonrpc: '2.0', id: null, error: { code: -32001, message: 'Connect with Google, or make a token in Pact (Connect Grok) and send it as: Authorization: Bearer pact_…' } }, 401, { 'WWW-Authenticate': `Bearer realm="pact", resource_metadata="${BASE}/.well-known/oauth-protected-resource"` })
   let body: unknown
   try { body = await request.json() } catch { return reply({ jsonrpc: '2.0', id: null, error: { code: -32700, message: 'Parse error' } }, 400) }
   if (Array.isArray(body)) {
