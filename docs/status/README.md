@@ -6,7 +6,7 @@ Where everyone is at. Each person has their own checklist, and the group checkli
 
 | Person | Role | Status | Done | File |
 |---|---|---|---|---|
-| Rory | Agent, blockchain and QuickNode | In progress | 25/35 | [rory.md](rory.md) |
+| Rory | Agent, blockchain and QuickNode | Blocked | 41/52 | [rory.md](rory.md) |
 | Nihar | Frontend | Not started | 0/9 | [nihar.md](nihar.md) |
 | Vamsi | Backend (Supabase) | Not started | 0/6 | [vamsi.md](vamsi.md) |
 | Dimple | Onchain data (QuickNode) | Not started | 0/5 | [dimple.md](dimple.md) |
@@ -28,7 +28,7 @@ Day 1, Friday Nov 13. Tick one only when the whole team has seen it work.
 
 ## Blockers
 
-- None right now
+- Rory: PactSplit is not deployed on Base Sepolia yet, so pact payments return 502. The deployer wallet has no Base Sepolia ETH for gas. It needs a tiny amount from a Base Sepolia faucet
 
 ## How to update
 

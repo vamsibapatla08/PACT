@@ -1,8 +1,8 @@
 # Rory — Agent and blockchain
 
-- Status: In progress
-- Done: 25/35
-- Updated: 2026-11-16
+- Status: Blocked
+- Done: 41/52
+- Updated: 2026-11-17 15:40
 
 ## Main goal
 
@@ -62,9 +62,39 @@
 - [ ] README section: setup steps, architecture picture, contract address, chain ID 5042002 and the stream filter
 - [ ] Short screen clip of the stream firing for the demo video
 
+### Grok trip tab and splitting (Nov 17)
+
+- [x] Live trip tab per pact: anyone logs an expense (who paid, split with whom), split to the cent
+- [x] People can join an expense later: the tab re-splits and the newcomer pays earlier payers back, paid shares are never rewritten
+- [x] Settle-up shows the fewest paybacks
+- [x] Pay back with USDC or mark "got paid in cash"
+- [x] Wallet payments can be split onto a pact's tab
+- [x] Grok (PactPilot) proposes tab actions that the user approves (migration 20261117210000_pact_tab.sql, pactpilot function)
+
+### Grok connector and web tab (Nov 17)
+
+- [x] Pact MCP server with "Continue with Google": Grok connects with one link, no token to copy (migrations 20261118010000_mcp_oauth.sql and 20261118020000_mcp_service_role_grants.sql, pact-mcp function, frontend/vercel.json)
+- [x] Connector served from the Pact site at pact-chi-nine.vercel.app/mcp
+- [x] Tested end to end: Grok connected and listed Rory's real pacts
+- [x] Grok tab in the web app with one setup prompt to paste into Grok
+- [x] Connection list with Disconnect
+- [x] "What Grok can do" explorer
+
+### Phone view and Pact Money card (Nov 17)
+
+- [x] Phone view: bottom tab bar like the iOS app
+- [x] Wallet card is "Pact Money": brushed metal with a fake chip, never clipped when tilted
+- [x] Card finishes chosen on the Wallet page: Grey (default), Graphite, Titanium, Champagne, Gold, Liquid gold
+
+### Move wallets to Base Sepolia (Nov 17)
+
+- [x] Wallets moved from Arc Testnet to Base Sepolia, with the wallet fix (migration 20261118030000_wallets_service_role_update.sql)
+- [ ] Fund the deployer wallet with Base Sepolia ETH from a faucet
+- [ ] Deploy PactSplit to Base Sepolia and give Dimple the new address
+
 ## Blockers
 
-- None. The app has buttons for every PactSplit action now, and the QuickNode webhook is written. What's left is deploying it and running the live tests
+- Rory: PactSplit is not deployed on Base Sepolia yet, so pact payments return 502. The deploy failed because the deployer wallet has no Base Sepolia ETH for gas. It needs a tiny amount from a Base Sepolia faucet
 
 ## Notes
 
