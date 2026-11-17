@@ -124,7 +124,7 @@ export function PactPage({ id }: { id: string }) {
                   <small className="host"><Icon name="crown" size={12} />Coordinator</small>
                 </span>
               </button>
-              {host.user_id !== me && <NetBalance who={host} me={me} tab={tab} onSettle={(cents) => setSheet({ kind: 'send', to: host.user_id, cents, payback: true })} />}
+              {host.user_id !== me ? <NetBalance who={host} me={me} tab={tab} onSettle={(cents) => setSheet({ kind: 'send', to: host.user_id, cents, payback: true })} /> : <MyBalance me={me} tab={tab} />}
             </div>
           </div>)}
           {/* Everyone else: photo, name (cut with … if long), role under it, then their buttons. Nothing sits beside the name. */}
@@ -135,7 +135,7 @@ export function PactPage({ id }: { id: string }) {
                   <Avatar name={m.name} url={m.avatar_url} size={36} />
                   <span><b>{m.user_id === me ? 'You' : m.name ?? 'Someone'}</b><small>Member</small></span>
                 </button>
-                {m.user_id !== me && <NetBalance who={m} me={me} tab={tab} onSettle={(cents) => setSheet({ kind: 'send', to: m.user_id, cents, payback: true })} />}
+                {m.user_id !== me ? <NetBalance who={m} me={me} tab={tab} onSettle={(cents) => setSheet({ kind: 'send', to: m.user_id, cents, payback: true })} /> : <MyBalance me={me} tab={tab} />}
               </div>
             </div>))}
             {d?.joinRequests.map((r) => (
@@ -191,7 +191,7 @@ export function PactPage({ id }: { id: string }) {
             <button className="l-pill" type="button" onClick={() => setSheet({ kind: 'addItem' })}><Icon name="plus" />Add item</button>
             <button className="l-pill" type="button" disabled={Boolean(grokJob && !grokJob.error)} onClick={() => void runGrok('Grok is summing up the chat…', () => S.askPilot(id, S.summaryQuestion, messages, name))}><Icon name="text" />Summary</button>
             </div>
-            {(step?.kind === 'talk' || step?.kind === 'declined') && <button className="l-book" type="button" disabled={Boolean(grokJob && !grokJob.error)} onClick={() => void runGrok(d?.items.length ? 'Putting your items up to approve…' : 'Grok is reading the chat to write up what to book…', askBook)}><Icon name="sparkles" />Book it</button>}
+            {(step?.kind === 'talk' || step?.kind === 'declined') && <button className="l-book" type="button" disabled={Boolean(grokJob && !grokJob.error)} onClick={() => void runGrok(d?.items.length ? 'Sending it to the group to approve…' : 'Grok is writing up the plan for the group to approve…', askBook)}><Icon name="sparkles" />Send for approval</button>}
           </div>
 
           </>}
@@ -234,6 +234,7 @@ export function PactPage({ id }: { id: string }) {
           onVoted={reloadSide} onAddedToPlan={() => { reloadSide(); void refreshPact(id) }}
           onSeeFindings={() => findingsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
           recs={(d?.recommendations ?? []).slice(0, -1)} onGrok={(rec) => setSheet({ kind: 'summary', rec })} />
+        {d && step && !finished && <WaitingCard d={d} me={me} step={step} hasGrok={hasGrok} working={working} onAct={doStep} />}
         {grokJob && <GrokStatus job={grokJob} onDismiss={() => setGrokJob(null)} />}
         <Composer id={id} />
       </section>
@@ -710,6 +711,39 @@ function GrokBlock({ rec, big, onOpen }: { rec: S.Recommendation; big?: boolean;
 }
 
 /** Grok at work, at the bottom of the chat: thinking, taking longer, or failed with a way to try again. */
+/** Grok's live line at the bottom of the chat: who the pact is waiting on, with their faces. If it's you, your button. */
+function WaitingCard({ d, me, step, hasGrok, working, onAct }: {
+  d: S.PactData; me: string; step: S.Step; hasGrok: boolean; working: string | null; onAct: () => void
+}) {
+  const w = S.waitingOn(d)
+  if (!w || !w.people.length) return null
+  const people = w.people.map((u) => d.members.find((m) => m.user_id === u)).filter((m): m is S.Member => Boolean(m))
+  const names = people.map((m) => (m.user_id === me ? 'you' : S.firstName(m.name)))
+  const list = names.length <= 2 ? names.join(' and ') : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`
+  const doing = {
+    approve: 'to approve the plan',
+    start: 'to set up the split and start collecting',
+    pay: w.amount != null ? `to pay their ${S.dollars(w.amount)} share` : 'to pay their share',
+    release: 'to release the money and book it',
+  }[w.what]
+  const mine = w.people.includes(me)
+  const label = S.stepLabel(step, hasGrok)
+  const pin = w.what === 'pay' || w.what === 'release'
+  return (
+    <div className={`l-waiting${mine ? ' mine' : ''}`} role="status">
+      <span className="l-waiting-grok"><Grok size={15} /></span>
+      <div className="l-waiting-main">
+        <b>Grok</b>
+        <span>Waiting on {list} {doing}.{mine && pin ? ' You confirm it with your PIN.' : ''}</span>
+        <div className="l-waiting-faces">
+          {people.slice(0, 6).map((m) => <Avatar key={m.user_id} name={m.name} url={m.avatar_url} size={26} />)}
+          {mine && label.action && <button className="l-btn l-small" type="button" disabled={Boolean(working)} onClick={onAct}>{label.text}</button>}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function GrokStatus({ job, onDismiss }: { job: { label: string; slow: boolean; error: string | null; retry: () => void }; onDismiss: () => void }) {
   return (
     <div className={job.error ? 'l-grok-status error' : 'l-grok-status'}>
@@ -902,6 +936,13 @@ function NetBalance({ who, me, tab, onSettle }: { who: S.Member; me: string; tab
   const net = theyOwe - iOwe
   if (net < 0) return <button className="l-net owe" type="button" onClick={() => onSettle(-net)} title={`You owe ${S.firstName(who.name)} ${S.cents(net)}. Tap to settle.`}>−{S.cents(net)}</button>
   return <span className={net > 0 ? 'l-net owed' : 'l-net'} title={net > 0 ? `${S.firstName(who.name)} owes you ${S.cents(net)}` : 'Nothing owed either way'}>{net > 0 ? '+' : ''}{S.cents(net)}</span>
+}
+
+/** My own row: where I stand with the whole group on this pact's tab. Green when I'm owed, red when I owe. */
+function MyBalance({ me, tab }: { me: string; tab: S.Tab | null }) {
+  const cents = tab?.members.find((m) => m.user_id === me)?.balance_cents ?? 0
+  const title = cents > 0 ? `The group owes you ${S.cents(cents)}` : cents < 0 ? `You owe the group ${S.cents(cents)}` : "You're square with everyone"
+  return <span className={cents > 0 ? 'l-net owed' : cents < 0 ? 'l-net owe' : 'l-net'} title={title}>{cents > 0 ? '+' : cents < 0 ? '−' : ''}{S.cents(cents)}</span>
 }
 
 /** About this pact, its link, and a way into Settings. */

@@ -164,6 +164,25 @@ const tools = [
     inputSchema: { type: 'object', properties: { pact_id: { type: 'string' } }, required: ['pact_id'], additionalProperties: false },
     annotations: { readOnlyHint: true },
   },
+  {
+    name: 'whats_waiting',
+    title: "What's waiting",
+    description: "Who each pact is waiting on right now: people still to approve the plan, still to pay their share, or the coordinator to set up the split or release the money. Says when it's waiting on me. Leave out pact_id to check every pact. Read only.",
+    inputSchema: { type: 'object', properties: { pact_id: { type: 'string', description: 'One pact, or leave it out for all of them' } }, additionalProperties: false },
+    annotations: { readOnlyHint: true },
+  },
+  {
+    name: 'approve_plan',
+    title: 'Approve the plan',
+    description: "Approve the plan that's up for a vote in a pact, as me. Approving moves no money: paying is a separate step with my PIN in the Pact app. Ask me before calling it.",
+    inputSchema: { type: 'object', properties: { pact_id: { type: 'string' } }, required: ['pact_id'], additionalProperties: false },
+  },
+  {
+    name: 'remind',
+    title: 'Remind the group',
+    description: "Post a short reminder in a pact's chat, as me, naming who it's waiting on and what for (approve, pay, set up or release). Ask me before calling it.",
+    inputSchema: { type: 'object', properties: { pact_id: { type: 'string' } }, required: ['pact_id'], additionalProperties: false },
+  },
 ]
 
 class ToolError extends Error {}
@@ -337,8 +356,80 @@ async function call(name: string, args: Json, me: Me): Promise<{ text: string; d
         data: people,
       }
     }
+    case 'whats_waiting': {
+      const one = text(args.pact_id, 40)
+      let ids: string[]
+      if (one) { await memberOf(db, one); ids = [one] }
+      else {
+        const { data: rows } = await db.from('pact_members').select('pact_id').eq('user_id', me.id).eq('membership_status', 'active')
+        ids = [...new Set((rows ?? []).map((r) => r.pact_id as string))]
+      }
+      const found = (await Promise.all(ids.map((id) => waitingIn(db, id, me)))).filter((w): w is Waiting => Boolean(w))
+      if (!found.length) return { text: one ? 'Nothing is waiting on anyone in this pact right now.' : 'Nothing is waiting on anyone in your pacts right now.', data: [] }
+      const lines = found.map((w) => `• ${w.pact}: ${w.line}${w.mine ? ' (that includes you)' : ''}`)
+      const mine = found.filter((w) => w.mine)
+      const tail = mine.length ? `\nWaiting on you: ${mine.map((w) => `${w.pact} (${w.what === 'approve' ? 'approve the plan' : w.what === 'pay' ? 'pay your share with your PIN in the Pact app' : w.what === 'release' ? 'release the money with your PIN in the Pact app' : 'set up the split in the Pact app'})`).join('; ')}.` : ''
+      return { text: lines.join('\n') + tail, data: found }
+    }
+    case 'approve_plan': {
+      const id = text(args.pact_id, 40)
+      const pact = await memberOf(db, id)
+      const { data: decision } = await db.from('pact_decisions').select('decision_id, status').eq('pact_id', id).eq('status', 'open').order('created_at', { ascending: false }).limit(1).maybeSingle()
+      need(decision, `Nothing is up for approval in ${pact.name} right now.`)
+      // Approving puts you in the split, so you need a wallet first, the same as in the app.
+      const { data: wallet } = await db.from('wallets').select('address').eq('user_id', me.id).maybeSingle()
+      need(wallet, 'Set up your wallet in the Pact app first (it takes your PIN), then approve.')
+      const { error } = await db.rpc('cast_pact_decision_vote', { p_decision_id: decision!.decision_id, p_vote: 'approve' })
+      need(!error, "Your approval didn't save. Try again in the app.")
+      const after = await waitingIn(db, id, me)
+      return { text: `Approved ${pact.name}.${after ? ` Now ${after.line}.` : ''} No money moved: paying is its own step with your PIN in the Pact app.` }
+    }
+    case 'remind': {
+      const id = text(args.pact_id, 40)
+      const pact = await memberOf(db, id)
+      const w = await waitingIn(db, id, me, true)
+      need(w, `${pact.name} isn't waiting on anyone right now.`)
+      const { error } = await db.from('pact_messages').insert({ pact_id: id, body: `Reminder: ${w!.line}.` })
+      need(!error, "Couldn't post the reminder.")
+      return { text: `Posted in ${pact.name}: "Reminder: ${w!.line}."` }
+    }
   }
   throw new ToolError(`Unknown tool: ${name}`)
+}
+
+type Waiting = { pact_id: string; pact: string; what: 'approve' | 'start' | 'pay' | 'release'; people: string[]; mine: boolean; line: string }
+
+/** Who a pact is waiting on: an open vote, then the split and payments, the same order the Pact app uses. */
+async function waitingIn(db: SupabaseClient, pactId: string, me: Me, inChat = false): Promise<Waiting | null> {
+  const [{ data: pact }, { data: members }, { data: decision }, { data: shares }] = await Promise.all([
+    db.from('pacts').select('name').eq('pact_id', pactId).maybeSingle(),
+    db.rpc('list_pact_members', { p_pact_id: pactId }),
+    db.from('pact_decisions').select('decision_id, status').eq('pact_id', pactId).order('created_at', { ascending: false }).limit(1).maybeSingle(),
+    db.rpc('get_pact_payment_status', { p_pact_id: pactId }),
+  ])
+  if (!pact) return null
+  const people = (members ?? []) as { user_id: string; name: string | null; role: string }[]
+  // In the chat the reminder is posted as me, so everyone goes by their first name there, me included.
+  const name = (uid: string) => uid === me.id && !inChat ? 'you' : (people.find((m) => m.user_id === uid)?.name ?? 'someone').split(' ')[0]
+  const list = (ids: string[]) => { const n = ids.map(name); return n.length <= 2 ? n.join(' and ') : `${n.slice(0, -1).join(', ')} and ${n[n.length - 1]}` }
+  const host = people.find((m) => m.role === 'host')?.user_id
+  const make = (what: Waiting['what'], ids: string[], doing: string): Waiting | null =>
+    ids.length ? { pact_id: pactId, pact: pact.name as string, what, people: ids, mine: ids.includes(me.id), line: `waiting on ${list(ids)} ${doing}` } : null
+  const rows = (shares ?? []) as { payment_status: string; share_usdc: number; user_id: string | null; share_status: string | null }[]
+  if (rows.length) {
+    const plan = rows[0]
+    if (plan.payment_status !== 'open') return null
+    const unpaid = rows.filter((r) => r.user_id && r.share_status !== 'paid').map((r) => r.user_id as string)
+    if (unpaid.length) return make('pay', unpaid, `to pay their ${money(Number(plan.share_usdc))} share`)
+    return host ? make('release', [host], 'to release the money and book it') : null
+  }
+  if (decision?.status === 'open') {
+    const { data: votes } = await db.from('pact_decision_votes').select('user_id').eq('decision_id', decision.decision_id)
+    const voted = new Set((votes ?? []).map((v) => v.user_id as string))
+    return make('approve', people.map((m) => m.user_id).filter((u) => !voted.has(u)), 'to approve the plan')
+  }
+  if (decision?.status === 'approved' && host) return make('start', [host], 'to set up the split and start collecting')
+  return null
 }
 
 // ---- JSON-RPC over Streamable HTTP (single requests and batches; no server-sent events needed)
@@ -358,7 +449,7 @@ async function handle(msg: Json, me: Me) {
           protocolVersion: typeof (msg.params as Json)?.protocolVersion === 'string' ? (msg.params as Json).protocolVersion : PROTOCOL,
           capabilities: { tools: { listChanged: false } },
           serverInfo: { name: 'pact', title: 'Pact', version: '1.0.0' },
-          instructions: `You're helping ${me.name} plan group trips in Pact. Read pacts with list_pacts and get_pact. When you find options (hotels, flights, dinners), put them to a vote with start_vote so they show as vote cards; never paste a list of options with post_message. Build the itinerary with add_item, and put it up for approval with propose_booking. You can't pay or move money: everyone pays their own share with their PIN in the Pact app.`,
+          instructions: `You're helping ${me.name} plan group trips in Pact. Read pacts with list_pacts and get_pact. When you find options (hotels, flights, dinners), put them to a vote with start_vote so they show as vote cards; never paste a list of options with post_message. Build the itinerary with add_item, and put it up for approval with propose_booking. Use whats_waiting to see who each pact is waiting on (start there when I ask what's going on); approve_plan approves for me and remind nudges the group, both only after I say yes. You can't pay or move money: everyone pays their own share with their PIN in the Pact app.`,
         },
       }
     case 'ping':

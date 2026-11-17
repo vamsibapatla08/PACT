@@ -157,16 +157,31 @@ const tabs = [
 const tabIcon = (icon: string, size?: number) => (icon === 'grok' ? <Grok size={size} /> : <Icon name={icon} size={size} />)
 
 /** Phones: the tabs move to a glass bar at the bottom with a silver +, like the iOS app. */
+/** What a pact is waiting on you for, in a line. Paying and releasing take your PIN. */
+function needsText(w: S.Waiting) {
+  if (w.what === 'approve') return 'Approve the plan so everyone can pay'
+  if (w.what === 'pay') return `Pay your ${w.amount != null ? S.dollars(w.amount) + ' ' : ''}share with your PIN`
+  if (w.what === 'release') return 'Everyone has paid: release it and book, with your PIN'
+  return 'Everyone approved: set up the split and start collecting'
+}
+
+/** How many pacts are waiting on me, for the dot on the Pacts tab. */
+function useNeedsMe() {
+  const { me, pacts, data } = useApp()
+  return (pacts ?? []).filter((p) => { const w = data[p.pact_id] ? S.waitingOn(data[p.pact_id]) : null; return Boolean(w && w.people.includes(me)) }).length
+}
+
 function BottomBar({ tab }: { tab: string | null }) {
   const { go, newPact, social } = useApp()
   const waiting = social.requests.filter((r) => r.incoming).length + social.invites.length
+  const needs = useNeedsMe()
   return (
     <nav className="l-tabbar" aria-label="Main">
       <div className="l-tabbar-glass">
         {tabs.map((t) => (
           <button key={t.key} type="button" className={tab === t.key ? 'on' : ''} onClick={() => go(t.path)} aria-label={t.label} aria-current={tab === t.key ? 'page' : undefined}>
             {tabIcon(t.icon, 22)}
-            {t.key === 'friends' && waiting > 0 && <i className="l-tabbar-dot" />}
+            {((t.key === 'friends' && waiting > 0) || (t.key === 'pacts' && needs > 0)) && <i className="l-tabbar-dot" />}
           </button>
         ))}
       </div>
@@ -177,18 +192,30 @@ function BottomBar({ tab }: { tab: string | null }) {
 
 function TopBar({ tab }: { tab: string | null }) {
   const { go, profile, newPact, social } = useApp()
+  // The header stays put; side columns sit just under it, so they read its real height into --top-h.
+  const topRef = useRef<HTMLElement>(null)
+  useEffect(() => {
+    const el = topRef.current
+    if (!el) return
+    const set = () => document.documentElement.style.setProperty('--top-h', `${el.offsetHeight}px`)
+    set()
+    const ro = new ResizeObserver(set)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
   const [now, setNow] = useState(new Date())
   const [menu, setMenu] = useState(false)
   useEffect(() => { const t = setInterval(() => setNow(new Date()), 30_000); return () => clearInterval(t) }, [])
   const waiting = social.requests.filter((r) => r.incoming).length + social.invites.length
+  const needs = useNeedsMe()
   return (
-    <header className="l-top">
+    <header className="l-top" ref={topRef}>
       <button className="l-mark" type="button" onClick={() => go('/')} style={{ border: 0, padding: 0, background: 'none' }} aria-label="Home"><img src="/pact-mark.png" alt="" /></button>
       <nav className="l-nav" aria-label="Main">
         {tabs.map((t) => (
           <button key={t.key} type="button" className={tab === t.key ? 'on' : ''} onClick={() => go(t.path)} aria-current={tab === t.key ? 'page' : undefined}>
             {tabIcon(t.icon)}<span>{t.label}</span>
-            {t.key === 'friends' && waiting > 0 && <i style={{ width: 7, height: 7, borderRadius: 9, background: 'var(--bad)', marginLeft: -2 }} />}
+            {((t.key === 'friends' && waiting > 0) || (t.key === 'pacts' && needs > 0)) && <i style={{ width: 7, height: 7, borderRadius: 9, background: 'var(--bad)', marginLeft: -2 }} />}
           </button>
         ))}
       </nav>
@@ -218,6 +245,7 @@ function Home() {
   const owe = pacts.reduce((sum, p) => sum + S.owedIn(data[p.pact_id], me), 0)
   const coming = pacts.reduce((sum, p) => sum + S.collectingIn(data[p.pact_id], me), 0)
   const upcoming = sortByDate(pacts).filter((p) => !isPast(p)).slice(0, 3)
+  const needsMe = pacts.flatMap((p) => { const w = data[p.pact_id] ? S.waitingOn(data[p.pact_id]) : null; return w && w.people.includes(me) ? [{ pact: p, w }] : [] })
   return (
     <main className="l-page">
       <h1 className="l-h1">Hi, {S.firstName(profile?.name)}</h1>
@@ -229,6 +257,19 @@ function Home() {
           <button className="l-link" type="button" onClick={() => go('/wallet')}>{wallet ? 'Wallet' : 'Make your wallet'}</button>
         </div>
       } />
+
+      {needsMe.length > 0 && <>
+        <h2 className="l-h2">Needs you</h2>
+        <div className="l-card l-list">
+          {needsMe.map(({ pact, w }) => (
+            <button className="l-row l-ledger-row" key={pact.pact_id} type="button" onClick={() => go(`/pacts/${pact.pact_id}`)}>
+              <span className="l-waiting-grok"><Grok size={15} /></span>
+              <div className="l-row-main"><b>{pact.name}</b><span>{needsText(w)}</span></div>
+              <span className="l-btn l-small">{w.what === 'approve' ? 'Approve' : w.what === 'pay' ? 'Pay' : w.what === 'release' ? 'Release' : 'Start'}</span>
+            </button>
+          ))}
+        </div>
+      </>}
 
       {social.invites.length > 0 && <>
         <h2 className="l-h2">Asked in</h2>

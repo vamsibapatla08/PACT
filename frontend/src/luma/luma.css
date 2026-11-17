@@ -1207,3 +1207,32 @@ button.l-net { border: 0; background: none; padding: 4px 0; cursor: pointer; }
 .l-vote-check:active { transform: scale(0.92); }
 .l-vote-check.on { color: #0b0b0d; background: var(--silver); box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35); }
 .l-opt-foot .l-vote-check + .l-settle { margin-left: 0; }
+
+/* The header never moves. On a pact, the people column and the chat stay put under it, and only the middle scrolls. */
+:root { --top-h: 86px; }
+.l-top, .l-top:hover { position: sticky; top: 0; z-index: 40;
+  background: linear-gradient(180deg, rgba(11, 11, 13, 0.94), rgba(11, 11, 13, 0.82));
+  backdrop-filter: blur(18px) saturate(1.2); -webkit-backdrop-filter: blur(18px) saturate(1.2); }
+.l-pact-people { position: sticky; top: calc(var(--top-h) + 36px); max-height: calc(100vh - var(--top-h) - 56px); overflow-y: auto; scrollbar-width: none; }
+.l-pact-people::-webkit-scrollbar { display: none; }
+.l-pact-chat.l-chat-wide { position: sticky; top: calc(var(--top-h) + 36px); height: calc(100vh - var(--top-h) - 56px); }
+@media (max-width: 860px) {
+  .l-pact-people { position: static; max-height: none; overflow: visible; }
+  .l-pact-chat.l-chat-wide { position: static; }
+}
+
+/* Grok's "Waiting on" line at the bottom of the chat. */
+.l-waiting { display: flex; gap: 10px; align-items: flex-start; margin-top: 10px; padding: 12px 14px; border-radius: 18px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.09), rgba(255, 255, 255, 0.04)); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08); }
+.l-waiting.mine { box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.28), 0 8px 24px rgba(0, 0, 0, 0.35); }
+.l-waiting-grok { flex: none; width: 30px; height: 30px; border-radius: 999px; display: grid; place-items: center; background: #000; }
+.l-waiting-main { display: grid; gap: 6px; min-width: 0; }
+.l-waiting-main b { font-size: 14px; }
+.l-waiting-main > span { color: var(--dim); font-size: 14.5px; line-height: 1.4; }
+.l-waiting-faces { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.l-waiting-faces .l-btn { margin-left: auto; }
+
+/* The pact chat: a clear "Chat" heading with room under it before the first card. */
+.l-pact-chat .l-chat-head { font-size: 30px; margin: 2px 2px 18px; padding-bottom: 14px; border-bottom: 1px solid var(--line); }
+/* My own balance is a figure, not a button, so it has no underline. */
+span.l-net.owe { text-decoration: none; }

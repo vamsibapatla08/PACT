@@ -171,9 +171,10 @@ const round = (value: number) => Math.round(value * 100) / 100
 
 const chatLimit = 16
 const chatMessageLimit = 600
-// Grok takes 16-19s per answer, so 18s per try timed out about half the time. Edge functions can run 150s.
-const grokBudgetMs = 50_000
-const grokAttemptBudgetMs = 40_000
+// Big write-ups (a long chat, a vote with several options) can take Grok over 40s to start answering. One long try
+// beats two short ones that both get cut off. Supabase lets a function run 150s, so this stays well inside it.
+const grokBudgetMs = 110_000
+const grokAttemptBudgetMs = 100_000
 const defaultQuestion = "Read the chat. Has the group agreed on a plan? " +
   "Check the budget, dates, people and place, and suggest 2 to 3 options."
 
@@ -368,7 +369,7 @@ async function callGrok(apiKey: string, model: string, input: unknown, requestId
   let bodyDurationMs = 0
   for (let attempt = 0; attempt < 2; attempt += 1) {
     const remainingMs = deadline - Date.now()
-    if (remainingMs <= 1000) break
+    if (remainingMs <= 20_000) break // too little time left for Grok to finish, so stop rather than fail again
     try {
       const timeoutMs = Math.min(grokAttemptBudgetMs, remainingMs - 500)
       const fetchStartedAt = performance.now()

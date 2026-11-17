@@ -45,6 +45,18 @@ export const mcpTools: McpTool[] = [
     detail: "Each person's share and whether it's paid, straight from the payments on Arc. Grok can see it but can never pay or move money.",
     ask: "Who still hasn't paid for ACL?",
     result: ['Split: $330 each, open', 'You: paid · Vamsi: paid', 'Nihar: owed · Dimple: owed'] },
+  { name: 'whats_waiting', label: "What's waiting", does: 'Who each pact is waiting on, and if it is you', read: true,
+    detail: 'Grok checks every pact for who still has to approve the plan, who still has to pay, or whether the coordinator has to set up the split or release the money. It tells you when it is waiting on you.',
+    ask: "What's waiting on me?",
+    result: ['Texas Trip: waiting on Nihar to approve the plan', 'Austin Rory: waiting on you to release the money', 'Waiting on you: Austin Rory'] },
+  { name: 'approve_plan', label: 'Approve the plan', does: 'Approves for you, after asking. No money moves',
+    detail: "Grok approves the plan that's up for a vote, as you, once you say yes. Approving moves no money: paying your share is its own step with your PIN in the Pact app.",
+    ask: 'Approve the Texas Trip plan for me.',
+    result: ['Approved Texas Trip', 'Now waiting on Nihar to approve the plan', 'No money moved'] },
+  { name: 'remind', label: 'Remind the group', does: 'A nudge in the chat, naming who it is waiting on',
+    detail: "Grok posts a short reminder in the pact's chat, as you, naming who it's waiting on and what for. It asks you first.",
+    ask: 'Nudge Nihar to approve.',
+    result: ['Posted in Texas Trip:', '"Reminder: waiting on Nihar to approve the plan."'] },
 ]
 
 /** The link for Grok's connector dialog, which only takes a URL: the token rides along as ?key=. */
@@ -69,6 +81,9 @@ Tools on the Pact connector
 - post_message: post a short note in a pact's group chat
 - propose_booking: put the itinerary up for everyone to approve
 - payment_status: see who has paid
+- whats_waiting: who each pact is waiting on (to approve, pay, set up or release), and whether it's me
+- approve_plan: approve a plan for me (no money moves)
+- remind: post a nudge in a pact's chat naming who it's waiting on
 
 How to work
 1. Once I'm connected, start with list_pacts. If it's unclear which pact, ask. Read it with get_pact before changing anything.
@@ -77,9 +92,10 @@ How to work
 4. When the group has picked one, add it with add_item: the right kind, a short title, dates, price_each per person and the link.
 5. Keep the total per person within budget. Say so if it isn't.
 6. When the itinerary is done and I say go, call propose_booking, then post a short note in the chat with post_message.
-7. You can't pay or move money. Everyone approves and pays their own share with their PIN in the Pact app.
+7. When I ask what's going on, or come back after a while, call whats_waiting. If a pact is waiting on me, tell me what to do: approve (you can do it with approve_plan once I say yes), or pay or release in the Pact app with my PIN.
+8. You can't pay or move money. Everyone approves and pays their own share with their PIN in the Pact app.
 
-Ask before create_pact, start_vote, propose_booking or post_message. Keep replies short.`
+Ask before create_pact, start_vote, propose_booking, post_message, approve_plan or remind. Keep replies short.`
 
 export function grokSnippet(token = 'pact_…') {
   return `curl https://api.x.ai/v1/responses \\

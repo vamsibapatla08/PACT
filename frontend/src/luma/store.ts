@@ -17,6 +17,8 @@ export type Recommendation = { recommendation_id: string; summary: string; optio
 export type Decision = {
   decision_id: string; recommendation_id: string | null; question: string; options: string[]; approval_rule: string
   status: string; created_at: string; approvals: number; rejects: number; eligible: number; myVote: string | null
+  /** Everyone's vote so far: user_id -> 'approve' | 'reject'. Pact members can see each other's votes. */
+  votes: Record<string, string>
 }
 export type Chain = {
   state: string; payee?: string | null; sharesPaid: number; sharesNeeded: number; funded: boolean
@@ -125,12 +127,13 @@ export async function loadPlan(id: string, me: string) {
   ])
   const decisions = (rows ?? []) as Decision[]
   const votes = decisions.length
-    ? (await supabase.from('pact_decision_votes').select('decision_id, vote').eq('user_id', me).in('decision_id', decisions.map((d) => d.decision_id))).data ?? []
+    ? (await supabase.from('pact_decision_votes').select('decision_id, user_id, vote').in('decision_id', decisions.map((d) => d.decision_id))).data ?? []
     : []
   for (const d of decisions) {
     const c = (counts ?? []).find((x: { decision_id: string }) => x.decision_id === d.decision_id)
     d.approvals = c?.approve_count ?? 0; d.rejects = c?.reject_count ?? 0; d.eligible = c?.eligible_count ?? 0
-    d.myVote = votes.find((v) => v.decision_id === d.decision_id)?.vote ?? null
+    d.votes = Object.fromEntries(votes.filter((v) => v.decision_id === d.decision_id).map((v) => [v.user_id, v.vote]))
+    d.myVote = d.votes[me] ?? null
   }
   return { recommendations: ((recs ?? []) as Recommendation[]).map((r) => ({ ...r, options: r.options ?? [], costs: r.costs ?? [] })), decisions }
 }
@@ -712,6 +715,27 @@ export async function loadLedger(address: string, pactIds: string[]): Promise<Le
 // ---- Verification: QuickNode watches PactSplit on Arc and records each payment with its transaction.
 // "verified" means QuickNode has confirmed every payment the chain shows (and the release, once released).
 // "onchain" means the chain shows it but QuickNode hasn't confirmed all of it yet.
+
+/** Who the pact is waiting on right now, and for what. Drives Grok's "Waiting on…" card and the Needs you list. */
+export type Waiting = { what: 'approve' | 'start' | 'pay' | 'release'; people: string[]; amount: number | null }
+export function waitingOn(d: PactData): Waiting | null {
+  const host = coordinator(d)?.user_id ?? null
+  const chain = d.chain
+  // Same order as step(): what the chain says first, then the saved split, then the group's approval.
+  if (chain && chain.state !== 'none') {
+    if (chain.state !== 'open') return null
+    if (chain.funded) return host ? { what: 'release', people: [host], amount: Number(chain.total.usdc) || null } : null
+    const unpaid = chain.members.filter((m) => m.address && !m.paid && m.userId).map((m) => m.userId)
+    return unpaid.length ? { what: 'pay', people: unpaid, amount: Number(chain.share.usdc) || null } : null
+  }
+  if (d.plan) return host ? { what: 'start', people: [host], amount: null } : null
+  const b = booking(d)
+  const k = b && consent(d, b)
+  if (!k || k.status === 'rejected') return null
+  if (k.status === 'approved') return host ? { what: 'start', people: [host], amount: null } : null
+  const people = d.members.map((m) => m.user_id).filter((u) => !k.votes?.[u])
+  return people.length ? { what: 'approve', people, amount: null } : null
+}
 
 export type Check = { label: string; userId: string | null; onChain: boolean; quickNode: boolean; txHash: string | null }
 export type Verification = { level: 'verified' | 'onchain' | 'none'; checks: Check[] }
