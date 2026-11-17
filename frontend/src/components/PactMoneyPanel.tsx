@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import type { PactMoneyStatus, PactMoneyTransfer, PactMoneyWallet, PactPaymentStatusRow } from '../types/pactMoney'
 import type { PactAction } from '../lib/pactMoneyService'
+import { PactVerificationError } from '../lib/pactMoneyService'
 
 export type PactMoneyRecipient = { userId: string; name: string; hasWallet?: boolean; address?: string }
 export type PactMoneyMember = { userId: string; name: string }
@@ -70,9 +71,10 @@ type Props = {
   currentUserId?: string
   members?: PactMoneyMember[]
   onPactAction?: (action: PactAction) => Promise<string | null>
+  onRetryVerification?: (eventType: PactVerificationError['eventType'], txHash: string) => Promise<void>
 }
 
-export function PactMoneyPanel({ pactName, memberCount = 0, status = 'unavailable', wallet = null, error = null, paymentStatusError = null, walletEnabled = false, onCreateWallet, onResetPin, recipients = [], onSend, paymentRows = null, isHost = false, onCreateFundingPlan, currentUserId, members = [], onPactAction }: Props) {
+export function PactMoneyPanel({ pactName, memberCount = 0, status = 'unavailable', wallet = null, error = null, paymentStatusError = null, walletEnabled = false, onCreateWallet, onResetPin, recipients = [], onSend, paymentRows = null, isHost = false, onCreateFundingPlan, currentUserId, members = [], onPactAction, onRetryVerification }: Props) {
   const [shareUsdc, setShareUsdc] = useState('')
   const [deadlineMonth, setDeadlineMonth] = useState(() => tomorrow().month)
   const [deadlineDay, setDeadlineDay] = useState(() => tomorrow().day)
@@ -101,7 +103,7 @@ export function PactMoneyPanel({ pactName, memberCount = 0, status = 'unavailabl
   // A new one only after that send finished, or when who or how much changes.
   const [requestId, setRequestId] = useState(() => crypto.randomUUID())
   const [acting, setActing] = useState<PactAction | null>(null)
-  const [actionResult, setActionResult] = useState<{ ok: boolean; pending?: boolean; text: string; txHash?: string | null } | null>(null)
+  const [actionResult, setActionResult] = useState<{ ok: boolean; pending?: boolean; text: string; txHash?: string | null; eventType?: PactVerificationError['eventType'] } | null>(null)
   const [confirmingAction, setConfirmingAction] = useState<PactAction | null>(null)
   const [now, setNow] = useState(() => Date.now())
   const [resetting, setResetting] = useState(false)
@@ -145,7 +147,8 @@ export function PactMoneyPanel({ pactName, memberCount = 0, status = 'unavailabl
       setActionResult({ ok: true, text: ACTION_DONE[action], txHash })
     } catch (reason) {
       const text = reason instanceof Error ? reason.message : 'That did not go through.'
-      setActionResult({ ok: false, pending: /^Approved, but Arc has not confirmed/i.test(text), text })
+      const verification = reason instanceof PactVerificationError
+      setActionResult({ ok: false, pending: verification && reason.pending || /^Approved, but Arc has not confirmed/i.test(text), text, txHash: verification ? reason.txHash : null, eventType: verification ? reason.eventType : undefined })
     } finally { setActing(null) }
   }
 
@@ -200,7 +203,7 @@ export function PactMoneyPanel({ pactName, memberCount = 0, status = 'unavailabl
       {confirmingAction === 'release' ? <div className="money-action-confirm"><strong>You send {(Number(plan.share_usdc) * plan.shares_needed).toFixed(2)} USDC to {shortAddress(plan.payee_address)}.</strong><span>Confirm to continue to the Circle PIN screen.</span><button className="gold-button money-create-button" type="button" onClick={() => { void handlePactAction('release') }} disabled={Boolean(acting) || sending}>Confirm release</button><button className="outline-button" type="button" onClick={() => setConfirmingAction(null)} disabled={Boolean(acting)}>Back</button></div> : null}
       {confirmingAction === 'cancel' ? <div className="money-action-confirm"><strong>{pastDeadline ? 'Deadline passed. Anyone can cancel.' : 'Cancel this Pact before the deadline?'}</strong><span>{pastDeadline ? 'The deadline has passed, so any active member may request cancellation.' : 'Before the deadline, only the host can cancel. The backend will verify this rule.'}</span><button className="gold-button money-create-button" type="button" onClick={() => { void handlePactAction('cancel') }} disabled={Boolean(acting) || sending}>Confirm cancellation</button><button className="outline-button" type="button" onClick={() => setConfirmingAction(null)} disabled={Boolean(acting)}>Back</button></div> : null}
       {confirmingAction === null ? actions.map((action) => <button key={action} className={action === 'cancel' ? 'outline-button' : 'gold-button money-create-button'} type="button" onClick={() => { void handlePactAction(action) }} disabled={Boolean(acting) || sending}>{acting === action ? 'Waiting for Arc…' : ACTION_LABEL[action](plan.share_usdc)}</button>) : null}
-      {actionResult ? <p className={actionResult.ok ? 'money-send-result is-confirmed' : actionResult.pending ? 'money-send-result' : 'form-error money-send-result'} role={actionResult.ok || actionResult.pending ? 'status' : 'alert'}>{actionResult.text}{actionResult.txHash ? <> · <a href={ARC_EXPLORER + actionResult.txHash} target="_blank" rel="noreferrer">View on Arc explorer</a></> : null}</p> : null}
+      {actionResult ? <div className="money-action-result"><p className={actionResult.ok ? 'money-send-result is-confirmed' : actionResult.pending ? 'money-send-result' : 'form-error money-send-result'} role={actionResult.ok || actionResult.pending ? 'status' : 'alert'}>{actionResult.ok ? actionResult.text : actionResult.pending ? actionResult.text : `Verification failed: ${actionResult.text}`}{actionResult.txHash ? <> · <a href={ARC_EXPLORER + actionResult.txHash} target="_blank" rel="noreferrer">View on Arc explorer</a></> : null}</p>{actionResult.pending && actionResult.txHash && actionResult.eventType && onRetryVerification ? <button className="outline-button" type="button" disabled={Boolean(acting)} onClick={() => { const txHash = actionResult.txHash; const eventType = actionResult.eventType; if (!txHash || !eventType) return; setActing('pay_share'); void onRetryVerification(eventType, txHash).then(() => setActionResult({ ok: true, text: 'Payment Verified.', txHash, eventType })).catch((reason) => setActionResult({ ok: false, pending: true, text: reason instanceof Error ? reason.message : 'PACT verification failed.', txHash, eventType })).finally(() => setActing(null)) }}>Retry PACT verification</button> : null}</div> : null}
       {actionResult && !actionResult.ok && /low_balance/i.test(actionResult.text) ? <a className="money-faucet-link" href="https://faucet.circle.com/" target="_blank" rel="noreferrer">Get Arc Testnet USDC from the faucet</a> : null}
     </div> : null}
     {plan && members.length ? <div className="money-member-list"><span className="money-label">MEMBER CONTRIBUTIONS</span>{members.map((member) => { const row = paymentRows?.find((item) => item.user_id === member.userId); const state = row?.share_status === 'paid' ? 'Paid' : row?.share_status === 'refunded' ? 'Refunded' : "Didn't pay"; return <div className="money-member-row" key={member.userId}><span>{member.name}</span><strong>{state}</strong>{state === 'Refunded' && row?.amount_usdc ? <small>Refunded {row.amount_usdc} USDC.</small> : state === "Didn't pay" ? <small>Nothing to refund.</small> : null}</div> })}</div> : null}
