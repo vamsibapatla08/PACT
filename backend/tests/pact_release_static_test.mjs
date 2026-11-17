@@ -3,8 +3,8 @@ import fs from 'node:fs'
 
 const root = new URL('..', import.meta.url).pathname
 const read = (path) => fs.readFileSync(new URL(path, import.meta.url), 'utf8')
-const rebalance = read('../supabase/migrations/20261117133500_pact_payment_obligations.sql')
-const action = read('../supabase/migrations/20261117140000_pactpilot_action_engine.sql')
+const rebalance = read('../supabase/migrations/20261117190700_pact_payment_obligations.sql')
+const action = read('../supabase/migrations/20261117190800_pactpilot_action_engine.sql')
 const worker = read('../supabase/functions/pact-email-worker/index.ts')
 const tools = read('../supabase/functions/pactpilot/tools.ts')
 

@@ -1,0 +1,7 @@
+# Made by xcodegen and CocoaPods, so each person regenerates them: see README.md
+build/
+Pods/
+Pact_App.xcodeproj/
+Pact_App.xcworkspace/
+xcuserdata/
+DerivedData/

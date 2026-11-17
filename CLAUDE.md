@@ -8,6 +8,7 @@ Context for any AI agent working in this repo, and the team-only notes. Shared w
 | Folder | What lives there |
 |---|---|
 | `frontend/` | The app people use. |
+| `ios/` | The iPhone app in SwiftUI, on the same live Supabase. Needs a Mac to run, see `ios/README.md`. |
 | `backend/` | Server and agent code. |
 | `backend/supabase/` | The database as SQL. `migrations/` run in order, `seed.sql` is demo data for local only. |
 | `docs/` | The team canvas, context files and notes about the project. |

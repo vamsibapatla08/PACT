@@ -16,12 +16,12 @@ Run `pactpilot_preflight.sql` in the SQL Editor. A missing-object result is info
 
 Do not rerun manually installed booking migrations blindly. After preflight, execute only the missing files in this order:
 
-1. `20261117133000_pact_rebalance.sql`
-2. `20261117133500_pact_payment_obligations.sql`
-3. `20261117140000_pactpilot_action_engine.sql`
-4. `20261117143000_pactchat_action_cards.sql`
-5. `20261117150000_pact_email_automation.sql`
-6. `20261117151000_pact_action_card_sync.sql`
+1. `20261117190600_pact_rebalance.sql`
+2. `20261117190700_pact_payment_obligations.sql`
+3. `20261117190800_pactpilot_action_engine.sql`
+4. `20261117190900_pactchat_action_cards.sql`
+5. `20261117191000_pact_email_automation.sql`
+6. `20261117191100_pact_action_card_sync.sql`
 
 Each file is a self-contained transaction. Execute one file at a time and run `pactpilot_postflight.sql` after each successful batch. Do not continue after an error.
 
