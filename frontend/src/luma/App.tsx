@@ -3,8 +3,11 @@ import type { Session } from '@supabase/supabase-js'
 import * as S from './store'
 import { Avatar, Busy, Cover, Icon, Modal, Stack, Switch, VerifiedBadge } from './ui'
 import { PactPage } from './PactPage'
+import { AddExpense } from './TabCard'
 import { BankCard } from './BankCard'
 import { LiquidGold } from './LiquidGold'
+import { ConnectPage } from './Mcp'
+import { Landing } from './Landing'
 import './luma.css'
 
 type Profile = { name: string | null; email: string | null; avatar_url: string | null }
@@ -40,7 +43,7 @@ export function LumaApp() {
     return () => data.subscription.unsubscribe()
   }, [])
   if (session === undefined) return <div className="l-app"><div className="l-center"><img src="/pact-mark.png" alt="Pact" width={64} /><span className="l-spin" /></div></div>
-  if (!session) return <SignIn />
+  if (!session) return <Landing />
   return <Signed me={session.user.id} />
 }
 
@@ -121,7 +124,7 @@ function Signed({ me }: { me: string }) {
 
   const app: App = { me, profile, pacts, data, wallet, walletLoaded, social, friends, name, avatar, go, refresh, refreshPact, refreshSocial, setWallet, newPact: () => setCreating(true) }
   const parts = path.split('/').filter(Boolean)
-  const tab = parts[0] === 'pacts' && parts[1] ? null : ['pacts', 'friends', 'wallet'].includes(parts[0]) ? parts[0] : 'home'
+  const tab = parts[0] === 'pacts' && parts[1] ? null : ['pacts', 'friends', 'wallet', 'connect'].includes(parts[0]) ? parts[0] : 'home'
 
   return (
     <Ctx.Provider value={app}>
@@ -132,6 +135,7 @@ function Signed({ me }: { me: string }) {
           : tab === 'pacts' ? <Timeline />
           : tab === 'friends' ? <Friends />
           : tab === 'wallet' ? <WalletPage />
+          : tab === 'connect' ? <ConnectPage />
           : <Home />}
         {creating && <NewPact onClose={() => setCreating(false)} />}
       </div>
@@ -171,6 +175,7 @@ function TopBar({ tab }: { tab: string | null }) {
           {menu && (
             <div className="l-menu" onMouseLeave={() => setMenu(false)}>
               <div><b>{profile?.name ?? 'You'}</b><span>{profile?.email}</span></div>
+              <button type="button" onClick={() => { setMenu(false); go('/connect') }}>Connect Grok</button>
               <button type="button" onClick={() => void S.supabase.auth.signOut()}>Sign out</button>
             </div>
           )}
@@ -394,6 +399,8 @@ function WalletPage() {
   const { pacts } = useApp()
   const [ledger, setLedger] = useState<S.Ledger | null>(null)
   const [ledgerError, setLedgerError] = useState<string | null>(null)
+  const [tagged, setTagged] = useState<Map<string, string>>(new Map())
+  const [splitting, setSplitting] = useState<S.LedgerRow | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
@@ -408,6 +415,7 @@ function WalletPage() {
     setLedgerError(null)
     S.loadLedger(wallet.address, pactKey ? pactKey.split(',') : [])
       .then((l) => { if (run === latestLoad.current) setLedger(l) })
+    void S.loadTaggedPayments().then(setTagged)
       .catch((e) => { if (run === latestLoad.current) setLedgerError((e as Error).message) })
   }, [wallet?.address, wallet?.usdcBalance, pactKey, attempt])
   if (!walletLoaded) return <div className="l-center"><span className="l-spin" /></div>
@@ -436,7 +444,7 @@ function WalletPage() {
         : !ledger ? <div className="l-card l-empty"><span className="l-spin" style={{ margin: '0 auto' }} /></div>
         : !ledger.rows.length ? <div className="l-card l-empty"><span>Money you send and get shows up here.</span></div> : (
         <div className="l-card l-list">
-          {ledger.rows.map((r) => <LedgerLine key={r.id} row={r} />)}
+          {ledger.rows.map((r) => <LedgerLine key={r.id} row={r} taggedTo={tagged.get(r.txHash.toLowerCase()) ?? null} onSplit={() => setSplitting(r)} />)}
           {ledger.fees > 0 && (
             <div className="l-row">
               <span className="l-ledger-icon"><Icon name="other" /></span>
@@ -450,11 +458,34 @@ function WalletPage() {
           </div>
         </div>
       )}
+      {splitting && <SplitPayment row={splitting} onClose={() => setSplitting(null)} onDone={() => { setSplitting(null); void S.loadTaggedPayments().then(setTagged) }} />}
     </main>
   )
 }
 
-function LedgerLine({ row }: { row: S.LedgerRow }) {
+/** Put a wallet payment on a pact's tab: pick the pact, then who it was for. */
+function SplitPayment({ row, onClose, onDone }: { row: S.LedgerRow; onClose: () => void; onDone: () => void }) {
+  const { pacts, me } = useApp()
+  const [pactId, setPactId] = useState<string | null>(null)
+  const [members, setMembers] = useState<S.Member[] | null>(null)
+  useEffect(() => { if (pactId) void S.loadMembers(pactId).then(setMembers) }, [pactId])
+  if (pactId && members) return <AddExpense id={pactId} me={me} members={members} txHash={row.txHash} amountCents={Math.round(row.amount * 100)} onClose={onClose} onDone={onDone} />
+  return (
+    <Modal title="Which pact was it for?" onClose={onClose}>
+      <div className="l-list">
+        {(pacts ?? []).map((p) => (
+          <button key={p.pact_id} type="button" className="l-row l-ledger-row" disabled={Boolean(pactId)} onClick={() => setPactId(p.pact_id)}>
+            <span className="l-ledger-icon pact"><Icon name={S.detailsOf(p).kind} /></span>
+            <div className="l-row-main"><b>{p.name}</b><span>{p.location ?? 'Add it to this tab'}</span></div>
+          </button>
+        ))}
+      </div>
+      {pactId && <Busy text="Loading the pact…" />}
+    </Modal>
+  )
+}
+
+function LedgerLine({ row, taggedTo, onSplit }: { row: S.LedgerRow; taggedTo: string | null; onSplit: () => void }) {
   const { name, avatar, pacts, go } = useApp()
   const short = `${row.address.slice(0, 6)}…${row.address.slice(-4)}`
   const pact = row.pactId ? pacts?.find((p) => p.pact_id === row.pactId) ?? null : null
@@ -473,6 +504,18 @@ function LedgerLine({ row }: { row: S.LedgerRow }) {
       <b className="l-amt" style={row.incoming ? { color: 'var(--go)' } : undefined}>{row.incoming ? '+' : '−'}{row.amount.toFixed(2)}</b>
     </>
   )
+  // A payment to anyone outside the app (a shop, a host) can go on a pact's tab and split.
+  if (row.kind === 'address' && !row.incoming) {
+    const tab = taggedTo ? pacts?.find((p) => p.pact_id === taggedTo) ?? null : null
+    return (
+      <div className="l-row l-ledger-row">
+        {body}
+        {tab
+          ? <button className="l-btn l-ghost l-small" type="button" onClick={() => go(`/pacts/${tab.pact_id}`)}>On {tab.name}'s tab</button>
+          : <button className="l-btn l-small" type="button" onClick={onSplit}>Split it</button>}
+      </div>
+    )
+  }
   // A pact payment opens that pact; everything else opens the transaction on the Arc explorer.
   return pact
     ? <button type="button" className="l-row l-ledger-row" onClick={() => go(`/pacts/${pact.pact_id}`)} title={`Open ${pact.name}`}>{body}</button>
