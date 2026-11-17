@@ -2,9 +2,18 @@ import { supabase } from './supabase'
 import type { BookingApproval, BookingConfirmation, BookingProposal, BookingRecord, BookingSplit, BookingSplitApproval, BookingSplitItem, DemoHotelOption } from '../types/booking'
 
 function client() { if (!supabase) throw new Error('Pact is not connected to Supabase yet.'); return supabase }
+async function bookingErrorMessage(error: unknown) {
+  const response = (error as { context?: unknown }).context
+  if (response instanceof Response) {
+    const body = await response.clone().json().catch(() => null) as { error?: unknown } | null
+    const backendMessage = typeof body?.error === 'string' ? body.error : null
+    return `${response.status}${backendMessage ? `: ${backendMessage}` : ''}`
+  }
+  return error instanceof Error ? error.message : 'Booking service is unavailable.'
+}
 async function invoke<T>(body: Record<string, unknown>): Promise<T> {
   const { data, error } = await client().functions.invoke('booking', { body })
-  if (error) throw error
+  if (error) throw new Error(await bookingErrorMessage(error))
   if (!data) throw new Error('Booking service returned no data.')
   return data as T
 }
