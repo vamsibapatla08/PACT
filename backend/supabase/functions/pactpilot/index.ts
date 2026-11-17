@@ -1,4 +1,5 @@
 import { createClient } from "npm:@supabase/supabase-js@2"
+import { executePactPilotTool, isSupportedTool } from "./tools.ts"
 
 const headers = {
   "Access-Control-Allow-Origin": "*",
@@ -13,7 +14,7 @@ const uuidPattern =
 const planSchema = {
   type: "object",
   additionalProperties: false,
-  required: ["summary", "options", "tasks", "costs", "estimate", "next_steps"],
+  required: ["summary", "options", "tasks", "costs", "estimate", "next_steps", "actions"],
   properties: {
     summary: { type: "string" },
     options: {
@@ -69,6 +70,19 @@ const planSchema = {
       },
     },
     next_steps: { type: "array", items: { type: "string" } },
+    actions: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["tool", "args", "requires_confirmation"],
+        properties: {
+          tool: { type: "string", enum: ["read_pact_state", "read_booking_options", "read_booking_state", "prepare_booking_proposal", "read_split_state", "prepare_split", "read_rebalance", "prepare_rebalance", "vote_rebalance", "apply_rebalance", "create_poll", "publish_action_card", "enqueue_email"] },
+          args: { type: "object", additionalProperties: true },
+          requires_confirmation: { type: "boolean" },
+        },
+      },
+    },
   },
 }
 
@@ -243,6 +257,16 @@ Deno.serve(async (request) => {
     return json({ error: "Only active Pact members can use PactPilot" }, 403)
   }
 
+  if (input?.tool !== undefined) {
+    if (!isSupportedTool(input.tool)) return json({ error: "Unsupported PactPilot tool" }, 400)
+    try {
+      const result = await executePactPilotTool({ client: supabase, pactId, tool: input.tool, args: input.args && typeof input.args === "object" ? input.args : {} })
+      return json({ kind: "tool_result", ...result })
+    } catch (error) {
+      return json({ error: error instanceof Error ? error.message : "PactPilot tool failed" }, 400)
+    }
+  }
+
   const { data: pact, error: pactError } = await supabase
     .from("pacts")
     .select("name,description,budget")
@@ -285,8 +309,13 @@ Deno.serve(async (request) => {
               "is_shared=false and option_title to the exact alternative " +
               "title for option-specific expenses), estimate (currency, " +
               "group_size from the question or 0 if unknown, budget from the " +
-              "question or 0 if none is stated) and next_steps (short actions " +
-              "the group can take). Keep the total of costs within any budget " +
+              "question or 0 if none is stated), next_steps (short actions " +
+              "the group can take), and actions. Actions must use only " +
+              "read_pact_state, read_booking_options, read_booking_state, " +
+              "prepare_booking_proposal, read_split_state, prepare_split, " +
+              "read_rebalance, prepare_rebalance, vote_rebalance, apply_rebalance, create_poll, " +
+              "publish_action_card, or enqueue_email, and every " +
+              "action requires confirmation. Keep the total of costs within any budget " +
               "and say in the summary if it cannot fit. All costs are " +
               "estimates, never quotes. " +
               "Never claim to approve commitments, book anything, or move money.",
@@ -331,9 +360,22 @@ Deno.serve(async (request) => {
       return json({ error: "Grok returned an invalid plan" }, 502)
     }
 
+    const actions = Array.isArray(plan.actions)
+      ? plan.actions.filter((action: unknown) => {
+        const item = action as Record<string, unknown> | null
+        return typeof item?.tool === "string" && ["read_pact_state", "read_booking_options", "read_booking_state", "prepare_booking_proposal", "read_split_state", "prepare_split", "read_rebalance", "prepare_rebalance", "vote_rebalance", "apply_rebalance", "create_poll", "publish_action_card", "enqueue_email"].includes(item.tool) && item.args !== null && typeof item.args === "object" && item.requires_confirmation === true
+      })
+      : []
+    const operationPlan = { actions, summary: plan.summary, next_steps: plan.next_steps ?? [] }
+    const operationKey = typeof input?.idempotency_key === "string" && uuidPattern.test(input.idempotency_key) ? input.idempotency_key : crypto.randomUUID()
+    const { data: operationId, error: operationError } = await supabase.rpc("create_pact_ai_operation", { p_pact_id: pactId, p_request_text: question, p_plan: operationPlan, p_idempotency_key: operationKey })
+    if (operationError) return json({ error: "PactPilot could not persist the proposed operation" }, 500)
+
     return json({
       summary: plan.summary,
       options: plan.options,
+      actions,
+      operation_id: operationId,
       ...cleanExtras(plan, pact.budget),
     })
   } catch {

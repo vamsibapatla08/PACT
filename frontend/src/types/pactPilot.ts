@@ -15,6 +15,8 @@ export type PactPilotMessage = {
   costs?: PactPilotCost[]
   estimate?: PactPilotEstimate
   next_steps?: string[]
+  actions?: Array<{ tool: string; args: Record<string, unknown>; requires_confirmation: true }>
+  operation_id?: string
 }
 
 export type PactPilotContext = { pactId: string; pactName: string }

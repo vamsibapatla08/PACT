@@ -1,5 +1,5 @@
 import { supabase } from './supabase'
-import type { PactMoneyTransfer, PactMoneyWallet, PactPaymentStatusRow } from '../types/pactMoney'
+import type { PactMoneyTransfer, PactMoneyWallet, PactPaymentObligation, PactPaymentStatusRow } from '../types/pactMoney'
 
 // Local development is enabled; deployed builds require an explicit opt-in.
 export const pactMoneyWalletEnabled = import.meta.env.DEV
@@ -30,7 +30,14 @@ export async function getPactPaymentStatus(pactId: string): Promise<PactPaymentS
   const { data, error } = await client().rpc('get_pact_payment_status', { p_pact_id: pactId })
   if (error) throw error
   if (!Array.isArray(data)) throw new Error('Payment service returned an invalid response.')
-  const rows = data as PactPaymentStatusRow[]
+  let rows = data as PactPaymentStatusRow[]
+  const obligations = await getPactPaymentObligationStatus(pactId).catch(() => null)
+  if (obligations?.length) {
+    rows = rows.map((row) => {
+      const obligation = obligations.find((item) => item.payment_id === row.payment_id && item.user_id === row.user_id)
+      return obligation ? { ...row, amount_usdc: obligation.amount_usdc, share_status: obligation.status } : row
+    })
+  }
   if (!rows.length) return rows
   const chain = await invokeWallet<OnChainStatus>('pact_status', { pactId }).catch(() => null)
   if (!chain) return rows
@@ -45,6 +52,13 @@ export async function getPactPaymentStatus(pactId: string): Promise<PactPaymentS
       share_status: member?.paid ? 'paid' : row.share_status,
     }
   })
+}
+
+export async function getPactPaymentObligationStatus(pactId: string): Promise<PactPaymentObligation[]> {
+  const { data, error } = await client().rpc('get_pact_payment_obligation_status', { p_pact_id: pactId })
+  if (error) throw error
+  if (!Array.isArray(data)) throw new Error('Payment obligation service returned an invalid response.')
+  return data as PactPaymentObligation[]
 }
 
 export async function createPactFundingPlan(input: { pactId: string; shareUsdc: string; deadline: string; payeeAddress: string }): Promise<{ paymentId: string; sharesNeeded: number }> {

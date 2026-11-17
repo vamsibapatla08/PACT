@@ -6,6 +6,7 @@ export type PactChatMessage = {
   sender_avatar_url: string | null
   body: string
   created_at: string
+  action_card_id?: string | null
 }
 
 /** Backend-neutral boundary for Vamsi's confirmed chat implementation. */
