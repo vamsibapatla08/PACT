@@ -1,0 +1,613 @@
+/* Luma's layout with the iOS app's look: a black fade from the top, silver actions, soft cards with no white borders. */
+:root {
+  color-scheme: dark;
+  --bg: #0b0b0d;
+  --card: rgba(255, 255, 255, 0.045);
+  --card-hover: rgba(255, 255, 255, 0.075);
+  --line: rgba(255, 255, 255, 0.07);
+  --text: #f5f5f7;
+  --dim: rgba(245, 245, 247, 0.56);
+  --faint: rgba(245, 245, 247, 0.34);
+  --silver: linear-gradient(180deg, #fbfbfc 0%, #d9dade 45%, #a9abb2 100%);
+  --go: #30d158;
+  --warn: #ff9f0a;
+  --bad: #ff453a;
+  --radius: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', Inter, 'Segoe UI', system-ui, sans-serif;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--bg); color: var(--text); -webkit-font-smoothing: antialiased; }
+body { min-height: 100vh; }
+button, input, textarea, select { font: inherit; color: inherit; }
+button { cursor: pointer; }
+a { color: inherit; }
+
+.l-app { min-height: 100vh; position: relative; }
+/* The iOS AmbientBackdrop: a cool glow that fades to black halfway down. */
+.l-app::before {
+  content: ''; position: fixed; inset: 0 0 auto 0; height: 70vh; pointer-events: none; z-index: 0;
+  background: linear-gradient(180deg, #1b2130 0%, #15171f 35%, rgba(11, 11, 13, 0) 100%);
+}
+.l-app > * { position: relative; z-index: 1; }
+
+/* Top bar */
+.l-top { display: flex; align-items: center; gap: 16px; padding: 14px 20px; position: sticky; top: 0; z-index: 10; backdrop-filter: blur(18px); background: rgba(11, 11, 13, 0.55); }
+.l-mark { display: inline-flex; width: 34px; height: 34px; flex: none; }
+.l-mark img { width: 100%; height: 100%; object-fit: cover; }
+.l-nav { display: flex; gap: 4px; margin: 0 auto; }
+.l-nav button { display: inline-flex; align-items: center; gap: 7px; background: none; border: 0; padding: 7px 12px; border-radius: 9px; color: var(--dim); font-weight: 600; font-size: 15px; }
+.l-nav button:hover { color: var(--text); }
+.l-nav button.on { color: var(--text); }
+.l-nav svg { width: 17px; height: 17px; }
+.l-right { display: flex; align-items: center; gap: 14px; }
+.l-time { color: var(--faint); font-size: 14px; font-variant-numeric: tabular-nums; }
+.l-create { background: none; border: 0; font-weight: 600; font-size: 15px; color: var(--text); padding: 6px 4px; }
+.l-create:hover { opacity: 0.8; }
+
+/* Pages */
+.l-page { width: min(820px, 100% - 32px); margin: 0 auto; padding: 36px 0 120px; }
+.l-wide { width: min(940px, 100% - 32px); }
+.l-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 28px; }
+.l-h1 { font-size: 34px; font-weight: 700; letter-spacing: -0.02em; margin: 0; }
+.l-h2 { font-size: 17px; font-weight: 600; color: var(--dim); margin: 34px 0 12px; }
+.l-sub { color: var(--dim); font-size: 15px; margin: 6px 0 0; }
+.l-dim { color: var(--dim); }
+.l-faint { color: var(--faint); }
+.l-error { color: var(--bad); font-size: 14px; margin: 8px 0; }
+
+.l-seg { display: inline-flex; padding: 3px; background: var(--card); border-radius: 11px; }
+.l-seg button { border: 0; background: none; padding: 7px 14px; border-radius: 8px; font-weight: 600; font-size: 14px; color: var(--dim); }
+.l-seg button.on { background: rgba(255, 255, 255, 0.12); color: var(--text); }
+
+/* Buttons */
+.l-btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; border: 0; border-radius: 999px; padding: 10px 18px; font-weight: 700; font-size: 15px; background: var(--silver); color: #0b0b0d; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9), 0 6px 20px rgba(0, 0, 0, 0.35); }
+.l-btn:hover { filter: brightness(1.04); }
+.l-btn:disabled { opacity: 0.45; cursor: default; }
+.l-ghost { background: rgba(255, 255, 255, 0.08); color: var(--text); box-shadow: none; }
+.l-ghost:hover { background: rgba(255, 255, 255, 0.13); }
+.l-small { padding: 6px 13px; font-size: 13px; }
+.l-wide-btn { width: 100%; }
+.l-link { background: none; border: 0; padding: 0; color: var(--dim); font-size: 14px; font-weight: 500; text-align: left; }
+.l-link:hover { color: var(--text); }
+.l-icon-btn { width: 36px; height: 36px; display: inline-grid; place-items: center; border-radius: 999px; border: 0; background: rgba(255, 255, 255, 0.08); color: var(--text); }
+.l-icon-btn svg { width: 18px; height: 18px; }
+
+/* Avatars */
+.l-av { display: inline-grid; place-items: center; border-radius: 999px; background: #2a2c33; color: var(--text); font-weight: 700; object-fit: cover; flex: none; }
+.l-stack { display: inline-flex; align-items: center; }
+.l-stack .l-av { box-shadow: 0 0 0 2px #17181c; margin-left: -6px; }
+.l-stack .l-av:first-child { margin-left: 0; }
+.l-more { margin-left: 4px; font-size: 11px; font-weight: 700; color: var(--dim); background: rgba(255, 255, 255, 0.08); border-radius: 999px; padding: 2px 6px; }
+
+/* Chips, like Luma's Going / Pending */
+.l-chip { display: inline-flex; align-items: center; gap: 5px; padding: 3px 8px; border-radius: 6px; font-size: 12.5px; font-weight: 700; }
+.l-chip.go { background: var(--go); color: #04210d; }
+.l-chip.warn { background: var(--warn); color: #2b1600; }
+.l-chip.mute { background: rgba(255, 255, 255, 0.1); color: var(--dim); }
+
+/* Cards */
+.l-card { background: var(--card); border-radius: var(--radius); padding: 18px; }
+button.l-card { border: 0; width: 100%; text-align: left; }
+button.l-card:hover { background: var(--card-hover); }
+
+/* Timeline */
+.l-day { display: grid; grid-template-columns: 150px 22px 1fr; gap: 0 18px; }
+.l-when { padding-top: 14px; }
+.l-when b { display: block; font-size: 16px; font-weight: 600; }
+.l-when span { color: var(--dim); font-size: 15px; }
+.l-rail { position: relative; }
+.l-rail::before { content: ''; position: absolute; left: 50%; top: 0; bottom: 0; border-left: 1.5px dashed rgba(255, 255, 255, 0.13); transform: translateX(-50%); }
+.l-rail::after { content: ''; position: absolute; left: 50%; top: 20px; width: 7px; height: 7px; border-radius: 99px; background: #6b6d75; transform: translateX(-50%); }
+.l-day:first-child .l-rail::before { top: 20px; }
+.l-day:last-child .l-rail::before { bottom: auto; height: 20px; }
+.l-events { display: grid; gap: 14px; padding-bottom: 34px; }
+
+.l-event { display: flex; gap: 16px; align-items: flex-start; padding: 16px 16px 16px 18px; }
+.l-event-main { flex: 1; min-width: 0; display: grid; gap: 7px; }
+.l-event-top { font-size: 15px; color: var(--dim); }
+.l-event-top .now { color: var(--warn); font-weight: 700; }
+.l-event-top .soon { color: #ffd60a; }
+.l-event h3 { margin: 0; font-size: 20px; font-weight: 700; letter-spacing: -0.01em; }
+.l-meta { display: flex; align-items: center; gap: 8px; color: var(--dim); font-size: 15px; min-width: 0; }
+.l-meta svg { width: 16px; height: 16px; flex: none; opacity: 0.8; }
+.l-meta span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.l-event-foot { display: flex; align-items: center; gap: 10px; margin-top: 6px; }
+
+/* Covers: the iOS black tile with the pact's icon, like Luma's event art */
+.l-cover { flex: none; width: 120px; aspect-ratio: 1; border-radius: 11px; overflow: hidden; display: grid; place-items: center; align-content: center; gap: 10px; text-align: center; padding: 12px;
+  background: radial-gradient(120% 90% at 50% 0%, #2b2f3b 0%, #101114 60%, #050506 100%); box-shadow: 0 18px 40px rgba(0, 0, 0, 0.45); }
+.l-cover svg { width: 34%; height: auto; color: #e9e9ec; filter: drop-shadow(0 4px 14px rgba(255, 255, 255, 0.15)); }
+.l-cover b { font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: rgba(255, 255, 255, 0.82); font-weight: 700; line-height: 1.25; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.l-cover.big { width: 100%; border-radius: 18px; gap: 18px; box-shadow: 0 30px 60px rgba(0, 0, 0, 0.5); }
+.l-cover.big svg { width: 26%; }
+.l-cover.big b { font-size: 26px; letter-spacing: 0.04em; text-transform: none; }
+.l-cover.big small { font-size: 13px; letter-spacing: 0.22em; text-transform: uppercase; color: var(--dim); font-weight: 600; }
+
+/* Home */
+.l-balance { padding: 22px; display: grid; gap: 4px; }
+.l-balance.white { background: #f5f5f7; color: #0b0b0d; }
+.l-balance.white .l-dim { color: rgba(0, 0, 0, 0.55); }
+.l-balance .big { font-size: 40px; font-weight: 800; letter-spacing: -0.02em; }
+.l-balance-row { display: flex; gap: 12px; }
+.l-balance-row > * { flex: 1; }
+.l-ok { display: flex; align-items: center; gap: 12px; font-size: 26px; font-weight: 800; }
+.l-ok svg { width: 30px; height: 30px; color: var(--go); }
+
+.l-row { display: flex; align-items: center; gap: 12px; padding: 12px 0; }
+.l-row + .l-row { border-top: 1px solid var(--line); }
+.l-row-main { flex: 1; min-width: 0; display: grid; gap: 2px; }
+.l-row-main b { font-weight: 600; font-size: 16px; }
+.l-row-main span { color: var(--dim); font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.l-list { padding: 4px 18px; }
+
+.l-empty { padding: 28px; text-align: center; color: var(--dim); display: grid; gap: 6px; }
+.l-empty b { color: var(--text); font-size: 17px; }
+
+/* Pact page: Luma's event layout */
+.l-event-page { display: grid; grid-template-columns: 330px 1fr; gap: 36px; align-items: start; }
+.l-side { display: grid; gap: 18px; position: sticky; top: 76px; }
+.l-presented { display: flex; align-items: center; gap: 10px; }
+.l-presented small { display: block; color: var(--dim); font-size: 12.5px; }
+.l-presented b { font-size: 15px; }
+.l-section-title { font-size: 14px; font-weight: 600; color: var(--dim); padding-bottom: 10px; border-bottom: 1px solid var(--line); margin: 6px 0 4px; }
+.l-person { display: flex; align-items: center; gap: 10px; padding: 7px 0; width: 100%; background: none; border: 0; text-align: left; }
+.l-person b { flex: 1; font-weight: 600; font-size: 15px; }
+.l-person small { color: var(--dim); font-size: 13px; font-weight: 600; }
+.l-person.pending { opacity: 0.5; }
+.l-tag { display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px 5px 6px; border-radius: 9px; background: var(--card); font-size: 13px; color: var(--dim); font-weight: 600; width: fit-content; }
+.l-tag img, .l-tag svg { width: 18px; height: 18px; }
+.l-title { font-size: 44px; line-height: 1.08; font-weight: 750; letter-spacing: -0.025em; margin: 10px 0 18px; }
+.l-fact { display: flex; align-items: center; gap: 14px; margin-bottom: 14px; }
+.l-fact-icon { width: 42px; height: 42px; border-radius: 10px; background: var(--card); display: grid; place-items: center; flex: none; text-align: center; }
+.l-fact-icon svg { width: 20px; height: 20px; color: var(--dim); }
+.l-fact-icon small { display: block; font-size: 9px; font-weight: 800; color: var(--dim); text-transform: uppercase; padding-top: 3px; letter-spacing: 0.04em; }
+.l-fact-icon b { display: block; font-size: 16px; line-height: 1.05; }
+.l-fact div b { display: block; font-size: 16px; font-weight: 600; }
+.l-fact div span { color: var(--dim); font-size: 14px; }
+
+.l-status { margin: 22px 0 10px; display: grid; gap: 10px; padding: 20px; }
+.l-status h3 { margin: 6px 0 0; font-size: 21px; font-weight: 700; }
+.l-status p { margin: 0; color: var(--dim); font-size: 15px; }
+.l-status-actions { display: flex; gap: 10px; margin-top: 6px; flex-wrap: wrap; }
+.l-progress { height: 6px; border-radius: 99px; background: rgba(255, 255, 255, 0.1); overflow: hidden; }
+.l-progress i { display: block; height: 100%; background: var(--silver); border-radius: inherit; }
+
+.l-actions { display: flex; gap: 8px; flex-wrap: wrap; margin: 16px 0 0; }
+.l-pill { display: inline-flex; align-items: center; gap: 7px; border: 0; padding: 8px 13px; border-radius: 999px; background: var(--card); font-weight: 600; font-size: 14px; color: var(--text); }
+.l-pill:hover { background: var(--card-hover); }
+.l-pill svg, .l-pill img { width: 15px; height: 15px; }
+
+.l-about { margin-top: 28px; }
+.l-about p { font-size: 16px; line-height: 1.55; margin: 12px 0; white-space: pre-wrap; }
+.l-kv { display: grid; grid-template-columns: 140px 1fr; gap: 10px 14px; font-size: 15px; margin-top: 10px; }
+.l-kv span { color: var(--dim); }
+.l-kv a { word-break: break-all; }
+
+.l-item { display: flex; gap: 12px; align-items: center; padding: 12px 0; }
+.l-item + .l-item { border-top: 1px solid var(--line); }
+.l-item-icon { width: 38px; height: 38px; border-radius: 10px; background: rgba(255, 255, 255, 0.07); display: grid; place-items: center; flex: none; }
+.l-item-icon svg { width: 18px; height: 18px; }
+.l-item b { display: block; font-weight: 600; }
+.l-item span { color: var(--dim); font-size: 14px; }
+.l-item-price { margin-left: auto; font-weight: 700; white-space: nowrap; }
+
+.l-grok { display: flex; gap: 12px; align-items: flex-start; padding: 16px; }
+.l-grok img { width: 22px; height: 22px; margin-top: 2px; }
+.l-grok small { color: var(--dim); font-size: 13px; font-weight: 600; }
+.l-grok p { margin: 4px 0 0; font-size: 15px; line-height: 1.45; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+
+/* Chat */
+.l-chat { display: grid; gap: 10px; margin-top: 14px; }
+.l-msg { display: flex; gap: 10px; align-items: flex-end; }
+.l-msg.me { flex-direction: row-reverse; }
+.l-bubble { max-width: 74%; padding: 9px 13px; border-radius: 18px; background: rgba(255, 255, 255, 0.08); font-size: 15px; line-height: 1.4; white-space: pre-wrap; word-wrap: break-word; }
+.l-msg.me .l-bubble { background: var(--silver); color: #0b0b0d; }
+.l-bubble small { display: block; color: var(--dim); font-size: 12px; font-weight: 600; margin-bottom: 2px; }
+.l-composer { position: sticky; bottom: 16px; display: flex; gap: 8px; align-items: flex-end; margin-top: 16px; padding: 8px 8px 8px 16px; border-radius: 26px; background: rgba(30, 31, 36, 0.92); backdrop-filter: blur(18px); box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5); }
+.l-composer textarea { flex: 1; background: none; border: 0; outline: none; resize: none; font-size: 15px; padding: 8px 0; max-height: 140px; }
+.l-send { width: 36px; height: 36px; border-radius: 99px; border: 0; background: var(--silver); color: #0b0b0d; display: grid; place-items: center; flex: none; }
+.l-send:disabled { opacity: 0.35; }
+.l-send svg { width: 17px; height: 17px; }
+
+/* Modals */
+.l-scrim { position: fixed; inset: 0; z-index: 50; background: rgba(0, 0, 0, 0.6); backdrop-filter: blur(6px); display: grid; place-items: center; padding: 20px; animation: l-fade 0.15s ease; }
+.l-modal { width: min(520px, 100%); max-height: calc(100vh - 40px); overflow: auto; background: #17181c; border-radius: 20px; padding: 24px; box-shadow: 0 40px 100px rgba(0, 0, 0, 0.6); animation: l-rise 0.2s ease; }
+.l-modal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 18px; }
+.l-modal-head h2 { margin: 0; font-size: 24px; font-weight: 750; letter-spacing: -0.015em; }
+@keyframes l-fade { from { opacity: 0; } }
+@keyframes l-rise { from { opacity: 0; transform: translateY(10px) scale(0.98); } }
+
+/* Forms */
+.l-form { display: grid; gap: 14px; }
+.l-field { display: grid; gap: 6px; }
+.l-field > span { font-size: 13px; font-weight: 600; color: var(--dim); }
+.l-input { width: 100%; background: rgba(255, 255, 255, 0.06); border: 0; border-radius: 11px; padding: 11px 13px; font-size: 15px; outline: none; }
+.l-input:focus { background: rgba(255, 255, 255, 0.09); box-shadow: 0 0 0 1.5px rgba(255, 255, 255, 0.25); }
+textarea.l-input { resize: vertical; min-height: 76px; }
+.l-two { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.l-kinds { display: flex; gap: 6px; flex-wrap: wrap; }
+.l-kinds button { display: inline-flex; align-items: center; gap: 6px; border: 0; padding: 8px 12px; border-radius: 999px; background: rgba(255, 255, 255, 0.06); font-weight: 600; font-size: 14px; color: var(--dim); }
+.l-kinds button svg { width: 15px; height: 15px; }
+.l-kinds button.on { background: var(--silver); color: #0b0b0d; }
+.l-switch { display: flex; align-items: center; justify-content: space-between; background: none; border: 0; padding: 4px 0; font-weight: 600; font-size: 15px; width: 100%; }
+.l-switch i { width: 44px; height: 26px; border-radius: 99px; background: rgba(255, 255, 255, 0.14); position: relative; transition: background 0.2s; }
+.l-switch i::after { content: ''; position: absolute; top: 3px; left: 3px; width: 20px; height: 20px; border-radius: 99px; background: #fff; transition: transform 0.2s; }
+.l-switch.on i { background: var(--silver); }
+.l-switch.on i::after { transform: translateX(18px); background: #0b0b0d; }
+.l-pick { display: flex; align-items: center; gap: 10px; padding: 8px 4px; width: 100%; background: none; border: 0; text-align: left; border-radius: 10px; }
+.l-pick:hover { background: rgba(255, 255, 255, 0.04); }
+.l-pick b { flex: 1; font-weight: 600; }
+.l-check { width: 22px; height: 22px; border-radius: 99px; box-shadow: inset 0 0 0 1.5px rgba(255, 255, 255, 0.3); display: grid; place-items: center; }
+.l-check.on { background: var(--silver); box-shadow: none; color: #0b0b0d; }
+.l-check svg { width: 13px; height: 13px; }
+
+/* Menus */
+.l-menu-wrap { position: relative; }
+.l-menu { position: absolute; right: 0; top: calc(100% + 8px); min-width: 210px; background: #1d1e23; border-radius: 14px; padding: 6px; box-shadow: 0 20px 50px rgba(0, 0, 0, 0.6); z-index: 20; }
+.l-menu > div { padding: 10px 12px 8px; }
+.l-menu > div b { display: block; }
+.l-menu > div span { color: var(--dim); font-size: 13px; }
+.l-menu button { display: block; width: 100%; text-align: left; border: 0; background: none; padding: 9px 12px; border-radius: 9px; font-weight: 500; }
+.l-menu button:hover { background: rgba(255, 255, 255, 0.07); }
+
+/* Loading */
+.l-center { min-height: 70vh; display: grid; place-items: center; gap: 18px; align-content: center; }
+.l-spin { width: 26px; height: 26px; border-radius: 99px; border: 2.5px solid rgba(255, 255, 255, 0.15); border-top-color: #fff; animation: l-turn 0.8s linear infinite; }
+@keyframes l-turn { to { transform: rotate(360deg); } }
+.l-busy { display: flex; align-items: center; gap: 10px; color: var(--dim); font-size: 14px; font-weight: 600; }
+.l-busy .l-spin { width: 16px; height: 16px; border-width: 2px; }
+
+.l-signin { min-height: 100vh; display: grid; place-items: center; align-content: center; gap: 18px; text-align: center; padding: 24px; }
+.l-signin h1 { font-size: 40px; letter-spacing: -0.025em; margin: 0; max-width: 560px; line-height: 1.1; }
+.l-signin p { color: var(--dim); margin: 0 0 8px; font-size: 17px; }
+
+@media (max-width: 860px) {
+  .l-event-page { grid-template-columns: 1fr; }
+  .l-side { position: static; }
+  .l-cover.big { max-width: 360px; }
+  .l-title { font-size: 34px; }
+}
+@media (max-width: 640px) {
+  .l-top { padding: 10px 14px; gap: 8px; }
+  .l-nav button span, .l-time { display: none; }
+  .l-day { grid-template-columns: 1fr; }
+  .l-rail { display: none; }
+  .l-when { padding: 0 0 8px; display: flex; gap: 8px; align-items: baseline; }
+  .l-cover { width: 82px; }
+  .l-kv { grid-template-columns: 1fr; gap: 2px 0; }
+  .l-kv span { margin-top: 8px; }
+}
+
+/* Type, matched to Luma: system font, bold white headings, medium grey sub-lines. */
+.l-h1 { font-size: 30px; font-weight: 700; letter-spacing: -0.015em; }
+.l-h2 { font-size: 20px; font-weight: 700; color: var(--text); letter-spacing: -0.01em; margin: 36px 0 14px; }
+.l-sub, .l-row-main span, .l-meta, .l-event-top, .l-when span { font-weight: 500; }
+.l-row-main b, .l-event h3, .l-fact div b { letter-spacing: -0.01em; }
+.l-event h3 { font-size: 19px; }
+.l-title { font-weight: 700; }
+
+/* Liquid glass, like iOS 26: a frosted see-through fill, a soft shine at the top, a drop shadow, and no outline. */
+.l-card, .l-seg, .l-pill, .l-ghost, .l-tag, .l-fact-icon, .l-modal, .l-menu, .l-composer, .l-input, .l-kinds button, .l-icon-btn, .l-item-icon, .l-top {
+  border: 0;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.10) 0%, rgba(255, 255, 255, 0.035) 38%, rgba(255, 255, 255, 0.025) 100%);
+  backdrop-filter: blur(28px) saturate(170%);
+  -webkit-backdrop-filter: blur(28px) saturate(170%);
+}
+.l-card, .l-modal, .l-menu, .l-composer { box-shadow: 0 1px 0 rgba(255, 255, 255, 0.05) inset, 0 18px 50px rgba(0, 0, 0, 0.35); }
+.l-pill, .l-ghost, .l-seg, .l-tag, .l-icon-btn, .l-kinds button { box-shadow: 0 1px 0 rgba(255, 255, 255, 0.06) inset, 0 6px 18px rgba(0, 0, 0, 0.25); }
+button.l-card:hover, .l-pill:hover, .l-ghost:hover, .l-icon-btn:hover, .l-kinds button:hover {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.15) 0%, rgba(255, 255, 255, 0.06) 45%, rgba(255, 255, 255, 0.045) 100%);
+}
+.l-card { border-radius: 16px; }
+.l-modal { background: linear-gradient(180deg, rgba(40, 42, 50, 0.78) 0%, rgba(22, 23, 28, 0.82) 100%); }
+.l-menu { background: linear-gradient(180deg, rgba(44, 46, 54, 0.82) 0%, rgba(26, 27, 32, 0.86) 100%); }
+.l-composer { background: linear-gradient(180deg, rgba(48, 50, 58, 0.72) 0%, rgba(28, 29, 34, 0.8) 100%); }
+.l-top { background: linear-gradient(180deg, rgba(11, 11, 13, 0.55), rgba(11, 11, 13, 0.25)); box-shadow: none; }
+.l-seg button.on { background: linear-gradient(180deg, rgba(255, 255, 255, 0.2), rgba(255, 255, 255, 0.1)); box-shadow: 0 1px 0 rgba(255, 255, 255, 0.12) inset, 0 4px 12px rgba(0, 0, 0, 0.3); }
+.l-kinds button.on { background: var(--silver); }
+.l-balance.white { background: #f5f5f7; backdrop-filter: none; }
+.l-row + .l-row, .l-item + .l-item { border-top-color: rgba(255, 255, 255, 0.05); }
+.l-input:focus { box-shadow: 0 0 0 1.5px rgba(255, 255, 255, 0.22); }
+
+/* One gradient behind the whole page, like Luma: cool navy at the top, easing into a warm near-black, all the way down. */
+.l-app::before {
+  position: fixed; inset: 0; height: auto;
+  background:
+    radial-gradient(120% 60% at 50% -10%, rgba(64, 84, 128, 0.42) 0%, rgba(64, 84, 128, 0) 60%),
+    linear-gradient(180deg, #1a2030 0%, #19191f 38%, #171517 72%, #121113 100%);
+}
+body { background: #121113; }
+
+/* The top bar sits on the gradient, not on a bar of its own. */
+.l-top, .l-top:hover { position: relative; background: none; backdrop-filter: none; -webkit-backdrop-filter: none; box-shadow: none; padding: 18px 24px; }
+
+/* Bigger headings. */
+.l-h1 { font-size: 40px; letter-spacing: -0.025em; }
+.l-h2 { font-size: 24px; letter-spacing: -0.015em; }
+.l-title { font-size: 52px; letter-spacing: -0.03em; }
+.l-modal-head h2 { font-size: 26px; }
+@media (max-width: 640px) {
+  .l-h1 { font-size: 34px; }
+  .l-h2 { font-size: 21px; }
+  .l-title { font-size: 38px; }
+}
+.l-side { top: 24px; }
+@media (max-width: 860px) { .l-side { position: static; } }
+
+/* The 3D wallet card */
+.l-bankcard { margin-top: 18px; }
+.l-bankcard-stage { position: relative; width: 100%; height: 400px; cursor: grab; touch-action: pan-y; }
+.l-card-stats { display: flex; align-items: center; justify-content: center; gap: 10px; flex-wrap: wrap; margin-top: 4px; }
+.l-stat { display: inline-flex; align-items: center; gap: 7px; padding: 8px 14px; border-radius: 999px; font-size: 14px; font-weight: 600; color: var(--dim);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.10), rgba(255, 255, 255, 0.03)); backdrop-filter: blur(24px); box-shadow: 0 1px 0 rgba(255, 255, 255, 0.06) inset, 0 6px 18px rgba(0, 0, 0, 0.25); }
+.l-stat b { color: var(--text); font-size: 15px; }
+.l-stat.ok { color: var(--text); }
+.l-stat.ok svg { color: var(--go); }
+.l-stat.owe { background: var(--silver); color: rgba(0, 0, 0, 0.6); }
+.l-stat.owe b { color: #0b0b0d; }
+.l-flatcard { width: min(420px, 100%); aspect-ratio: 1.586; margin: 0 auto 14px; border-radius: 20px; padding: 24px; display: grid; align-content: space-between;
+  background: linear-gradient(135deg, #2a2c33, #111216 60%, #1b1c21); box-shadow: 0 30px 60px rgba(0, 0, 0, 0.5); }
+.l-flatcard-top { display: flex; justify-content: space-between; letter-spacing: 0.2em; }
+.l-flatcard-bal { font-size: 32px; font-weight: 750; }
+.l-flatcard-bal small { font-size: 15px; color: var(--dim); }
+.l-flatcard-num { font-size: 18px; letter-spacing: 0.12em; color: rgba(255, 255, 255, 0.85); }
+@media (max-width: 640px) { .l-bankcard-stage { height: 270px; } }
+
+/* Liquid gold: a faint, slow-moving gold and silver backdrop in place of the navy gradient. */
+body { background: #050505; }
+.l-app::before { display: none; }
+.l-app > .l-gold { position: fixed; inset: 0; width: 100vw; height: 100vh; z-index: 0; display: block; pointer-events: none; }
+.l-top .l-nav button.on, .l-h1, .l-title { text-shadow: 0 2px 18px rgba(0, 0, 0, 0.35); }
+
+/* Pact cards: bigger faces in glass rings, and chips in clearer liquid-glass colours. */
+.l-stack .l-av { box-shadow: 0 0 0 2px rgba(20, 20, 22, 0.9), 0 0 0 3.5px rgba(255, 255, 255, 0.16), 0 4px 10px rgba(0, 0, 0, 0.35); margin-left: -8px; }
+.l-stack .l-av:first-child { margin-left: 0; }
+.l-more { margin-left: 6px; font-size: 12px; padding: 4px 8px; color: var(--text);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.2), rgba(255, 255, 255, 0.08)); box-shadow: 0 1px 0 rgba(255, 255, 255, 0.2) inset; }
+.l-meta { gap: 10px; }
+.l-event-foot { gap: 12px; margin-top: 8px; }
+.l-chip { padding: 5px 11px; border-radius: 999px; font-size: 13px; font-weight: 700; letter-spacing: 0.01em;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.45) inset, 0 -1px 0 rgba(0, 0, 0, 0.15) inset, 0 6px 16px rgba(0, 0, 0, 0.3); }
+.l-chip.go { background: linear-gradient(180deg, #5cf58a 0%, #2fd160 55%, #22b14d 100%); color: #032b10; }
+.l-chip.warn { background: linear-gradient(180deg, #ffc56b 0%, #ffa21f 55%, #f08a00 100%); color: #3a1d00; }
+.l-chip.mute { background: linear-gradient(180deg, rgba(255, 255, 255, 0.24), rgba(255, 255, 255, 0.1)); color: #f2f2f4; backdrop-filter: blur(16px); }
+
+/* A larger header, same layout: logo left, tabs centred, time, New Pact and avatar right. */
+.l-top, .l-top:hover { padding: 20px 28px; gap: 20px; }
+.l-mark { width: 46px; height: 46px; }
+.l-mark img { border-radius: 11px; }
+.l-nav { gap: 8px; }
+.l-nav button { font-size: 17.5px; padding: 9px 15px; gap: 9px; border-radius: 12px; }
+.l-nav svg { width: 21px; height: 21px; }
+.l-nav button.on { background: linear-gradient(180deg, rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0.05)); box-shadow: 0 1px 0 rgba(255, 255, 255, 0.12) inset; }
+.l-right { gap: 18px; }
+.l-time { font-size: 15.5px; }
+.l-create { font-size: 17.5px; font-weight: 700; }
+.l-right .l-av { width: 38px !important; height: 38px !important; }
+@media (max-width: 640px) {
+  .l-top, .l-top:hover { padding: 12px 14px; gap: 8px; }
+  .l-mark { width: 38px; height: 38px; }
+  .l-nav { gap: 2px; }
+  .l-nav button { padding: 8px 9px; }
+  .l-create { font-size: 15px; }
+  .l-right .l-av { width: 32px !important; height: 32px !important; }
+}
+.l-mark { width: 36px; height: 36px; }
+.l-mark img { border-radius: 9px; }
+@media (max-width: 640px) { .l-mark { width: 32px; height: 32px; } }
+
+/* Header in three columns, so the tabs sit in the true centre whatever is on either side. */
+.l-top, .l-top:hover { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; }
+.l-top > .l-mark { justify-self: start; }
+.l-nav { margin: 0; justify-self: center; }
+.l-right { justify-self: end; }
+
+/* The plus: a silver circle in the header, and a big pill on the Pacts page. */
+.l-plus { display: inline-grid; place-items: center; width: 40px; height: 40px; border: 0; border-radius: 999px; padding: 0; color: #0b0b0d;
+  background: var(--silver); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9), 0 6px 18px rgba(0, 0, 0, 0.4); transition: transform 0.15s ease, filter 0.15s ease; }
+.l-plus:hover { transform: scale(1.06); filter: brightness(1.05); }
+.l-plus:active { transform: scale(0.96); }
+.l-plus svg { width: 22px; height: 22px; stroke-width: 2.4; }
+.l-plus.big { width: auto; height: 50px; padding: 0 22px 0 16px; display: inline-flex; gap: 8px; font-size: 17px; font-weight: 700; }
+.l-plus.big svg { width: 24px; height: 24px; }
+.l-head-actions { display: flex; align-items: center; gap: 14px; }
+.l-head-actions .l-seg button { padding: 9px 16px; font-size: 15px; }
+@media (max-width: 640px) {
+  .l-plus { width: 34px; height: 34px; }
+  .l-plus.big { height: 42px; padding: 0 16px 0 12px; font-size: 15px; }
+  .l-head-actions { gap: 8px; }
+  .l-head-actions .l-seg button { padding: 7px 10px; font-size: 13px; }
+}
+
+/* Wallet ledger */
+.l-ledger-row { text-decoration: none; color: inherit; border-radius: 10px; }
+.l-ledger-row:hover .l-row-main b { text-decoration: underline; text-underline-offset: 3px; text-decoration-color: rgba(255, 255, 255, 0.3); }
+.l-ledger-icon { width: 40px; height: 40px; border-radius: 999px; display: grid; place-items: center; flex: none; color: var(--text);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0.05)); box-shadow: 0 1px 0 rgba(255, 255, 255, 0.14) inset; }
+.l-ledger-icon svg { width: 19px; height: 19px; }
+.l-ledger-icon.deposit { background: linear-gradient(180deg, rgba(48, 209, 88, 0.35), rgba(48, 209, 88, 0.12)); color: #7dffa4; }
+.l-amt { font-variant-numeric: tabular-nums; white-space: nowrap; font-size: 16px; }
+.l-ledger-total { border-top: 1px solid rgba(255, 255, 255, 0.14) !important; }
+.l-ledger-total .l-row-main b, .l-ledger-total .l-amt { font-size: 18px; font-weight: 800; }
+
+/* Verification badges */
+.l-verify { display: inline-flex; align-items: center; gap: 7px; padding: 6px 12px 6px 9px; border-radius: 999px; font-size: 13.5px; font-weight: 700; letter-spacing: 0.01em; white-space: nowrap; }
+.l-verify svg { width: 17px; height: 17px; stroke-width: 2; }
+.l-verify.ok { color: #04210d; background: linear-gradient(180deg, #8cffb0 0%, #34d867 50%, #1fae4c 100%); box-shadow: 0 1px 0 rgba(255, 255, 255, 0.55) inset, 0 6px 18px rgba(48, 209, 88, 0.3); }
+.l-verify.wait { color: #f2f2f4; background: linear-gradient(180deg, rgba(255, 255, 255, 0.2), rgba(255, 255, 255, 0.07)); box-shadow: 0 1px 0 rgba(255, 255, 255, 0.18) inset, 0 6px 16px rgba(0, 0, 0, 0.3); }
+.l-verify.compact { padding: 4px 10px 4px 7px; font-size: 12.5px; }
+.l-verify.compact svg { width: 15px; height: 15px; }
+
+/* The Booked card: a seal, what was paid, and the checks behind it. */
+.l-booked { display: grid; gap: 14px; padding: 22px; margin: 22px 0 10px; }
+.l-booked-top { display: flex; align-items: center; gap: 16px; }
+.l-seal { width: 58px; height: 58px; border-radius: 999px; display: grid; place-items: center; flex: none; color: #0b0b0d;
+  background: var(--silver); box-shadow: 0 1px 0 rgba(255, 255, 255, 0.9) inset, 0 10px 26px rgba(0, 0, 0, 0.45); }
+.l-seal svg { width: 32px; height: 32px; stroke-width: 1.7; }
+.l-seal.cancelled { background: linear-gradient(180deg, #5a5c63, #2e2f34); color: #fff; }
+.l-booked h3 { margin: 0; font-size: 26px; font-weight: 800; letter-spacing: -0.015em; }
+.l-booked p { margin: 2px 0 0; color: var(--dim); font-size: 15px; }
+.l-checks { display: grid; gap: 2px; padding-top: 6px; border-top: 1px solid rgba(255, 255, 255, 0.08); }
+.l-check-row { display: flex; align-items: center; gap: 10px; padding: 8px 0; font-size: 14.5px; text-decoration: none; color: inherit; }
+.l-check-row b { flex: 1; font-weight: 600; }
+.l-check-row .ok { color: var(--go); display: inline-flex; gap: 6px; align-items: center; font-weight: 600; font-size: 13px; }
+.l-check-row .wait { color: var(--dim); display: inline-flex; gap: 6px; align-items: center; font-weight: 600; font-size: 13px; }
+.l-check-row svg { width: 16px; height: 16px; }
+.l-check-row .l-ledger-icon { width: 28px; height: 28px; }
+.l-check-row .l-ledger-icon svg { width: 15px; height: 15px; }
+.l-chat-toggle { width: 100%; justify-content: space-between; }
+
+/* Coordinator: the big name under the cover */
+.l-coord { display: flex; align-items: center; gap: 10px; }
+.l-coord-who { flex: 1; display: flex; align-items: center; gap: 12px; background: none; border: 0; padding: 0; text-align: left; min-width: 0; }
+.l-coord-who span { display: grid; gap: 3px; min-width: 0; }
+.l-coord-who b { font-size: 22px; font-weight: 750; letter-spacing: -0.015em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.l-coord-who small { display: inline-flex; align-items: center; gap: 5px; color: #e9d8a6; font-size: 13px; font-weight: 700; }
+.l-coord-who small svg { width: 13px; height: 13px; }
+.l-coord .l-icon-btn { width: 40px; height: 40px; }
+
+/* People list: open someone's profile, or remove them if you're the coordinator */
+.l-person-open { flex: 1; display: flex; align-items: center; gap: 10px; background: none; border: 0; padding: 0; text-align: left; min-width: 0; }
+.l-person-open b { font-weight: 600; font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.l-remove { border: 0; border-radius: 999px; padding: 5px 11px; font-size: 12.5px; font-weight: 700; color: #ff8a80;
+  background: linear-gradient(180deg, rgba(255, 69, 58, 0.22), rgba(255, 69, 58, 0.08)); box-shadow: 0 1px 0 rgba(255, 255, 255, 0.1) inset; }
+.l-remove:hover { background: linear-gradient(180deg, rgba(255, 69, 58, 0.34), rgba(255, 69, 58, 0.14)); }
+.l-side-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.l-side-actions .l-btn { padding: 12px 14px; }
+.l-side-note { margin: -6px 0 0; color: var(--faint); font-size: 12.5px; line-height: 1.45; }
+
+/* Chat: below the page, wide and simple */
+.l-chat-jump-wrap { display: flex; justify-content: center; margin: 46px 0 10px; position: relative; }
+.l-chat-jump-wrap::before { content: ''; position: absolute; left: 0; right: 0; top: 50%; border-top: 1px solid rgba(255, 255, 255, 0.08); }
+.l-chat-jump { position: relative; display: inline-flex; align-items: center; gap: 9px; border: 0; padding: 12px 22px; border-radius: 999px; font-weight: 700; font-size: 16px; color: var(--text);
+  background: linear-gradient(180deg, rgba(48, 50, 58, 0.95), rgba(26, 27, 32, 0.95)); box-shadow: 0 1px 0 rgba(255, 255, 255, 0.12) inset, 0 10px 30px rgba(0, 0, 0, 0.45); }
+.l-chat-jump svg { width: 18px; height: 18px; }
+.l-chat-jump:hover { filter: brightness(1.12); }
+.l-chat-wide { max-width: 820px; margin: 0 auto; padding-top: 22px; scroll-margin-top: 20px; }
+.l-chat-head { font-size: 28px; font-weight: 750; letter-spacing: -0.02em; margin: 0 0 18px; }
+.l-chat-wide .l-chat { gap: 14px; }
+.l-chat-wide .l-msg { gap: 12px; }
+.l-chat-wide .l-bubble { max-width: 70%; padding: 12px 17px; border-radius: 22px; font-size: 16.5px; line-height: 1.45;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.11), rgba(255, 255, 255, 0.06)); box-shadow: 0 1px 0 rgba(255, 255, 255, 0.07) inset; }
+.l-chat-wide .l-msg.me .l-bubble { background: var(--silver); color: #0b0b0d; }
+.l-chat-wide .l-bubble small { font-size: 13px; margin-bottom: 4px; }
+.l-bubble-grok { border: 0; text-align: left; cursor: pointer; display: grid; gap: 8px; color: var(--text);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0.03)) !important; box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.1) inset !important; }
+.l-bubble-grok:hover { background: linear-gradient(180deg, rgba(255, 255, 255, 0.11), rgba(255, 255, 255, 0.05)) !important; }
+.l-grok-av { background: #000 !important; box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.14); }
+.l-grok-pick { display: inline-flex; align-items: center; gap: 6px; width: fit-content; padding: 5px 11px; border-radius: 999px; font-size: 13.5px; font-weight: 700;
+  background: rgba(255, 255, 255, 0.1); }
+.l-chat-day { display: flex; justify-content: center; margin: 8px 0 2px; }
+.l-chat-day span { font-size: 12.5px; font-weight: 700; color: var(--faint); padding: 4px 12px; border-radius: 999px; background: rgba(255, 255, 255, 0.05); }
+.l-chat-empty { color: var(--dim); font-size: 16px; text-align: center; padding: 30px 0; }
+.l-chat-wide .l-composer { margin-top: 22px; padding: 10px 10px 10px 20px; border-radius: 30px; }
+.l-chat-wide .l-composer textarea { font-size: 16.5px; }
+.l-chat-wide .l-send { width: 42px; height: 42px; }
+@media (max-width: 640px) { .l-chat-wide .l-bubble { max-width: 82%; font-size: 15.5px; } .l-side-actions { grid-template-columns: 1fr; } }
+button.l-ledger-row { width: 100%; border: 0; background: none; text-align: left; font: inherit; }
+.l-ledger-icon.in { background: linear-gradient(180deg, rgba(48, 209, 88, 0.35), rgba(48, 209, 88, 0.12)); color: #7dffa4; }
+.l-ledger-icon.pact { background: var(--silver); color: #0b0b0d; }
+
+/* Coordinator row: name left; Coordinator and settings right, on one line */
+.l-coord-who { gap: 11px; }
+.l-coord-who b { font-size: 20px; }
+.l-coord-role { display: inline-flex; align-items: center; gap: 5px; flex: none; color: #ecdcae; font-size: 12.5px; font-weight: 700; padding: 5px 10px;
+  border-radius: 999px; background: linear-gradient(180deg, rgba(236, 220, 174, 0.18), rgba(236, 220, 174, 0.06)); box-shadow: 0 1px 0 rgba(255, 255, 255, 0.1) inset; }
+.l-coord-role svg { width: 13px; height: 13px; }
+
+/* Pact progress: four numbered steps on a line */
+.l-progress-steps { list-style: none; margin: 26px 0 6px; padding: 0; display: grid; grid-template-columns: repeat(4, 1fr); position: relative; }
+.l-progress-steps li { display: grid; justify-items: center; gap: 8px; position: relative; color: var(--faint); font-weight: 600; font-size: 14px; }
+.l-progress-steps li::before { content: ''; position: absolute; top: 19px; left: -50%; width: 100%; height: 2px; background: rgba(255, 255, 255, 0.1); z-index: 0; }
+.l-progress-steps li:first-child::before { display: none; }
+.l-progress-steps li.done::before, .l-progress-steps li.now::before { background: linear-gradient(90deg, #d9dade, #a9abb2); }
+.l-progress-steps .dot { position: relative; z-index: 1; width: 40px; height: 40px; border-radius: 999px; display: grid; place-items: center; font-size: 16px; font-weight: 800;
+  color: var(--dim); background: linear-gradient(180deg, rgba(40, 41, 47, 1), rgba(24, 25, 29, 1)); box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.1) inset; }
+.l-progress-steps .dot svg { width: 19px; height: 19px; stroke-width: 2.6; }
+.l-progress-steps li.done { color: var(--text); }
+.l-progress-steps li.done .dot { background: var(--silver); color: #0b0b0d; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9); }
+.l-progress-steps li.now { color: var(--text); }
+.l-progress-steps li.now .dot { color: #0b0b0d; background: var(--silver); box-shadow: 0 0 0 4px rgba(255, 255, 255, 0.14), 0 8px 22px rgba(0, 0, 0, 0.45); }
+.l-progress-steps.cancelled { opacity: 0.45; }
+
+/* One Grok entry at the top of the chat */
+.l-grok-one { width: 100%; display: flex; align-items: center; gap: 14px; border: 0; text-align: left; padding: 16px 18px; margin-bottom: 22px; border-radius: 20px; color: var(--text);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.035)); box-shadow: 0 1px 0 rgba(255, 255, 255, 0.1) inset, 0 12px 30px rgba(0, 0, 0, 0.3); }
+.l-grok-one:hover { background: linear-gradient(180deg, rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0.05)); }
+.l-grok-one-main { flex: 1; min-width: 0; display: grid; gap: 4px; }
+.l-grok-one-main b { font-size: 17px; }
+.l-grok-one-main b small { color: var(--dim); font-weight: 600; font-size: 14px; }
+.l-grok-one-main > span { color: var(--dim); font-size: 15px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.l-grok-one-open { display: inline-flex; align-items: center; gap: 6px; font-weight: 700; font-size: 14px; padding: 8px 14px; border-radius: 999px; background: rgba(255, 255, 255, 0.1); flex: none; }
+.l-sum-block { display: grid; gap: 8px; margin-bottom: 18px; }
+.l-sum-block > small { color: var(--dim); font-weight: 700; font-size: 12.5px; text-transform: uppercase; letter-spacing: 0.06em; }
+.l-sum-block p { margin: 0; line-height: 1.55; }
+.l-sum-block ul { margin: 0; padding-left: 20px; line-height: 1.6; }
+.l-sum-pick { font-weight: 700; }
+.l-sum-earlier { display: grid; gap: 4px; padding: 10px 0; border-top: 1px solid rgba(255, 255, 255, 0.07); }
+.l-sum-earlier span { color: var(--faint); font-size: 12.5px; font-weight: 700; }
+.l-sum-earlier p { color: var(--dim); font-size: 14.5px; }
+
+/* Chat: bigger photos, centred level with each message */
+.l-chat-wide .l-msg { align-items: center; gap: 14px; }
+.l-chat-wide .l-msg .l-av { box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.12), 0 6px 14px rgba(0, 0, 0, 0.35); }
+.l-chat-wide .l-bubble { padding: 10px 16px; }
+.l-chat-wide .l-bubble small { margin-bottom: 2px; }
+.l-chat-wide .l-chat { gap: 12px; }
+
+/* Grok's summary: room to breathe */
+.l-modal:has(.l-sum-block) { width: min(600px, 100%); padding: 28px; }
+.l-sum-block { gap: 12px; margin-bottom: 0; padding: 20px 0; border-top: 1px solid rgba(255, 255, 255, 0.07); }
+.l-sum-block:first-of-type { border-top: 0; padding-top: 4px; }
+.l-sum-block p { font-size: 16px; line-height: 1.65; }
+.l-sum-block ul { display: grid; gap: 8px; font-size: 15.5px; line-height: 1.5; }
+.l-sum-pick { display: grid; gap: 4px; padding: 16px 18px; margin-top: 6px; border-radius: 16px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.04)); box-shadow: 0 1px 0 rgba(255, 255, 255, 0.1) inset; }
+.l-sum-pick-label { color: var(--dim); font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; }
+.l-sum-pick b { font-size: 19px; font-weight: 750; letter-spacing: -0.01em; }
+.l-sum-pick-price { color: var(--dim); font-weight: 600; font-size: 14.5px; }
+.l-sum-cta { margin: 4px 0 8px; padding: 14px 18px; font-size: 16px; }
+.l-sum-earlier { gap: 8px; padding: 16px 0; }
+.l-sum-earlier .l-sum-pick { padding: 12px 14px; }
+.l-sum-earlier .l-sum-pick b { font-size: 16px; }
+.l-mic.on { background: var(--silver); color: #0b0b0d; animation: l-listen 1.4s ease-in-out infinite; }
+@keyframes l-listen { 0%, 100% { box-shadow: 0 0 0 0 rgba(255, 255, 255, 0.35); } 50% { box-shadow: 0 0 0 8px rgba(255, 255, 255, 0); } }
+
+/* Actions under the step card: helpers on the left, Book it pinned to the right */
+.l-actions-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 18px; flex-wrap: wrap; }
+.l-actions-row .l-actions { margin: 0; }
+.l-book { display: inline-flex; align-items: center; gap: 9px; border: 0; padding: 13px 26px; border-radius: 999px; font-size: 17px; font-weight: 800; letter-spacing: -0.005em;
+  color: #0b0b0d; background: #ffffff; box-shadow: 0 1px 0 rgba(255, 255, 255, 1) inset, 0 10px 28px rgba(0, 0, 0, 0.45), 0 0 0 4px rgba(255, 255, 255, 0.08);
+  transition: transform 0.15s ease, box-shadow 0.15s ease; margin-left: auto; }
+.l-book svg { width: 19px; height: 19px; }
+.l-book:hover { transform: translateY(-1px); box-shadow: 0 1px 0 #fff inset, 0 14px 34px rgba(0, 0, 0, 0.5), 0 0 0 5px rgba(255, 255, 255, 0.12); }
+.l-book:disabled { opacity: 0.5; transform: none; }
+@media (max-width: 640px) { .l-book { width: 100%; justify-content: center; } }
+
+/* Grok in the chat: the big setup first, then a block per question, then Grok's status */
+.l-grok-block { width: 100%; display: flex; align-items: flex-start; gap: 14px; border: 0; text-align: left; padding: 14px 16px; border-radius: 18px; color: var(--text);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.075), rgba(255, 255, 255, 0.03)); box-shadow: 0 1px 0 rgba(255, 255, 255, 0.08) inset; }
+.l-grok-block:hover { background: linear-gradient(180deg, rgba(255, 255, 255, 0.11), rgba(255, 255, 255, 0.045)); }
+.l-grok-block.big { padding: 20px; margin-bottom: 22px; border-radius: 22px; box-shadow: 0 1px 0 rgba(255, 255, 255, 0.12) inset, 0 14px 34px rgba(0, 0, 0, 0.35); }
+.l-grok-block-main { flex: 1; min-width: 0; display: grid; gap: 6px; }
+.l-grok-block-main b { font-size: 15.5px; }
+.l-grok-block.big .l-grok-block-main b { font-size: 18px; }
+.l-grok-block-main b small { color: var(--faint); font-weight: 600; font-size: 13px; }
+.l-grok-block-main .text { color: var(--dim); font-size: 15px; line-height: 1.5; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.l-grok-block.big .l-grok-block-main .text { -webkit-line-clamp: 5; font-size: 15.5px; color: rgba(245, 245, 247, 0.72); }
+.l-grok-block-pick { width: fit-content; padding: 5px 12px; border-radius: 999px; font-size: 13.5px; font-weight: 700; background: rgba(255, 255, 255, 0.1); }
+.l-grok-block .l-grok-one-open { align-self: center; }
+.l-grok-status { display: flex; align-items: center; gap: 14px; margin-top: 16px; padding: 14px 16px; border-radius: 18px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0.025)); }
+.l-grok-status.error { background: linear-gradient(180deg, rgba(255, 69, 58, 0.16), rgba(255, 69, 58, 0.05)); }
+.l-grok-status-main { flex: 1; display: grid; gap: 4px; min-width: 0; }
+.l-grok-status-main b { font-size: 15px; }
+.l-grok-status-main span { color: var(--dim); font-size: 14px; }
+.l-grok-status-actions { display: flex; gap: 8px; flex: none; }
+.l-dots { display: inline-flex; gap: 5px; }
+.l-dots i { width: 7px; height: 7px; border-radius: 99px; background: var(--dim); animation: l-dot 1.2s ease-in-out infinite; }
+.l-dots i:nth-child(2) { animation-delay: 0.15s; }
+.l-dots i:nth-child(3) { animation-delay: 0.3s; }
+@keyframes l-dot { 0%, 80%, 100% { opacity: 0.25; transform: translateY(0); } 40% { opacity: 1; transform: translateY(-3px); } }
