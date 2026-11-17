@@ -47,3 +47,13 @@ export type PactPaymentStatusRow = {
   refunded_at: string | null
 }
 
+export type PactPaymentObligation = {
+  payment_id: string
+  pact_id: string
+  user_id: string
+  amount_usdc: number | string
+  status: PactShareStatus
+  allocation_version: number
+  source_share_id: string | null
+}
+

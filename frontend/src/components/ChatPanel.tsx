@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
 import type { PactChatMessage } from '../types/chat'
 import type { PactMember } from '../types/pact'
+import type { PactActionCardRecord } from '../lib/chatService'
 
 type Props = {
   pactId: string
@@ -14,13 +15,16 @@ type Props = {
   error?: string | null
   backendReady?: boolean
   onSend?: (pactId: string, body: string) => Promise<void>
+  actionCards?: PactActionCardRecord[]
+  onShareActionCard?: (cardId: string) => Promise<void>
+  onActionDecision?: (decisionId: string, vote: 'approve' | 'reject') => Promise<void>
 }
 
 function formatTime(value: string) {
   return new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' }).format(new Date(value))
 }
 
-export function ChatPanel({ pactId, pactName, currentUserId, currentUserName, currentUserAvatar, members = [], messages = [], loading = false, error = null, backendReady = false, onSend }: Props) {
+export function ChatPanel({ pactId, pactName, currentUserId, currentUserName, currentUserAvatar, members = [], messages = [], loading = false, error = null, backendReady = false, onSend, actionCards = [], onShareActionCard, onActionDecision }: Props) {
   const [draft, setDraft] = useState('')
   const [sendError, setSendError] = useState<string | null>(null)
   const [sending, setSending] = useState(false)
@@ -59,7 +63,9 @@ export function ChatPanel({ pactId, pactName, currentUserId, currentUserName, cu
         const rosterMember = members.find((member) => member.user_id === message.sender_id)
         const name = message.sender_name || rosterMember?.profile?.full_name || (mine ? currentUserName : 'Pact member')
         const avatar = message.sender_avatar_url || rosterMember?.profile?.avatar_url || (mine ? currentUserAvatar : null)
-        return <article className={`chat-message${mine ? ' is-mine' : ''}`} key={message.id}><div className="chat-avatar">{avatar ? <img src={avatar} alt="" referrerPolicy="no-referrer" /> : <span>{name.charAt(0).toUpperCase()}</span>}</div><div className="chat-message-body"><div className="chat-message-meta"><strong>{name}{mine ? ' · you' : ''}</strong><time dateTime={message.created_at}>{formatTime(message.created_at)}</time></div><p>{message.body}</p></div></article>
+        const card = message.action_card_id ? actionCards.find((item) => item.card_id === message.action_card_id) : null
+        const decisionId = card?.payload && typeof card.payload.decision_id === 'string' ? card.payload.decision_id : null
+        return <article className={`chat-message${mine ? ' is-mine' : ''}`} key={message.id}><div className="chat-avatar">{avatar ? <img src={avatar} alt="" referrerPolicy="no-referrer" /> : <span>{name.charAt(0).toUpperCase()}</span>}</div><div className="chat-message-body"><div className="chat-message-meta"><strong>{name}{mine ? ' · you' : ''}</strong><time dateTime={message.created_at}>{formatTime(message.created_at)}</time></div><p>{message.body}</p>{card ? <div className="chat-action-card"><strong>{card.title}</strong><span>{card.state}</span><small>{card.description}</small><div>{onShareActionCard ? <button className="outline-button" type="button" onClick={() => void onShareActionCard(card.card_id)}>Share with Group</button> : null}{decisionId && onActionDecision && card.state !== 'approved' && card.state !== 'rejected' ? <><button className="outline-button" type="button" onClick={() => void onActionDecision(decisionId, 'approve')}>Approve</button><button className="outline-button" type="button" onClick={() => void onActionDecision(decisionId, 'reject')}>Reject</button></> : null}</div></div> : null}</div></article>
       }) : null}
     </div>
     <div className="chat-composer"><textarea value={draft} maxLength={2000} onChange={(event) => { setDraft(event.target.value); setSendError(null) }} onKeyDown={handleKeyDown} placeholder={backendReady ? 'Write to your Pact…' : 'Compose a message…'} aria-label="Message" disabled={sending} /> <div className="chat-composer-footer"><span className={draft.length > 2000 ? 'is-over' : ''}>{draft.length}/2000 · Enter to send · Shift+Enter for a new line</span><button className="outline-button" type="button" onClick={() => void send()} disabled={!canSend}>{sending ? 'Sending…' : 'Send'}<span>↑</span></button></div></div>

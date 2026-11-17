@@ -7,8 +7,8 @@ import { createPactInvitation, friendlyError, getPactWorkspace } from '../lib/pa
 import type { PactWorkspace, Profile } from '../types/pact'
 import { ChatPanel } from '../components/ChatPanel'
 import { PactPilotPanel } from '../components/PactPilotPanel'
-import { askPactPilot } from '../lib/pactPilotService'
-import { listPactMessages, sendPactMessage, subscribeToPactMessages } from '../lib/chatService'
+import { askPactPilot, executePactPilotOperation } from '../lib/pactPilotService'
+import { listPactActionCards, listPactMessages, sendPactMessage, sharePactActionCard, subscribeToPactActionCards, subscribeToPactMessages, type PactActionCardRecord } from '../lib/chatService'
 import type { PactChatMessage } from '../types/chat'
 import { PactMoneyPanel } from '../components/PactMoneyPanel'
 import { createPactFundingPlan, createPactMoneyWallet, getPactMemberWallets, getPactMoneyWalletStatus, getPactPaymentStatus, isPaymentBackendUnavailable, pactMoneyWalletEnabled, resetPactMoneyPin, retryPactEventVerification, runPactAction, sendPactMoney, type PactAction, type PactVerificationError } from '../lib/pactMoneyService'
@@ -39,6 +39,7 @@ export function PactWorkspacePage({ user, profile, pactId, onNavigate, onSignOut
   const [chatLoading, setChatLoading] = useState(false)
   const [chatError, setChatError] = useState<string | null>(null)
   const [chatLive, setChatLive] = useState(false)
+  const [actionCards, setActionCards] = useState<PactActionCardRecord[]>([])
   const [moneyStatus, setMoneyStatus] = useState<PactMoneyStatus>('unavailable')
   const [moneyWallet, setMoneyWallet] = useState<PactMoneyWallet | null>(null)
   const [moneyError, setMoneyError] = useState<string | null>(null)
@@ -115,7 +116,9 @@ return () => {
       if (!active) return
       setChatMessages((current) => [...history, ...current].filter((message, index, all) => all.findIndex((item) => item.id === message.id) === index).sort((a, b) => a.created_at.localeCompare(b.created_at) || a.id.localeCompare(b.id)))
     }).catch((reason) => { if (active) setChatError(friendlyError(reason, 'The Pact conversation could not be loaded.')) }).finally(() => { if (active) setChatLoading(false) })
-    return () => { active = false; unsubscribe(); setChatLive(false) }
+    listPactActionCards(pact.id).then((cards) => { if (active) setActionCards(cards) }).catch(() => { if (active) setActionCards([]) })
+    const unsubscribeCards = subscribeToPactActionCards(pact.id, (card) => { if (active) setActionCards((current) => [card, ...current.filter((item) => item.card_id !== card.card_id)]) })
+    return () => { active = false; unsubscribe(); unsubscribeCards(); setChatLive(false) }
   }, [pact?.id])
 
   useEffect(() => {
@@ -234,6 +237,11 @@ return () => {
     return response
   }
 
+  async function executePilotOperation(operationId: string) {
+    await executePactPilotOperation({ pactId, pactName: pact?.name || 'Pact' }, operationId)
+    setFlow(await loadPactFlow(pactId))
+  }
+
   return <AppShell user={user} profile={profile} current="pacts" onNavigate={onNavigate} onSignOut={onSignOut} signingOut={signingOut}>
     <motion.section className="workspace-page" initial={reduceMotion ? false : { opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: .65 }}>
       <button className="back-link" type="button" onClick={() => onNavigate('/dashboard')}>← My Pacts</button>
@@ -256,11 +264,11 @@ return () => {
         </div>
         <div className="workspace-assist-grid">
           <div className={`workspace-assist-panel workspace-assist-chat ${activeTool === 'chat' ? 'is-mobile-active' : ''}`} id="pact-chat-panel">
-            <ChatPanel pactId={pact.id} pactName={pact.name} currentUserId={user.id} currentUserName={displayName(user, profile)} currentUserAvatar={avatarUrl(user, profile)} members={pact.members} messages={chatMessages} loading={chatLoading} error={chatError} backendReady={chatLive} onSend={sendPactMessage} />
+            <ChatPanel pactId={pact.id} pactName={pact.name} currentUserId={user.id} currentUserName={displayName(user, profile)} currentUserAvatar={avatarUrl(user, profile)} members={pact.members} messages={chatMessages} loading={chatLoading} error={chatError} backendReady={chatLive} onSend={sendPactMessage} actionCards={actionCards} onShareActionCard={async (cardId) => { await sharePactActionCard(cardId); const cards = await listPactActionCards(pact.id); setActionCards(cards) }} onActionDecision={async (decisionId, vote) => { await handleVote(decisionId, vote); const cards = await listPactActionCards(pact.id); setActionCards(cards) }} />
           </div>
           <div className={`workspace-assist-panel workspace-assist-pilot ${activeTool === 'pilot' ? 'is-mobile-active' : ''}`} id="pact-pilot-panel">
             <div className="pilot-column">
-              <PactPilotPanel pactId={pact.id} pactName={pact.name} onAsk={askAndPersist} />
+              <PactPilotPanel pactId={pact.id} pactName={pact.name} onAsk={askAndPersist} onExecuteOperation={executePilotOperation} />
               <div className="pilot-action-strip" aria-label="PactPilot workspace actions">
                 <PactPilotActionCard eyebrow="PLAN" title="Booking options" description="Search the simulated hotel inventory and bring a quote to the group." status="DEMO ONLY" actionLabel="Open below" onAction={() => document.getElementById('booking-panel')?.scrollIntoView({ behavior: 'smooth', block: 'center' })} />
                 <PactPilotActionCard eyebrow="DECIDE" title="Group approval" description="Turn a saved recommendation into a real decision for the Pact." status={flow.decisions.length ? `${flow.decisions.length} decision${flow.decisions.length === 1 ? '' : 's'}` : 'No open decisions'} actionLabel="Review below" onAction={() => document.getElementById('decide-panel')?.scrollIntoView({ behavior: 'smooth', block: 'center' })} />

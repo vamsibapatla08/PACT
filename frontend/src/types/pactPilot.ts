@@ -12,6 +12,7 @@ export type PactPilotMessage = {
   body: string
   created_at: string
   summary?: string
+  reply?: string
   agreement?: PactPilotAgreement
   fit_issues?: PactPilotFitIssue[]
   options?: PactPilotOption[]
@@ -19,6 +20,8 @@ export type PactPilotMessage = {
   costs?: PactPilotCost[]
   estimate?: PactPilotEstimate
   next_steps?: string[]
+  actions?: Array<{ tool: string; args: Record<string, unknown>; requires_confirmation: true }>
+  operation_id?: string
 }
 
 export type PactPilotContext = { pactId: string; pactName: string }
