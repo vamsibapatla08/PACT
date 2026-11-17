@@ -1,8 +1,8 @@
 # Rory — Agent and blockchain
 
 - Status: In progress
-- Done: 24/25
-- Updated: 2026-11-15
+- Done: 25/35
+- Updated: 2026-11-16
 
 ## Main goal
 
@@ -50,9 +50,21 @@
 - [x] Pay one share with a real PIN through the app
 - [ ] Send the first real USDC payment between two team wallets
 
+### QuickNode (taken over from Dimple, Nov 16)
+
+- [x] `quicknode-webhook` Edge Function: checks QuickNode's signature, decodes PactSplit events, marks shares paid and records Released, Cancelled and Refunded
+- [ ] Point the Stream at PactSplit only (`0x6eadb2b3829e6d9c30208ff4122c40df7682d79d`), filtered on the SharePaid, Released, Refunded, Cancelled and PactCreated topics
+- [ ] Deploy the webhook and set `QUICKNODE_SECURITY_TOKEN` on Supabase
+- [ ] Pay one share in a small pact and check the SharePaid event reaches the webhook
+- [ ] The same event sent twice changes nothing
+- [ ] A wrong signature gets a 401
+- [ ] Full loop: pay a share in the app and watch it show Paid without a refresh
+- [ ] README section: setup steps, architecture picture, contract address, chain ID 5042002 and the stream filter
+- [ ] Short screen clip of the stream firing for the demo video
+
 ## Blockers
 
-- None. The app has buttons for every PactSplit action now. What's left is running the live tests
+- None. The app has buttons for every PactSplit action now, and the QuickNode webhook is written. What's left is deploying it and running the live tests
 
 ## Notes
 
