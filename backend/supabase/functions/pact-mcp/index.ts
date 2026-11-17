@@ -2,7 +2,7 @@
 // It reads pacts, adds itinerary items, posts to the chat and puts a booking up for approval. It never moves
 // money: paying a share always needs the person's own PIN in the Pact app.
 //
-// Auth: a personal token made in Pact (Connect Grok), sent as "Authorization: Bearer pact_…". The token is
+// Auth: a personal token made in Pact (Connect Grok), sent as "Authorization: Bearer pact_…" or ?key=pact_…. The token is
 // looked up by its hash, then the server signs in as that person, so every row level security rule and Pact
 // function behaves exactly as it does in the app.
 import { createClient, type SupabaseClient } from 'npm:@supabase/supabase-js@2'
@@ -32,7 +32,10 @@ async function sha256(text: string) {
 }
 
 async function signIn(request: Request): Promise<Me | null> {
+  // The token comes as a Bearer header (API and most MCP clients) or as ?key= on the URL, for Grok's connector
+  // dialog, which only takes a URL.
   const token = request.headers.get('Authorization')?.match(/^Bearer\s+(pact_[0-9a-f]{64})$/i)?.[1]
+    ?? new URL(request.url).searchParams.get('key')?.match(/^(pact_[0-9a-f]{64})$/i)?.[1]
   if (!token) return null
   const { data: row } = await admin.from('pact_mcp_tokens').select('token_id, user_id').eq('token_hash', await sha256(token)).is('revoked_at', null).maybeSingle()
   if (!row) return null

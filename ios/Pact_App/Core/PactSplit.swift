@@ -169,11 +169,26 @@ extension PactStore {
 
     func key(_ id: Pact.ID) -> String { id.uuidString.lowercased() }
 
+    /// The current sign-in token, refreshed if it has expired. The functions client can otherwise keep sending
+    /// the token from launch, which edge functions reject with 401 once it's an hour old.
+    func freshAuth() async -> [String: String] {
+        guard let session = try? await client.auth.session else { return [:] }
+        return ["Authorization": "Bearer \(session.accessToken)"]
+    }
+
+    /// An edge function said "not signed in". If Supabase agrees the session has ended (signed out elsewhere,
+    /// or its refresh token was revoked), sign out here too, so the app asks to sign in instead of quietly
+    /// showing an empty wallet. A session that is still fine is left alone.
+    func signOutIfSessionEnded() async {
+        if (try? await client.auth.user()) == nil { await signOut() }
+    }
+
     /// Calls an Edge Function as the signed-in user. A 4xx comes back as its readable `error`.
     func invoke<T: Decodable>(_ function: String, _ body: [String: String]) async throws -> T {
         do {
-            return try await client.functions.invoke(function, options: FunctionInvokeOptions(body: body))
+            return try await client.functions.invoke(function, options: FunctionInvokeOptions(headers: await freshAuth(), body: body))
         } catch let failure as FunctionsError {
+            if case .httpError(401, _) = failure { await signOutIfSessionEnded() }
             if case .httpError(_, let data) = failure, let reply = try? JSONDecoder().decode(FailureReply.self, from: data), let message = reply.error {
                 throw FunctionFailure(message: message, lowBalance: reply.reason == "low_balance")
             }
