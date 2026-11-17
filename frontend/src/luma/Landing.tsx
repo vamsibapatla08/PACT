@@ -33,11 +33,12 @@ function GoogleG({ size = 18 }: { size?: number }) {
   )
 }
 
-function GoogleButton({ big }: { big?: boolean }) {
+/** Google sign-in. `to` is where Google sends you back; the app's home by default. */
+export function GoogleButton({ big, to, onStart }: { big?: boolean; to?: string; onStart?: () => void }) {
   const [busy, setBusy] = useState(false)
   return (
     <button className={big ? 'x-google big' : 'x-google'} type="button" disabled={busy}
-      onClick={() => { setBusy(true); void S.supabase.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: `${location.origin}/` } }) }}>
+      onClick={() => { setBusy(true); onStart?.(); void S.supabase.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: to ?? `${location.origin}/` } }) }}>
       <GoogleG size={big ? 20 : 17} />{busy ? 'Opening Google…' : 'Continue with Google'}
     </button>
   )

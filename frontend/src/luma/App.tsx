@@ -1,12 +1,12 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import type { Session } from '@supabase/supabase-js'
 import * as S from './store'
-import { Avatar, Busy, Cover, Icon, Modal, Stack, Switch, VerifiedBadge } from './ui'
+import { Avatar, Busy, Cover, Grok, Icon, Modal, Stack, Switch, VerifiedBadge } from './ui'
 import { PactPage } from './PactPage'
 import { AddExpense } from './TabCard'
 import { BankCard } from './BankCard'
 import { LiquidGold } from './LiquidGold'
-import { ConnectPage } from './Mcp'
+import { AuthorizeMcp, ConnectPage, pendingMcpRequest } from './Mcp'
 import { Landing } from './Landing'
 import './luma.css'
 
@@ -43,6 +43,8 @@ export function LumaApp() {
     return () => data.subscription.unsubscribe()
   }, [])
   if (session === undefined) return <div className="l-app"><div className="l-center"><img src="/pact-mark.png" alt="Pact" width={64} /><span className="l-spin" /></div></div>
+  // Grok's "Continue with Google" lands here, signed in or not.
+  if (location.pathname === '/connect/authorize' || pendingMcpRequest()) return <AuthorizeMcp session={session} />
   if (!session) return <Landing />
   return <Signed me={session.user.id} />
 }
@@ -124,7 +126,7 @@ function Signed({ me }: { me: string }) {
 
   const app: App = { me, profile, pacts, data, wallet, walletLoaded, social, friends, name, avatar, go, refresh, refreshPact, refreshSocial, setWallet, newPact: () => setCreating(true) }
   const parts = path.split('/').filter(Boolean)
-  const tab = parts[0] === 'pacts' && parts[1] ? null : ['pacts', 'friends', 'wallet', 'connect'].includes(parts[0]) ? parts[0] : 'home'
+  const tab = parts[0] === 'pacts' && parts[1] ? null : ['pacts', 'friends', 'wallet', 'grok'].includes(parts[0]) ? parts[0] : parts[0] === 'connect' ? 'grok' : 'home'
 
   return (
     <Ctx.Provider value={app}>
@@ -135,8 +137,9 @@ function Signed({ me }: { me: string }) {
           : tab === 'pacts' ? <Timeline />
           : tab === 'friends' ? <Friends />
           : tab === 'wallet' ? <WalletPage />
-          : tab === 'connect' ? <ConnectPage />
+          : tab === 'grok' ? <ConnectPage />
           : <Home />}
+        {tab && <BottomBar tab={tab} />}
         {creating && <NewPact onClose={() => setCreating(false)} />}
       </div>
     </Ctx.Provider>
@@ -148,7 +151,29 @@ const tabs = [
   { key: 'pacts', label: 'Pacts', icon: 'pacts', path: '/pacts' },
   { key: 'friends', label: 'Friends', icon: 'friends', path: '/friends' },
   { key: 'wallet', label: 'Wallet', icon: 'wallet', path: '/wallet' },
+  { key: 'grok', label: 'Grok', icon: 'grok', path: '/grok' },
 ]
+
+const tabIcon = (icon: string, size?: number) => (icon === 'grok' ? <Grok size={size} /> : <Icon name={icon} size={size} />)
+
+/** Phones: the tabs move to a glass bar at the bottom with a silver +, like the iOS app. */
+function BottomBar({ tab }: { tab: string | null }) {
+  const { go, newPact, social } = useApp()
+  const waiting = social.requests.filter((r) => r.incoming).length + social.invites.length
+  return (
+    <nav className="l-tabbar" aria-label="Main">
+      <div className="l-tabbar-glass">
+        {tabs.map((t) => (
+          <button key={t.key} type="button" className={tab === t.key ? 'on' : ''} onClick={() => go(t.path)} aria-label={t.label} aria-current={tab === t.key ? 'page' : undefined}>
+            {tabIcon(t.icon, 22)}
+            {t.key === 'friends' && waiting > 0 && <i className="l-tabbar-dot" />}
+          </button>
+        ))}
+      </div>
+      <button className="l-tabbar-plus" type="button" onClick={newPact} aria-label="New pact"><Icon name="plus" /></button>
+    </nav>
+  )
+}
 
 function TopBar({ tab }: { tab: string | null }) {
   const { go, profile, newPact, social } = useApp()
@@ -162,7 +187,7 @@ function TopBar({ tab }: { tab: string | null }) {
       <nav className="l-nav" aria-label="Main">
         {tabs.map((t) => (
           <button key={t.key} type="button" className={tab === t.key ? 'on' : ''} onClick={() => go(t.path)} aria-current={tab === t.key ? 'page' : undefined}>
-            <Icon name={t.icon} /><span>{t.label}</span>
+            {tabIcon(t.icon)}<span>{t.label}</span>
             {t.key === 'friends' && waiting > 0 && <i style={{ width: 7, height: 7, borderRadius: 9, background: 'var(--bad)', marginLeft: -2 }} />}
           </button>
         ))}
@@ -175,7 +200,6 @@ function TopBar({ tab }: { tab: string | null }) {
           {menu && (
             <div className="l-menu" onMouseLeave={() => setMenu(false)}>
               <div><b>{profile?.name ?? 'You'}</b><span>{profile?.email}</span></div>
-              <button type="button" onClick={() => { setMenu(false); go('/connect') }}>Connect Grok</button>
               <button type="button" onClick={() => void S.supabase.auth.signOut()}>Sign out</button>
             </div>
           )}
@@ -197,7 +221,7 @@ function Home() {
   return (
     <main className="l-page">
       <h1 className="l-h1">Hi, {S.firstName(profile?.name)}</h1>
-      <BankCard info={{ balance: wallet?.usdcBalance ?? null, address: wallet?.address ?? null, name: profile?.name ?? null }} footer={
+      <BankCard finish="saved" info={{ balance: wallet?.usdcBalance ?? null, address: wallet?.address ?? null, name: profile?.name ?? null }} footer={
         <div className="l-card-stats">
           {owe === 0 && coming === 0 && <span className="l-stat ok"><Icon name="checkCircle" size={16} />Up to date</span>}
           {owe > 0 && <span className="l-stat owe">You owe <b>{S.dollars(owe)}</b></span>}
@@ -415,15 +439,16 @@ function WalletPage() {
     setLedgerError(null)
     S.loadLedger(wallet.address, pactKey ? pactKey.split(',') : [])
       .then((l) => { if (run === latestLoad.current) setLedger(l) })
-    void S.loadTaggedPayments().then(setTagged)
       .catch((e) => { if (run === latestLoad.current) setLedgerError((e as Error).message) })
+    // Which payments are already on a pact's tab. If this fails, the list still shows, just without the tags.
+    void S.loadTaggedPayments().then(setTagged).catch(() => undefined)
   }, [wallet?.address, wallet?.usdcBalance, pactKey, attempt])
   if (!walletLoaded) return <div className="l-center"><span className="l-spin" /></div>
   return (
     <main className="l-page">
       <div className="l-head"><h1 className="l-h1">Wallet</h1></div>
       {wallet ? (
-        <BankCard info={{ balance: wallet.usdcBalance, address: wallet.address, name: profile?.name ?? null }} footer={
+        <BankCard finish="pick" info={{ balance: wallet.usdcBalance, address: wallet.address, name: profile?.name ?? null }} footer={
           <div className="l-card-stats">
             <code className="l-dim" style={{ fontSize: 14 }}>{wallet.address.slice(0, 6)}…{wallet.address.slice(-4)}</code>
             <button className="l-btn l-ghost l-small" type="button" onClick={() => { void navigator.clipboard.writeText(wallet.address); setCopied(true); setTimeout(() => setCopied(false), 1500) }}>{copied ? 'Copied' : 'Copy address'}</button>
@@ -432,7 +457,7 @@ function WalletPage() {
         } />
       ) : (
         <div className="l-card l-balance">
-          <span className="l-dim" style={{ fontWeight: 600 }}>Arc Testnet</span>
+          <span className="l-dim" style={{ fontWeight: 600 }}>Base Sepolia</span>
           <p style={{ margin: '6px 0 12px', fontSize: 16 }}>Make a wallet so you can send and get test USDC. Circle keeps it safe with your own PIN.</p>
           <div>{busy ? <Busy text="Set your PIN…" /> : <button className="l-btn" type="button" onClick={async () => { setBusy(true); setError(null); try { setWallet(await S.makeWallet()) } catch (e) { setError((e as Error).message) } setBusy(false) }}>Make my wallet</button>}</div>
           {error && <p className="l-error">{error}</p>}
@@ -442,16 +467,9 @@ function WalletPage() {
       {!wallet ? <div className="l-card l-empty"><span>Make your wallet to see money coming in and going out.</span></div>
         : ledgerError && !ledger ? <div className="l-card l-empty"><span>{ledgerError}</span><div><button className="l-btn l-ghost l-small" type="button" onClick={() => setAttempt((n) => n + 1)}>Try again</button></div></div>
         : !ledger ? <div className="l-card l-empty"><span className="l-spin" style={{ margin: '0 auto' }} /></div>
-        : !ledger.rows.length ? <div className="l-card l-empty"><span>Money you send and get shows up here.</span></div> : (
+        : !ledger.rows.length ? <div className="l-card l-empty"><span>Nothing yet on Base Sepolia. Your wallet here is new, so money you send and get from now on shows up here. Older Arc payments aren't listed.</span></div> : (
         <div className="l-card l-list">
           {ledger.rows.map((r) => <LedgerLine key={r.id} row={r} taggedTo={tagged.get(r.txHash.toLowerCase()) ?? null} onSplit={() => setSplitting(r)} />)}
-          {ledger.fees > 0 && (
-            <div className="l-row">
-              <span className="l-ledger-icon"><Icon name="other" /></span>
-              <div className="l-row-main"><b>Network fees</b><span>Arc charges a tiny fee in USDC for each payment you send</span></div>
-              <b className="l-amt">−{ledger.fees.toFixed(4)}</b>
-            </div>
-          )}
           <div className="l-row l-ledger-total">
             <div className="l-row-main"><b>Balance</b><span>Everything above, added up</span></div>
             <b className="l-amt">{(Math.floor(ledger.total * 100) / 100).toFixed(2)} USDC</b>
@@ -516,10 +534,10 @@ function LedgerLine({ row, taggedTo, onSplit }: { row: S.LedgerRow; taggedTo: st
       </div>
     )
   }
-  // A pact payment opens that pact; everything else opens the transaction on the Arc explorer.
+  // A pact payment opens that pact; everything else opens the transaction on the Base explorer.
   return pact
     ? <button type="button" className="l-row l-ledger-row" onClick={() => go(`/pacts/${pact.pact_id}`)} title={`Open ${pact.name}`}>{body}</button>
-    : <a className="l-row l-ledger-row" href={S.txLink(row.txHash)} target="_blank" rel="noreferrer" title="See it on the Arc explorer">{body}</a>
+    : <a className="l-row l-ledger-row" href={S.txLink(row.txHash)} target="_blank" rel="noreferrer" title="See it on the Base explorer">{body}</a>
 }
 
 // ---- New pact

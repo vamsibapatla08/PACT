@@ -2,7 +2,7 @@ export type PactMoneyStatus = 'unavailable' | 'loading' | 'ready' | 'error'
 
 export type PactMoneyWallet = {
   address: string
-  blockchain: 'ARC-TESTNET'
+  blockchain: 'BASE-SEPOLIA'
   usdcBalance: string | null
 }
 

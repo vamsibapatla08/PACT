@@ -790,3 +790,81 @@ button.l-ledger-row { width: 100%; border: 0; background: none; text-align: left
 .l-pilot-plan { flex-basis: 100%; display: flex; flex-direction: column; gap: 8px; }
 .l-pilot-plan ul { margin: 0; padding-left: 18px; }
 .l-pilot-buttons { display: flex; gap: 8px; }
+.m-manual { margin-top: 14px; } .m-manual summary { cursor: pointer; font-size: 14px; } .m-manual[open] summary { margin-bottom: 10px; }
+
+/* Phones: tabs in a glass capsule at the bottom and a separate silver +, like the iOS app. The one you're on fills
+   black on silver; the rest are thin icons. */
+.l-tabbar { display: none; }
+@media (max-width: 640px) {
+  .l-top .l-nav, .l-top .l-plus { display: none; }
+  .l-tabbar { display: flex; align-items: center; gap: 10px; position: fixed; left: 12px; right: 12px; z-index: 20;
+    bottom: calc(10px + env(safe-area-inset-bottom)); }
+  .l-tabbar-glass { flex: 1; display: flex; padding: 5px; border-radius: 999px;
+    background: rgba(28, 28, 32, 0.62); backdrop-filter: blur(22px) saturate(1.4); -webkit-backdrop-filter: blur(22px) saturate(1.4);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14), 0 10px 30px rgba(0, 0, 0, 0.45); }
+  .l-tabbar-glass button { flex: 1; position: relative; height: 50px; display: grid; place-items: center; border: 0; border-radius: 999px;
+    background: none; color: rgba(255, 255, 255, 0.7); padding: 0; -webkit-tap-highlight-color: transparent; }
+  .l-tabbar-glass button svg { width: 22px; height: 22px; stroke-width: 1.6; }
+  .l-tabbar-glass button.on { color: #0b0b0d; background: var(--silver); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9), 0 4px 14px rgba(0, 0, 0, 0.35); }
+  .l-tabbar-glass button.on svg { stroke-width: 2.2; }
+  .l-tabbar-dot { position: absolute; top: 10px; right: calc(50% - 16px); width: 7px; height: 7px; border-radius: 9px; background: var(--bad); }
+  .l-tabbar-plus { flex: none; width: 60px; height: 60px; display: grid; place-items: center; border: 0; border-radius: 999px; padding: 0; color: #0b0b0d;
+    background: var(--silver); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9), 0 8px 22px rgba(0, 0, 0, 0.45); }
+  .l-tabbar-plus svg { width: 24px; height: 24px; stroke-width: 2.4; }
+  .l-page { padding-bottom: calc(110px + env(safe-area-inset-bottom)); }
+}
+/* The Grok logo is a white image: dim it like the other icons, and turn it black on the silver tab. */
+.l-nav button img, .l-tabbar-glass button img { opacity: 0.7; }
+.l-nav button.on img, .l-nav button:hover img { opacity: 1; }
+.l-tabbar-glass button.on img { opacity: 1; filter: invert(1); }
+.m-hero { display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap; }
+.m-hero-actions { display: flex; gap: 10px; }
+.m-status { display: inline-flex; align-items: center; gap: 8px; color: var(--dim); font-weight: 600; }
+.m-status.on { color: var(--go); }
+@media (max-width: 640px) { .m-hero-actions { width: 100%; } .m-hero-actions > * { flex: 1; justify-content: center; } }
+.l-signin p { max-width: 520px; justify-self: center; }
+
+/* What Grok can do: tools down the side, the picked one previewed on the right with an example chat. */
+.m-explore { display: grid; grid-template-columns: minmax(220px, 300px) 1fr; gap: 16px; align-items: start; }
+.m-explore-list { display: grid; gap: 6px; }
+.m-explore-list button { display: grid; gap: 3px; text-align: left; padding: 14px 16px; border: 0; border-radius: 14px; background: none; color: var(--text); cursor: pointer;
+  transition: background 0.15s ease; }
+.m-explore-list button b { font-size: 16.5px; }
+.m-explore-list button span { color: var(--dim); font-size: 14px; line-height: 1.35; }
+.m-explore-list button:hover { background: rgba(255, 255, 255, 0.05); }
+.m-explore-list button.on { background: linear-gradient(180deg, rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0.05)); box-shadow: 0 1px 0 rgba(255, 255, 255, 0.12) inset; }
+.m-explore-preview { position: sticky; top: 100px; display: grid; gap: 12px; padding: 24px; border-radius: 20px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.03)); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1), 0 12px 32px rgba(0, 0, 0, 0.35); }
+.m-explore-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.m-explore-head h3 { margin: 0; font-size: 22px; letter-spacing: -0.01em; }
+.m-explore-head i { font-style: normal; font-size: 12px; font-weight: 700; color: var(--dim); padding: 4px 10px; border-radius: 99px; background: rgba(255, 255, 255, 0.08); white-space: nowrap; }
+.m-explore-head i.acts { color: #ffd479; background: rgba(255, 212, 121, 0.12); }
+.m-explore-preview > code { font-size: 13px; color: rgba(255, 255, 255, 0.5); }
+.m-explore-preview > p { margin: 0; color: var(--dim); font-size: 15.5px; line-height: 1.5; }
+.m-explore-chat { display: grid; gap: 10px; margin-top: 6px; }
+.m-bubble { max-width: 88%; padding: 11px 14px; border-radius: 18px; font-size: 15px; line-height: 1.4; display: grid; gap: 3px; }
+.m-bubble.me { justify-self: end; background: var(--silver); color: #0b0b0d; font-weight: 600; border-bottom-right-radius: 6px; }
+.m-bubble.grok { justify-self: start; background: rgba(255, 255, 255, 0.07); border-bottom-left-radius: 6px; }
+.m-bubble-who { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 700; color: var(--faint); margin-bottom: 2px; }
+@media (max-width: 760px) {
+  .m-explore { grid-template-columns: 1fr; }
+  .m-explore-list { grid-auto-flow: column; grid-auto-columns: minmax(170px, 72%); overflow-x: auto; scroll-snap-type: x mandatory; padding-bottom: 4px; }
+  .m-explore-list button { scroll-snap-align: start; background: rgba(255, 255, 255, 0.04); }
+  .m-explore-preview { position: static; padding: 18px; }
+}
+
+/* Pact Money: the flat fallback card in brushed silver, with a fake gold chip. */
+.l-flatcard { background: linear-gradient(135deg, #e9ebef 0%, #c3c7cf 30%, #eef0f3 55%, #a9adb6 80%, #cfd2d8 100%); color: #1d1f25;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.8), 0 18px 40px rgba(0, 0, 0, 0.45); }
+.l-flatcard .l-faint, .l-flatcard-bal small { color: rgba(29, 31, 37, 0.55); }
+.l-flatcard-num { color: #1d1f25; }
+.l-flatcard-chip { width: 52px; height: 40px; border-radius: 8px; background: linear-gradient(135deg, #f6e3a1, #d8b45c 35%, #f2d98c 65%, #a8833a); }
+/* The card's canvas spills past its slot; the slot itself stays in the layout. */
+.l-bankcard-stage { overflow: visible; }
+
+/* Card finish swatches, under the card in the signed-in app. */
+.l-finishes { display: flex; justify-content: center; gap: 10px; margin: 6px 0 12px; }
+.l-finishes button { width: 26px; height: 26px; border-radius: 999px; border: 0; padding: 0; cursor: pointer;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.6), 0 2px 8px rgba(0, 0, 0, 0.45); transition: transform 0.15s ease; }
+.l-finishes button:hover { transform: scale(1.12); }
+.l-finishes button.on { outline: 2px solid rgba(255, 255, 255, 0.9); outline-offset: 3px; }

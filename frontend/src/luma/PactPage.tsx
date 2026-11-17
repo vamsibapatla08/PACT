@@ -291,16 +291,16 @@ function BookedCard({ step, d, proof, me, name }: { step: S.Step; d: S.PactData;
               <>
                 {m ? <Avatar name={m.name} url={m.avatar_url} size={28} /> : <span className="l-ledger-icon"><Icon name="pacts" /></span>}
                 <b>{c.userId === me ? 'You paid' : c.label}{c.userId && share ? ` ${S.dollars(share)}` : ''}</b>
-                {c.quickNode ? <span className="ok"><Icon name="shield" />Verified by QuickNode</span> : <span className="wait"><Icon name="chain" />On Arc · QuickNode pending</span>}
+                {c.quickNode ? <span className="ok"><Icon name="shield" />Verified by QuickNode</span> : <span className="wait"><Icon name="chain" />On Base · QuickNode pending</span>}
               </>
             )
             return c.txHash
-              ? <a key={i} className="l-check-row" href={S.txLink(c.txHash)} target="_blank" rel="noreferrer" title="See it on the Arc explorer">{row}</a>
+              ? <a key={i} className="l-check-row" href={S.txLink(c.txHash)} target="_blank" rel="noreferrer" title="See it on the Base explorer">{row}</a>
               : <div key={i} className="l-check-row">{row}</div>
           })}
         </div>
       )}
-      {proof.level === 'onchain' && <p style={{ fontSize: 13 }}>The Arc chain shows every payment. Pact Verified appears once QuickNode has confirmed each one.</p>}
+      {proof.level === 'onchain' && <p style={{ fontSize: 13 }}>The Base chain shows every payment. Pact Verified appears once QuickNode has confirmed each one.</p>}
     </div>
   )
 }
@@ -770,7 +770,7 @@ function ActionSheet({ id, action, d, iCoordinate, onClose }: { id: string; acti
       {error && <p className="l-error">{error}</p>}
       <div style={{ marginTop: 18 }}>
         {state === 'done' ? <button className="l-btn l-wide-btn" type="button" onClick={onClose}>Done</button>
-          : state === 'busy' ? <Busy text="Confirm with your PIN, then Arc confirms it…" />
+          : state === 'busy' ? <Busy text="Confirm with your PIN, then Base confirms it…" />
           : <button className="l-btn l-wide-btn" type="button" disabled={action !== 'pay_share' && !iCoordinate}
               onClick={async () => { setState('busy'); setError(null); try { await S.pactAction(action, id); await refreshPact(id); setWallet(await S.loadWallet()); setState('done') } catch (e) { setError((e as Error).message); setState('idle') } }}>{copy.button}</button>}
       </div>

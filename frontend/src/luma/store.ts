@@ -530,10 +530,10 @@ export async function loadActivity(): Promise<Transfer[]> {
   return (data ?? []) as Transfer[]
 }
 
-// ---- The full wallet ledger, read from the Arc explorer: every USDC in and out, and the network fees.
+// ---- The full wallet ledger, read from the Base Sepolia explorer: every USDC in and out.
 
-const EXPLORER = 'https://explorer.testnet.arc.io'
-const USDC_TOKEN = '0x3600000000000000000000000000000000000000'
+const EXPLORER = 'https://base-sepolia.blockscout.com'
+const USDC_TOKEN = '0x036cbd53842c5426634e7929541ec2318f3dcf7e' // Circle USDC on Base Sepolia
 export const txLink = (hash: string) => `${EXPLORER}/tx/${hash}`
 
 export type LedgerRow = {
@@ -566,7 +566,7 @@ async function explorerAll<T>(path: string, maxPages = 10): Promise<T[]> {
     const query = new URLSearchParams(Object.entries(params).map(([k, v]) => [k, String(v)])).toString()
     const url = `${EXPLORER}/api/v2${path}${query ? `?${query}` : ''}`
     const res = await fetch(url).catch(() => null) ?? await new Promise((ok) => setTimeout(ok, 800)).then(() => fetch(url)).catch(() => null)
-    if (!res?.ok) throw new Error('The Arc explorer could not be reached. Your balance is still right.')
+    if (!res?.ok) throw new Error('The Base explorer could not be reached. Your balance is still right.')
     const body = await res.json() as ExplorerPage<T>
     all.push(...body.items)
     params = body.next_page_params
@@ -586,9 +586,12 @@ async function memberWallets(pactIds: string[]) {
   return byAddress
 }
 
+// A smart wallet wraps the PactSplit call inside its own, so look for a PactSplit selector anywhere in the input,
+// followed by a pact key (16 uuid bytes, then 16 zero bytes).
+const PACT_CALL = /(?:dd668b0a|67d42a8b|c4d252f5|71de2ffc|9f40efc6)([0-9a-f]{32})0{32}/
 function pactIdFromCall(input: string): string | null {
-  const arg = input.replace(/^0x/, '').slice(8, 40).toLowerCase()
-  if (!/^[0-9a-f]{32}$/.test(arg)) return null
+  const arg = PACT_CALL.exec(input.toLowerCase())?.[1]
+  if (!arg) return null
   return `${arg.slice(0, 8)}-${arg.slice(8, 12)}-${arg.slice(12, 16)}-${arg.slice(16, 20)}-${arg.slice(20)}`
 }
 
@@ -626,13 +629,13 @@ export async function loadLedger(address: string, pactIds: string[]): Promise<Le
     }
     r.pactId = pactIdFromCall(input)
   }))
-  // Every transaction I send pays a small network fee in USDC.
-  const fees = txs.filter((t) => t.from.hash.toLowerCase() === me).reduce((sum, t) => sum + Number(t.fee.value) / 1e18, 0)
+  // Gas is paid in ETH by Circle's Gas Station, so no USDC goes to fees.
+  const fees = 0
   const total = rows.reduce((sum, r) => sum + (r.incoming ? r.amount : -r.amount), 0) - fees
   return { rows, fees, total }
 }
 
-// ---- Verification: QuickNode watches PactSplit on Arc and records each payment with its transaction.
+// ---- Verification: QuickNode watches PactSplit on Base and records each payment with its transaction.
 // "verified" means QuickNode has confirmed every payment the chain shows (and the release, once released).
 // "onchain" means the chain shows it but QuickNode hasn't confirmed all of it yet.
 
