@@ -1,4 +1,6 @@
-export type PactPilotOption = { title: string; description: string; tradeoff: string }
+export type PactPilotOption = { title: string; description: string; tradeoff: string; price_per_person?: number | null; link?: string | null }
+export type PactPilotAgreement = { agreed: boolean; place: string | null; dates: string | null; people: number | null; budget_per_person: number | null; missing: string[] }
+export type PactPilotFitIssue = { problem: string; suggestion: string }
 export type PactPilotTask = { title: string; owner_suggestion: string | null; due_hint: string }
 export type PactPilotCost = { item: string; estimated_amount: number; currency: string; per_person_amount: number | null; option_title?: string | null; is_shared?: boolean; is_estimate: true }
 export type PactPilotAlternativeEstimate = { option_title: string; total: number; per_person: number | null }
@@ -10,6 +12,8 @@ export type PactPilotMessage = {
   body: string
   created_at: string
   summary?: string
+  agreement?: PactPilotAgreement
+  fit_issues?: PactPilotFitIssue[]
   options?: PactPilotOption[]
   tasks?: PactPilotTask[]
   costs?: PactPilotCost[]
