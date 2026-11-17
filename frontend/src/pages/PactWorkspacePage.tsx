@@ -38,6 +38,7 @@ export function PactWorkspacePage({ user, profile, pactId, onNavigate, onSignOut
   const [moneyWallet, setMoneyWallet] = useState<PactMoneyWallet | null>(null)
   const [moneyError, setMoneyError] = useState<string | null>(null)
   const [paymentRows, setPaymentRows] = useState<PactPaymentStatusRow[] | null>(null)
+  const [paymentStatusError, setPaymentStatusError] = useState<string | null>(null)
   const [memberWallets, setMemberWallets] = useState<{ user_id: string; address: string }[] | null>(null)
   const [flow, setFlow] = useState<{ milestones: PactMilestone[]; recommendations: PactRecommendation[]; decisions: PactDecision[] }>({ milestones: [], recommendations: [], decisions: [] })
   const [flowLoading, setFlowLoading] = useState(false)
@@ -47,18 +48,36 @@ export function PactWorkspacePage({ user, profile, pactId, onNavigate, onSignOut
     if (!pact) return
     let active = true
     setPaymentRows(null)
-    // pact_status saves what PactSplit says, so Progress is reloaded after it. Polling keeps both current
-    // while other members pay.
-    const refresh = () => getPactPaymentStatus(pact.id).then((rows) => {
-      if (!active) return
-      setPaymentRows(rows)
-      return loadPactFlow(pact.id).then((value) => { if (active) setFlow(value) }, () => {})
-    }).catch((reason) => {
-      if (active && !isPaymentBackendUnavailable(reason)) setMoneyError(reason instanceof Error ? reason.message : 'Payment status could not be loaded.')
-    })
-    void refresh()
-    const timer = window.setInterval(() => { void refresh() }, 20000)
-    return () => { active = false; window.clearInterval(timer) }
+    setPaymentStatusError(null)
+
+const refresh = async () => {
+  try {
+    const rows = await getPactPaymentStatus(pact.id)
+    if (!active) return
+
+    setPaymentRows(rows)
+    setPaymentStatusError(null)
+  } catch (reason) {
+    if (active && !isPaymentBackendUnavailable(reason)) {
+      setPaymentStatusError(
+        reason instanceof Error ? reason.message : 'Payment status could not be loaded.',
+      )
+    }
+    return
+  }
+
+  // Load progress after payment status has had a chance to sync it.
+  await loadPactFlow(pact.id).then((value) => {
+    if (active) setFlow(value)
+  }).catch(() => {})
+}
+
+void refresh()
+const timer = window.setInterval(() => { void refresh() }, 10000)
+return () => {
+  active = false
+  window.clearInterval(timer)
+}
   }, [pact?.id])
 
   useEffect(() => {
@@ -157,11 +176,20 @@ export function PactWorkspacePage({ user, profile, pactId, onNavigate, onSignOut
   }
 
   async function handlePactAction(action: PactAction) {
-    const txHash = await runPactAction(action, pactId)
-    setPaymentRows(await getPactPaymentStatus(pactId))
-    loadPactFlow(pactId).then(setFlow).catch(() => {})
-    getPactMoneyWalletStatus().then((wallet) => { if (wallet) setMoneyWallet(wallet) }).catch(() => {})
-    return txHash
+   try {
+  const txHash = await runPactAction(action, pactId)
+  setPaymentRows(await getPactPaymentStatus(pactId))
+  void loadPactFlow(pactId).then(setFlow).catch(() => {})
+  void getPactMoneyWalletStatus().then((wallet) => {
+    if (wallet) setMoneyWallet(wallet)
+  }).catch(() => {})
+  return txHash
+} catch (reason) {
+  // Reload payment status and progress before surfacing the original error.
+  await getPactPaymentStatus(pactId).then(setPaymentRows).catch(() => {})
+  void loadPactFlow(pactId).then(setFlow).catch(() => {})
+  throw reason
+}
   }
 
   async function handleVote(decisionId: string, vote: 'approve' | 'reject') {
@@ -211,7 +239,7 @@ export function PactWorkspacePage({ user, profile, pactId, onNavigate, onSignOut
             <PactPilotPanel pactId={pact.id} pactName={pact.name} onAsk={askAndPersist} />
           </div>
         </div>
-        <PactMoneyPanel pactName={pact.name} memberCount={pact.members.length} isHost={pact.members.some((member) => member.user_id === user.id && member.role === 'host')} status={moneyStatus} wallet={moneyWallet} error={moneyError} walletEnabled={pactMoneyWalletEnabled} onCreateWallet={handleCreateWallet} onResetPin={pactMoneyWalletEnabled ? resetPactMoneyPin : undefined} recipients={pact.members.filter((m) => m.user_id !== user.id).map((m) => ({ userId: m.user_id, name: m.profile?.full_name || 'Pact member', hasWallet: memberWallets ? memberWallets.some((w) => w.user_id === m.user_id) : undefined, address: memberWallets?.find((w) => w.user_id === m.user_id)?.address }))} onSend={pactMoneyWalletEnabled ? handleSendMoney : undefined} paymentRows={paymentRows} onCreateFundingPlan={handleCreateFundingPlan} currentUserId={user.id} onPactAction={pactMoneyWalletEnabled ? handlePactAction : undefined} />
+        <PactMoneyPanel pactName={pact.name} memberCount={pact.members.length} members={pact.members.map((member) => ({ userId: member.user_id, name: member.profile?.full_name || (member.user_id === user.id ? displayName(user, profile) : 'Pact member') }))} isHost={pact.members.some((member) => member.user_id === user.id && member.role === 'host')} status={moneyStatus} wallet={moneyWallet} error={moneyError} paymentStatusError={paymentStatusError} walletEnabled={pactMoneyWalletEnabled} onCreateWallet={handleCreateWallet} onResetPin={pactMoneyWalletEnabled ? resetPactMoneyPin : undefined} recipients={pact.members.filter((m) => m.user_id !== user.id).map((m) => ({ userId: m.user_id, name: m.profile?.full_name || 'Pact member', hasWallet: memberWallets ? memberWallets.some((w) => w.user_id === m.user_id) : undefined, address: memberWallets?.find((w) => w.user_id === m.user_id)?.address }))} onSend={pactMoneyWalletEnabled ? handleSendMoney : undefined} paymentRows={paymentRows} onCreateFundingPlan={handleCreateFundingPlan} currentUserId={user.id} onPactAction={pactMoneyWalletEnabled ? handlePactAction : undefined} />
         <div className="workspace-decision-grid"><PactFlowPanel milestones={flow.milestones} recommendations={flow.recommendations} decisions={flow.decisions} loading={flowLoading} error={flowError} onSubmitRecommendation={handleSubmitRecommendation} /><PactDecidePanel decisions={flow.decisions} onVote={handleVote} onCreate={handleCreateDecision} error={flowError} /></div>
         <section className="workspace-coming"><span>PACT / NEXT LAYER</span><strong>Conversation, decisions, and payments will live here.</strong><p>Chat, plans, votes, and payment features are not in the current backend migration yet.</p></section>
       </> : null}
