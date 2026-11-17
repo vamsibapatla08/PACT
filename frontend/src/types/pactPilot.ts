@@ -12,6 +12,7 @@ export type PactPilotMessage = {
   body: string
   created_at: string
   summary?: string
+  reply?: string
   agreement?: PactPilotAgreement
   fit_issues?: PactPilotFitIssue[]
   options?: PactPilotOption[]

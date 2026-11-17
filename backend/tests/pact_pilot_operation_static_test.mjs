@@ -3,6 +3,7 @@ import fs from 'node:fs'
 
 const service = fs.readFileSync('frontend/src/lib/pactPilotService.ts', 'utf8')
 const migration = fs.readFileSync('backend/supabase/migrations/20261117140000_pactpilot_action_engine.sql', 'utf8')
+const backend = fs.readFileSync('backend/supabase/functions/pactpilot/index.ts', 'utf8')
 
 assert.match(service, /activeOperationIds\.has\(operationId\)/)
 assert.match(service, /activeOperationIds\.add\(operationId\)/)
@@ -14,5 +15,14 @@ assert.match(service, /payload\?\.error/)
 assert.match(migration, /created_by = auth\.uid\(\) and status = 'awaiting_confirmation'/)
 assert.match(migration, /status = 'executing'/)
 assert.match(migration, /status = p_status/)
+assert.match(backend, /required: \["reply"\]/)
+assert.match(backend, /function conversationalFallback/)
+assert.match(backend, /for \(let attempt = 0; attempt < 2; attempt \+= 1\)/)
+assert.match(backend, /function cleanActions/)
+assert.match(backend, /action\.requires_confirmation === true/)
+assert.match(backend, /output_text === "string"/)
+assert.match(backend, /strict: false/)
+assert.match(backend, /if \(actions\.length\)/)
+assert.doesNotMatch(backend, /console\.log\([^)]*apiKey/)
 
 console.log('PACT Pilot operation static checks: PASS')
