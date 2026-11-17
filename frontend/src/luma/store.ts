@@ -1,6 +1,6 @@
 // The iOS app's logic, ported for the web: the same tables, functions and steps as ios/Pact_App/Core.
 import { supabase as maybeClient } from '../lib/supabase'
-import { createPactMoneyWallet, runPactAction } from '../lib/pactMoneyService'
+import { createPactMoneyWallet, runPactAction, sendPactMoney } from '../lib/pactMoneyService'
 
 export const supabase = maybeClient!
 
@@ -653,4 +653,75 @@ export function verification(d: PactData): Verification {
   }
   if (!checks.length) return { level: 'none', checks }
   return { level: checks.every((c) => c.quickNode) ? 'verified' : 'onchain', checks }
+}
+
+// ---- PactTab: the live group tab. Log what you paid, say who it's for, and it works out who owes whom.
+// The database does every sum in whole cents; this side only reads it and asks for changes.
+
+export type TabMember = { user_id: string; name: string; is_you: boolean; paid_cents: number; share_cents: number; paid_back_cents: number; got_back_cents: number; balance_cents: number }
+export type TabExpense = {
+  expense_id: string; title: string; total_cents: number; spent_at: string; source: 'manual' | 'wallet' | 'plan' | 'grok'
+  source_ref: string | null; created_by: string; version: number; payers: Record<string, number>; shares: Record<string, number>
+}
+export type TabPayback = { from: string; to: string; amount_cents: number }
+export type Tab = { currency: string; members: TabMember[]; expenses: TabExpense[]; settle_up: TabPayback[] }
+export type TabAction = { tool: string; args: Record<string, unknown> }
+export type TabAnswer = { reply: string; actions: TabAction[] }
+
+export const cents = (c: number) => `$${(Math.abs(c) / 100).toFixed(2)}`
+export const toCents = (text: string) => Math.round(Number(text.replace(/[^0-9.]/g, '')) * 100)
+
+export async function loadTab(id: string): Promise<Tab> {
+  const { data, error } = await supabase.rpc('get_pact_tab', { p_pact_id: id })
+  if (error) throw new Error(friendly(error, "Couldn't load the tab."))
+  return data as Tab
+}
+
+export async function addExpense(id: string, e: { title: string; totalCents: number; paidBy?: string; splitWith?: string[]; txHash?: string }) {
+  const { error } = await supabase.rpc('add_pact_expense', {
+    p_pact_id: id, p_title: e.title.trim(), p_total_cents: e.totalCents, p_paid_by: e.paidBy ?? null,
+    p_split_with: e.splitWith?.length ? e.splitWith : null, p_source: e.txHash ? 'wallet' : 'manual', p_source_ref: e.txHash ?? null,
+  })
+  if (error) throw new Error(said(error, "Couldn't add that."))
+}
+
+export async function joinExpense(expenseId: string) {
+  const { error } = await supabase.rpc('join_pact_expense', { p_expense_id: expenseId })
+  if (error) throw new Error(said(error, "Couldn't add you to that."))
+}
+
+export async function voidExpense(expenseId: string) {
+  const { error } = await supabase.rpc('void_pact_expense', { p_expense_id: expenseId })
+  if (error) throw new Error(said(error, "Couldn't remove that."))
+}
+
+/** I got paid back outside the wallet (cash, Venmo). Only the person who got the money can say so. */
+export async function gotPaidBack(id: string, fromUser: string, amountCents: number) {
+  const { error } = await supabase.rpc('record_pact_cash_payback', { p_pact_id: id, p_from_user: fromUser, p_amount_cents: amountCents })
+  if (error) throw new Error(said(error, "Couldn't record that."))
+}
+
+/** Pay someone back in USDC. A confirmed send counts on the tab by itself. */
+export async function payBack(id: string, toUser: string, amountCents: number) {
+  const t = await sendPactMoney(id, toUser, (amountCents / 100).toFixed(2), crypto.randomUUID(), () => undefined)
+  if (t.status !== 'confirmed') throw new Error('The payback has not confirmed yet. Check your wallet activity.')
+}
+
+const tabTools = ['add_expense', 'join_expense', 'resplit_expense', 'import_plan_to_tab']
+
+/** Ask Grok about money. It reads the tab and may propose changes, which only run when you tap them. */
+export async function askGrokAboutTab(id: string, question: string): Promise<TabAnswer> {
+  const a = await invoke<{ reply?: string; summary?: string; actions?: TabAction[] }>('pactpilot', { pact_id: id, question: question.slice(0, 2000) })
+  return { reply: a.reply ?? a.summary ?? '', actions: (a.actions ?? []).filter((x) => tabTools.includes(x.tool)) }
+}
+
+export async function runTabAction(id: string, action: TabAction) {
+  try { await invoke('pactpilot', { pact_id: id, tool: action.tool, args: action.args }) }
+  catch (e) { throw new Error(said(e, "Grok's change didn't go through.")) }
+}
+
+/** Wallet payments already on a tab, by transaction hash, so the wallet can show which pact each went to. */
+export async function loadTaggedPayments(): Promise<Map<string, string>> {
+  const { data } = await supabase.from('pact_expenses').select('pact_id, source_ref').eq('source', 'wallet').eq('status', 'active')
+  return new Map((data ?? []).map((r) => [String(r.source_ref).toLowerCase(), r.pact_id as string]))
 }

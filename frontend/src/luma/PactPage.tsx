@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import * as S from './store'
 import { DetailsForm, useApp } from './App'
 import { Avatar, Busy, Cover, Grok, Icon, Modal, Switch, VerifiedBadge } from './ui'
+import { TabCard } from './TabCard'
 
 type Sheet =
   | { kind: 'settings' } | { kind: 'addPeople' } | { kind: 'addItem' } | { kind: 'grok' }
@@ -167,6 +168,8 @@ export function PactPage({ id }: { id: string }) {
               {d && d.items.length > 0 && <Items items={d.items} />}
             </div>
           ) : null}
+
+          {d && <TabCard id={id} me={me} members={d.members} />}
 
         </section>
       </div>
