@@ -773,3 +773,17 @@ button.l-ledger-row { width: 100%; border: 0; background: none; text-align: left
 .l-tab-ask .l-input { flex: 1; min-width: 0; }
 .l-tab-answer { margin-top: 10px; padding: 12px 14px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--card); display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .l-tab-answer p { flex-basis: 100%; margin: 0 0 4px; }
+
+.m-steps { margin: 0; padding: 0; list-style: none; display: grid; gap: 10px; }
+.m-steps li { display: flex; align-items: center; gap: 10px; font-size: 15px; color: rgba(245, 245, 247, 0.85); }
+.m-steps li span { width: 24px; height: 24px; border-radius: 99px; display: grid; place-items: center; flex: none; font-size: 12.5px; font-weight: 800; color: #0b0b0d; background: var(--silver); }
+.m-steps a { color: var(--text); font-weight: 600; }
+.m-prompt { white-space: pre-wrap; max-height: 320px; overflow-y: auto; font-size: 12.5px; }
+
+/* Real iPhone screenshots in a titanium frame */
+.x-phones { position: relative; width: 340px; height: 640px; }
+.x-phone.real { position: absolute; right: 0; top: 0; width: 290px; height: auto; padding: 10px; border-radius: 48px; }
+.x-phone.real img { display: block; width: 100%; border-radius: 39px; }
+.x-phone.real.back { right: auto; left: -70px; top: 40px; transform: rotate(-6deg) scale(0.9); opacity: 0.9; filter: brightness(0.75); }
+@media (max-width: 1000px) { .x-phones { width: 330px; } }
+@media (max-width: 640px) { .x-phones { width: 290px; height: 610px; } .x-phone.real.back { display: none; } .x-phone.real { right: 0; } }

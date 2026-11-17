@@ -181,8 +181,9 @@ extension PactStore {
     /// Calls the Edge Function as the signed-in user. A 4xx still carries a readable reason in `error`.
     private func walletCall(_ body: [String: String]) async throws -> WalletReply {
         do {
-            return try await client.functions.invoke("wallet", options: FunctionInvokeOptions(body: body))
+            return try await client.functions.invoke("wallet", options: FunctionInvokeOptions(headers: await freshAuth(), body: body))
         } catch let failure as FunctionsError {
+            if case .httpError(401, _) = failure { await signOutIfSessionEnded() }
             if case .httpError(_, let data) = failure, let reply = try? JSONDecoder().decode(WalletReply.self, from: data) {
                 return reply
             }

@@ -15,6 +15,31 @@ export const mcpTools: { name: string; label: string; does: string; read?: boole
   { name: 'payment_status', label: "Who's paid", does: 'Each share, paid or owed on Arc', read: true },
 ]
 
+/** The link for Grok's connector dialog, which only takes a URL: the token rides along as ?key=. */
+export const connectorUrl = (token = 'pact_…') => `${MCP_URL}?key=${token}`
+
+/** Instructions for a Grok bot that plans in Pact. Paste into a Grok project. */
+export const GROK_PROMPT = `You are Pact Planner, a travel planner for group trips in Pact.
+Pact's rule: collect money before you book.
+
+You have the Pact connector:
+- list_pacts, get_pact: read pacts, people, itinerary, stage
+- create_pact: start a pact (name, place, dates, budget each)
+- add_item: add a stay, flight, tickets, dinner or other, priced per person
+- post_message: post in the pact's group chat
+- propose_booking: put the itinerary up for everyone to approve
+- payment_status: see who has paid
+
+How to work:
+1. Start with list_pacts. If it's unclear which pact, ask. Read it with get_pact before changing anything.
+2. To plan, search the web for real options that fit the place, dates, group size and budget each. Show 2-3 with the price per person and a link.
+3. When the user picks one, add it with add_item: the right kind, a short title, dates, price_each per person and the link.
+4. Keep the total per person within budget. Say so if it isn't.
+5. When the itinerary is done and the user says go, call propose_booking, then post a short note in the chat with post_message.
+6. You can't pay or move money. Everyone approves and pays their own share with their PIN in the Pact app. Use payment_status to see who's paid.
+
+Ask before create_pact, propose_booking or post_message. Keep replies short.`
+
 export function grokSnippet(token = 'pact_…') {
   return `curl https://api.x.ai/v1/responses \\
   -H "Authorization: Bearer $XAI_API_KEY" \\
@@ -112,13 +137,34 @@ export function ConnectPage() {
 
       <h2 className="l-h2">2. Add Pact to Grok</h2>
       <div className="l-card m-setup">
+        <ol className="m-steps">
+          <li><span>1</span>Open <a href="https://grok.com/connectors" target="_blank" rel="noreferrer">grok.com/connectors</a>, then <b>New Connector → Custom</b>.</li>
+          <li><span>2</span>Name it <b>Pact</b> and paste this link as the server URL.</li>
+        </ol>
+        <div className="m-token-row"><code>{connectorUrl(fresh ?? 'pact_…')}</code><Copy text={connectorUrl(fresh ?? 'pact_…')} label="Copy link" /></div>
+        {!fresh && <p className="l-faint" style={{ fontSize: 13, margin: 0 }}>Make a token above and the link fills in. The link holds your token, so keep it private.</p>}
+      </div>
+
+      <h2 className="l-h2">3. Make your Grok bot</h2>
+      <div className="l-card m-setup">
+        <ol className="m-steps">
+          <li><span>1</span>In Grok, start a new <b>Project</b> called <b>Pact Planner</b>.</li>
+          <li><span>2</span>Paste this as its instructions, and turn on the Pact connector.</li>
+          <li><span>3</span>Ask it: <i>"Plan our Austin weekend under $400 each."</i></li>
+        </ol>
+        <pre className="m-code m-prompt">{GROK_PROMPT}</pre>
+        <div style={{ display: 'flex', justifyContent: 'flex-end' }}><Copy text={GROK_PROMPT} label="Copy prompt" /></div>
+      </div>
+
+      <h2 className="l-h2">Using the xAI API instead</h2>
+      <div className="l-card m-setup">
         <div className="m-token-row"><span className="l-dim">Server</span><code>{MCP_URL}</code><Copy text={MCP_URL} /></div>
         <pre className="m-code">{grokSnippet(fresh ?? 'pact_…')}</pre>
         <div style={{ display: 'flex', justifyContent: 'flex-end' }}><Copy text={grokSnippet(fresh ?? 'pact_…')} label="Copy request" /></div>
         <p className="l-faint" style={{ fontSize: 13, margin: 0 }}>Any MCP client works the same way: this URL, with your token as a Bearer header.</p>
       </div>
 
-      <h2 className="l-h2">3. What Grok can do</h2>
+      <h2 className="l-h2">What Grok can do</h2>
       <ToolGrid />
     </main>
   )

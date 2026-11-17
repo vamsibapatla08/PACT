@@ -2,7 +2,7 @@ import { useState } from 'react'
 import * as S from './store'
 import { BankCard } from './BankCard'
 import { LiquidGold } from './LiquidGold'
-import { MCP_URL, ToolGrid, grokSnippet } from './Mcp'
+import { Copy, GROK_PROMPT, ToolGrid, connectorUrl } from './Mcp'
 import { Grok, Icon, VerifiedBadge } from './ui'
 
 // Everything below is the real Pact UI with made-up data. Rory is the coordinator; the friends are fictional.
@@ -125,27 +125,12 @@ export function Landing() {
               </MockDay>
             </div>
           </div>
-          <div className="x-phone" aria-label="Pact on iPhone">
-            <div className="x-phone-notch" />
-            <div className="x-phone-screen">
-              <div className="x-phone-top"><img src="/pact-mark.png" alt="" /><b>Pact</b><Face who="rory" size={26} /></div>
-              <b className="x-phone-hi">Hi, Rory</b>
-              <div className="x-phone-card">
-                <span>PACT</span>
-                <small>BALANCE</small>
-                <b>1,228.00 <i>USDC</i></b>
-                <small>0x7a3fC2e9…41c6D2</small>
-              </div>
-              <div className="x-phone-pill">You owe <b>$307</b></div>
-              <b className="x-phone-h">Your pacts</b>
-              {[['Austin ACL weekend', 'Owe $307'], ['Tahoe cabin', 'Paid out'], ['Dinner at Uchi', '']].map(([n, c]) => (
-                <div key={n} className="x-phone-row"><Faces who={['rory', 'maya']} size={22} /><b>{n}</b>{c && <span className={c === 'Paid out' ? 'ok' : ''}>{c}</span>}</div>
-              ))}
-              <div className="x-phone-tabs"><i className="on"><Icon name="home" /></i><i><Icon name="pacts" /></i><i><Icon name="friends" /></i><i><Icon name="wallet" /></i></div>
-            </div>
+          <div className="x-phones" aria-label="Pact on iPhone">
+            <div className="x-phone real back"><img src="/ios/wallet.jpg" alt="Pact on iPhone: the Wallet tab with the balance card and activity" /></div>
+            <div className="x-phone real"><img src="/ios/home.jpg" alt="Pact on iPhone: Home with the wallet card and your pacts" /></div>
           </div>
         </div>
-        <p className="x-note">Web and iPhone, on the same live data.</p>
+        <p className="x-note">Web and iPhone, on the same live data. The phones are real screenshots.</p>
       </section>
 
       <section id="grok" className="x-section">
@@ -161,12 +146,16 @@ export function Landing() {
           <div className="x-setup">
             <b>Set up in 2 minutes</b>
             <ol>
-              <li><span>1</span>Sign in and open <b>Connect Grok</b> to make a token.</li>
-              <li><span>2</span>Add Pact as an MCP tool in your Grok request.</li>
-              <li><span>3</span>Ask Grok to plan. Approve and pay in Pact.</li>
+              <li><span>1</span>Sign in and open <b>Connect Grok</b> to make your link.</li>
+              <li><span>2</span>In Grok, add it at <b>Connectors → Custom</b>.</li>
+              <li><span>3</span>Start a <b>Pact Planner</b> project with the ready prompt.</li>
             </ol>
-            <pre className="m-code small">{grokSnippet()}</pre>
-            <span className="l-faint" style={{ fontSize: 12.5 }}>Server: <code>{MCP_URL.replace(/^https:\/\//, '')}</code></span>
+            <pre className="m-code small m-prompt" style={{ maxHeight: 190 }}>{GROK_PROMPT}</pre>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
+              <span className="l-faint" style={{ fontSize: 13 }}>The Pact Planner prompt for your Grok bot</span>
+              <Copy text={GROK_PROMPT} label="Copy prompt" />
+            </div>
+            <span className="l-faint" style={{ fontSize: 12.5 }}>Connector: <code>{connectorUrl().replace(/^https:\/\//, '').replace(/\.supabase\.co/, '…')}</code></span>
           </div>
         </div>
         <ToolGrid />
