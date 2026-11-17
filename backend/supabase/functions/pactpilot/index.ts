@@ -129,8 +129,9 @@ const round = (value: number) => Math.round(value * 100) / 100
 
 const chatLimit = 16
 const chatMessageLimit = 600
-const grokBudgetMs = 25_000
-const grokAttemptBudgetMs = 18_000
+// Grok takes 16-19s per answer, so 18s per try timed out about half the time. Edge functions can run 150s.
+const grokBudgetMs = 50_000
+const grokAttemptBudgetMs = 40_000
 const defaultQuestion = "Read the chat. Has the group agreed on a plan? " +
   "Check the budget, dates, people and place, and suggest 2 to 3 options."
 
