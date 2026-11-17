@@ -81,6 +81,7 @@ struct MainTabs: View {
     private func screen(_ item: AppTab) -> some View {
         switch item {
         case .home: HomeView(tab: $tab)
+        case .wallet: WalletView()
         case .pacts: PactsView()
         case .friends: FriendsView()
         }
@@ -88,57 +89,65 @@ struct MainTabs: View {
 }
 
 enum AppTab: String, CaseIterable, Identifiable {
-    case home, pacts, friends
+    case home, wallet, pacts, friends
 
     var id: Self { self }
-    var title: String { rawValue.capitalized }
+    var title: String {
+        switch self {
+        case .pacts: "Chats"
+        default: rawValue.capitalized
+        }
+    }
     var symbol: String {
         switch self {
         case .home: "house"
-        case .pacts: "bubble.left.and.bubble.right"
+        case .wallet: "wallet.bifold"
+        case .pacts: "bubble.left.and.text.bubble.right"
         case .friends: "person.2"
         }
     }
 }
 
-/// Three round tabs on a glass capsule, and a separate silver + on the right that starts a new pact.
+/// Four round tabs spread across one glass capsule, and a separate silver + that starts a new pact.
+/// Off tabs are thin outline icons; the one you're on fills in black on silver.
 struct PactTabBar: View {
     @Binding var tab: AppTab
     let onNew: () -> Void
 
     var body: some View {
-        HStack(spacing: 14) {
-            HStack(spacing: 6) {
+        HStack(spacing: 12) {
+            HStack(spacing: 0) {
                 ForEach(AppTab.allCases) { item in
                     let on = tab == item
                     Button { tab = item } label: {
                         Image(systemName: item.symbol)
                             .symbolVariant(on ? .fill : .none)
-                            .font(.system(size: 20, weight: on ? .bold : .regular))
-                            .foregroundStyle(on ? AnyShapeStyle(Color.black) : AnyShapeStyle(Color.white.opacity(0.55)))
-                            .frame(width: 54, height: 54)
+                            .symbolRenderingMode(.hierarchical)
+                            .font(.system(size: 21, weight: on ? .semibold : .light))
+                            .foregroundStyle(on ? AnyShapeStyle(Color.black) : AnyShapeStyle(Color.white.opacity(0.7)))
+                            .frame(width: 58, height: 58)
                             .background { if on { LiquidMetal(shape: Circle()) } }
                             .contentShape(.circle)
+                            .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel(item.title)
                 }
             }
-            .padding(6)
+            .padding(5)
             .glassEffect(.regular, in: .capsule)
-            Spacer()
             Button(action: onNew) {
                 Image(systemName: "plus")
-                    .font(.system(size: 24, weight: .bold))
+                    .font(.system(size: 24, weight: .semibold))
                     .foregroundStyle(.black)
-                    .frame(width: 66, height: 66)
+                    .frame(width: 68, height: 68)
                     .background(LiquidMetal(shape: Circle()))
                     .shadow(color: PactColor.silver.opacity(0.3), radius: 18, y: 8)
             }
             .buttonStyle(.plain)
             .accessibilityLabel("New pact")
         }
-        .padding(.horizontal, 22)
+        .padding(.horizontal, 16)
         .padding(.bottom, 2)
         .sensoryFeedback(.selection, trigger: tab)
         .animation(.smooth(duration: 0.2), value: tab)

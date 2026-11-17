@@ -111,3 +111,41 @@ extension PactStore {
         joinRequests[id] = rows ?? []
     }
 }
+
+/// Someone on Pact from `search_people`, and where I stand with them: `none`, `requested`, `asked_you` or `friend`.
+struct PersonResult: Identifiable, Hashable, Decodable {
+    let id: UUID
+    var name: String?
+    var avatarUrl: String?
+    var status: String
+
+    enum CodingKeys: String, CodingKey { case id = "user_id", name, avatarUrl = "avatar_url", status }
+}
+
+struct SearchFailure: Error { var text: String }
+
+extension PactStore {
+    func searchPeople(_ query: String) async -> Result<[PersonResult], SearchFailure> {
+        do {
+            let rows: [PersonResult] = try await client.rpc("search_people", params: ["p_query": query]).execute().value
+            return .success(rows)
+        } catch {
+            let text = String(describing: error).lowercased()
+            if text.contains("could not find the function") || text.contains("pgrst202") {
+                return .failure(SearchFailure(text: "Search needs the latest database update."))
+            }
+            return .failure(SearchFailure(text: friendly(error, "Couldn't search right now.")))
+        }
+    }
+
+    /// Asks someone from a search to be friends, or accepts if they already asked me. Returns an error message, or nil.
+    func requestFriend(_ userId: UUID) async -> String? {
+        do {
+            let _: String = try await client.rpc("send_friend_request_to", params: ["p_user_id": userId]).execute().value
+            await loadSocial()
+            return nil
+        } catch {
+            return friendly(error, "Couldn't send the request.")
+        }
+    }
+}

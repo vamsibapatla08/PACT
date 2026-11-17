@@ -4,7 +4,6 @@ import SwiftUI
 struct ProfileView: View {
     @Environment(PactStore.self) private var store
     @Environment(\.dismiss) private var dismiss
-    @State private var showingWallet = false
 
     var body: some View {
         ScrollView {
@@ -37,19 +36,6 @@ struct ProfileView: View {
                 }
                 .pactCard()
 
-                Button { showingWallet = true } label: {
-                    HStack {
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text("Payment details").font(.headline.weight(.bold)).foregroundStyle(.primary)
-                            Text(store.wallet == nil ? "Set up the first time you approve a payment" : "Wallet, balance and test money")
-                                .font(.subheadline).foregroundStyle(.secondary)
-                        }
-                        Spacer()
-                        Image(systemName: "chevron.right").font(.footnote.weight(.bold)).silver()
-                    }
-                    .pactCard()
-                }
-                .buttonStyle(.plain)
 
                 Button("Sign out") {
                     dismiss()
@@ -61,7 +47,6 @@ struct ProfileView: View {
         }
         .presentationBackground { AmbientBackdrop() }
         .presentationDetents([.large])
-        .sheet(isPresented: $showingWallet) { WalletView() }
     }
 
     private func row(_ label: String, _ value: String) -> some View {

@@ -32,6 +32,8 @@ final class PactStore {
     var addedFriends: [Member] = []
     var pactInvites: [PactInvite] = []
     var joinRequests: [Pact.ID: [JoinRequest]] = [:]
+    /// Each pact's items: the stays, flights, tickets and dinners it's booking.
+    var items: [Pact.ID: [PactItem]] = [:]
     /// True while a pact's chat is open, so the tab bar steps aside for the keyboard and message box.
     var inChat = false
     var walletBusy = false
@@ -42,6 +44,8 @@ final class PactStore {
     /// Set once each first load finishes, so empty states don't flash while data is on its way.
     var pactsLoaded = false
     var walletLoaded = false
+    /// True once Home has every pact's balance, so it never shows "Up to date" before it knows.
+    var homeReady = false
 
     var signedIn: Bool { session != nil }
     var myId: UUID? { session?.user.id }
@@ -85,7 +89,7 @@ final class PactStore {
                 profile = nil; pacts = []; members = [:]; messages = [:]; wallet = nil; activity = []
                 fundingPlans = [:]; pactSplit = [:]; shareReceipts = [:]; recommendations = [:]; decisions = [:]
                 friendRequests = []; addedFriends = []; pactInvites = []; joinRequests = [:]
-                pactsLoaded = false; walletLoaded = false
+                pactsLoaded = false; walletLoaded = false; homeReady = false
             }
         }
     }

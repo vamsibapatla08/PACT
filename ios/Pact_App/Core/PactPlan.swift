@@ -180,7 +180,7 @@ extension PactStore {
     }
 
     /// The question, after as much of the newest chat as fits in PactPilot's 2,000 characters.
-    private func withChat(_ question: String, in id: Pact.ID) -> String {
+    func withChat(_ question: String, in id: Pact.ID) -> String {
         let tail = "\n\nQuestion: \(question)"
         var lines: [String] = []
         var room = 2000 - tail.count - 40

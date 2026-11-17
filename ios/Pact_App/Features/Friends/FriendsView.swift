@@ -8,7 +8,7 @@ struct FriendsView: View {
     var body: some View {
         NavigationStack {
             TabScreen(title: "Friends") {
-                Button("Add a friend", systemImage: "person.badge.plus") { adding = true }.pactAction()
+                Button("Find people", systemImage: "magnifyingglass") { adding = true }.pactAction()
 
                 let incoming = store.friendRequests.filter(\.incoming)
                 let sent = store.friendRequests.filter { !$0.incoming }
@@ -75,34 +75,92 @@ struct FriendsView: View {
     }
 }
 
-/// Ask someone to be friends by the email they sign in with. They show up once they say yes.
+/// Search everyone on Pact by name, or by their exact email, and add them as a friend.
 struct AddFriendSheet: View {
     @Environment(PactStore.self) private var store
-    @Environment(\.dismiss) private var dismiss
-    @State private var email = ""
-    @State private var sending = false
+    @State private var query = ""
+    @State private var results: [PersonResult] = []
+    @State private var searching = false
     @State private var failure: String?
+    @FocusState private var focused: Bool
 
     var body: some View {
-        SheetLayout(title: "Add a friend", action: sending ? "Sending…" : "Send request",
-                    enabled: !sending && email.contains("@")) {
-            sending = true
-            failure = nil
-            Task {
-                failure = await store.requestFriend(email)
-                sending = false
-                if failure == nil { dismiss() }
+        VStack(alignment: .leading, spacing: 18) {
+            SheetTitle(title: "Find people")
+            HStack(spacing: 10) {
+                Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                TextField("Name or email", text: $query)
+                    .textInputAutocapitalization(.never).autocorrectionDisabled()
+                    .focused($focused)
+                if searching { ProgressView().tint(PactColor.silver) }
             }
-        } content: {
-            PactField(label: "Their email") {
-                TextField("nihar@gmail.com", text: $email)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .keyboardType(.emailAddress)
+            .padding(16)
+            .pactWell(16)
+
+            if let failure {
+                Text(failure).font(.footnote.weight(.semibold)).foregroundStyle(.red)
+            } else if query.trimmingCharacters(in: .whitespaces).count < 2 {
+                Text("Type at least two letters of their name, or their whole email.").font(.footnote).foregroundStyle(.secondary)
+            } else if results.isEmpty && !searching {
+                Text("Nobody on Pact matches that yet.").font(.footnote).foregroundStyle(.secondary)
             }
-            if let failure { Text(failure).font(.footnote.weight(.semibold)).foregroundStyle(.red) }
-            Text("Use the email they sign in to Pact with. Once they accept, you can ask them into any pact.")
-                .font(.footnote).foregroundStyle(.secondary)
+
+            ScrollView {
+                VStack(spacing: 14) {
+                    ForEach(results) { person in
+                        HStack(spacing: 12) {
+                            Avatar(name: person.name, url: person.avatarUrl, size: 42)
+                            Text(person.name ?? "Someone").font(.body.weight(.semibold))
+                            Spacer()
+                            action(person)
+                        }
+                    }
+                }
+                .padding(.vertical, 4)
+            }
+            .scrollDismissesKeyboard(.interactively)
+        }
+        .padding(24)
+        .presentationBackground { AmbientBackdrop() }
+        .presentationDetents([.large])
+        .onAppear { focused = true }
+        // Waits a moment after typing stops, so each letter doesn't send its own search.
+        .task(id: query) {
+            let text = query.trimmingCharacters(in: .whitespaces)
+            guard text.count >= 2 else { results = []; return }
+            try? await Task.sleep(for: .milliseconds(300))
+            guard !Task.isCancelled else { return }
+            searching = true
+            let outcome = await store.searchPeople(text)
+            searching = false
+            guard !Task.isCancelled else { return }
+            switch outcome {
+            case .success(let found): failure = nil; withAnimation(.smooth) { results = found }
+            case .failure(let message): failure = message.text
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func action(_ person: PersonResult) -> some View {
+        switch person.status {
+        case "friend":
+            Label("Friends", systemImage: "checkmark").font(.subheadline.weight(.semibold)).foregroundStyle(PactColor.paid)
+        case "requested":
+            Text("Requested").font(.subheadline.weight(.semibold)).foregroundStyle(.secondary)
+        default:
+            Button(person.status == "asked_you" ? "Accept" : "Add") {
+                Task {
+                    if let message = await store.requestFriend(person.id) { failure = message; return }
+                    if let index = results.firstIndex(of: person) {
+                        results[index].status = person.status == "asked_you" ? "friend" : "requested"
+                    }
+                }
+            }
+            .font(.subheadline.weight(.bold)).foregroundStyle(.black)
+            .padding(.horizontal, 16).padding(.vertical, 8)
+            .background(LiquidMetal(shape: Capsule()))
+            .buttonStyle(.plain)
         }
     }
 }

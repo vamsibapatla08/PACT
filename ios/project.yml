@@ -44,5 +44,7 @@ targets:
         CODE_SIGN_STYLE: Automatic
         INFOPLIST_KEY_ITSAppUsesNonExemptEncryption: NO
         INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.travel
+        INFOPLIST_KEY_NSMicrophoneUsageDescription: Pact listens while you hold the mic so you can talk instead of type.
+        INFOPLIST_KEY_NSSpeechRecognitionUsageDescription: Pact turns what you say into a message for your group.
         SWIFT_DEFAULT_ACTOR_ISOLATION: MainActor
         SWIFT_APPROACHABLE_CONCURRENCY: YES

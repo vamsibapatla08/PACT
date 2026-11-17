@@ -34,9 +34,11 @@ struct CreatePactSheet: View {
             .pactAction()
             .disabled(!ready)
             .padding(.horizontal, 24).padding(.top, 28).padding(.bottom, 8)
+            // Only a look behind the button: it must never take taps meant for the form above it.
             .background {
                 LinearGradient(colors: [.clear, .black.opacity(0.9)], startPoint: .top, endPoint: .center)
-                    .ignoresSafeArea()
+                    .ignoresSafeArea(edges: .bottom)
+                    .allowsHitTesting(false)
             }
         }
         .presentationBackground { AmbientBackdrop() }
@@ -91,15 +93,7 @@ struct PactDetailsForm: View {
             PactField(label: "What it is") { TextField("Hotel for the four of us", text: $details.about, axis: .vertical) }
             PactField(label: "Where") { TextField("Austin, TX", text: $details.location) }
             VStack(alignment: .leading, spacing: 10) {
-                Toggle("Dates", isOn: $details.hasDates.animation(.smooth))
-                    .font(.caption.weight(.semibold)).foregroundStyle(.secondary).tint(PactColor.silver)
-                if details.hasDates {
-                    HStack {
-                        DatePicker("From", selection: $details.startsOn, displayedComponents: .date).labelsHidden()
-                        Image(systemName: "arrow.right").foregroundStyle(.secondary)
-                        DatePicker("To", selection: $details.endsOn, in: details.startsOn..., displayedComponents: .date).labelsHidden()
-                    }
-                }
+                DatesField(on: $details.hasDates, from: $details.startsOn, to: $details.endsOn)
             }
             PactField(label: "Budget each") {
                 TextField("Optional", value: $details.budget, format: .currency(code: "USD")).keyboardType(.decimalPad)
@@ -108,6 +102,87 @@ struct PactDetailsForm: View {
                 TextField("Booking or event link", text: $details.link)
                     .keyboardType(.URL).textInputAutocapitalization(.never).autocorrectionDisabled()
             }
+        }
+    }
+}
+
+/// A Dates switch with From and To underneath once it's on. The switch is a plain button, because a system
+/// Toggle inside a scrolling sheet loses quick taps to the scroll view.
+struct DatesField: View {
+    @Binding var on: Bool
+    @Binding var from: Date
+    @Binding var to: Date
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Button { withAnimation(.smooth) { on.toggle() } } label: {
+                HStack {
+                    Text("Dates").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                    Spacer()
+                    Capsule()
+                        .fill(on ? AnyShapeStyle(LinearGradient.pactSilver) : AnyShapeStyle(.white.opacity(0.14)))
+                        .frame(width: 52, height: 30)
+                        .overlay(alignment: on ? .trailing : .leading) {
+                            Circle().fill(on ? .black : .white).padding(3).shadow(color: .black.opacity(0.25), radius: 2, y: 1)
+                        }
+                }
+                .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+            .sensoryFeedback(.selection, trigger: on)
+            .accessibilityValue(on ? "On" : "Off")
+            if on {
+                VStack(spacing: 10) {
+                    row("From", selection: $from)
+                    row("To", selection: $to)
+                }
+                .padding(14)
+                .pactWell(16)
+                // Both pickers are set up the same, or iOS shortens one's date; the order is kept here instead.
+                .onChange(of: from) { if to < from { to = from } }
+                .onChange(of: to) { if to < from { from = to } }
+            }
+        }
+    }
+
+    private func row(_ label: String, selection: Binding<Date>) -> some View {
+        HStack {
+            Text(label).font(.subheadline.weight(.semibold))
+            Spacer()
+            DayButton(label: label, day: selection)
+        }
+    }
+}
+
+/// A date shown as "Nov 19, 2026" that opens a calendar. iOS 26's compact picker prints other days as
+/// "2026-11-19", so the label is drawn here and the calendar is the full graphical one.
+private struct DayButton: View {
+    let label: String
+    @Binding var day: Date
+    @State private var picking = false
+
+    var body: some View {
+        Button { picking = true } label: {
+            Text(day.formatted(.dateTime.month(.abbreviated).day().year()))
+                .font(.body.weight(.medium))
+                .padding(.horizontal, 14).padding(.vertical, 8)
+                .background(.white.opacity(0.08), in: .capsule)
+        }
+        .buttonStyle(.plain)
+        .sheet(isPresented: $picking) {
+            VStack(spacing: 12) {
+                HStack {
+                    Text(label).font(.title3.weight(.heavy)).silver()
+                    Spacer()
+                    Button("Done") { picking = false }.font(.headline).silver()
+                }
+                DatePicker(label, selection: $day, displayedComponents: .date)
+                    .datePickerStyle(.graphical)
+                    .tint(PactColor.silver)
+            }
+            .padding(20)
+            .presentationDetents([.medium])
+            .presentationBackground { AmbientBackdrop() }
         }
     }
 }

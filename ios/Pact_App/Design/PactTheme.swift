@@ -26,8 +26,8 @@ extension LinearGradient {
                                            startPoint: .topLeading, endPoint: .bottomTrailing)
 }
 
-/// The ground every screen sits on: a slow mesh of graphite, steel blue and a little violet over black,
-/// so the glass above it has colour to bend.
+/// The ground every screen sits on: black at the top fading into a slow mesh of graphite, steel blue and a little
+/// violet lower down, so the glass above it has colour to bend.
 struct AmbientBackdrop: View {
     var body: some View {
         TimelineView(.animation(minimumInterval: 1 / 20)) { timeline in
@@ -43,8 +43,15 @@ struct AmbientBackdrop: View {
                 Color(hex: 0x07090F), Color(hex: 0x15112A), Color(hex: 0x04070A),
             ])
         }
-        .overlay(RadialGradient(colors: [PactColor.silverPale.opacity(0.18), .clear],
-                                center: .topTrailing, startRadius: 0, endRadius: 420))
+        // Black from the top, easing out about halfway down, so the colour only glows in the lower half.
+        .overlay(LinearGradient(stops: [
+            .init(color: .black.opacity(0.96), location: 0),
+            .init(color: .black.opacity(0.9), location: 0.22),
+            .init(color: .black.opacity(0.68), location: 0.38),
+            .init(color: .black.opacity(0.38), location: 0.52),
+            .init(color: .black.opacity(0.14), location: 0.66),
+            .init(color: .clear, location: 0.8),
+        ], startPoint: .top, endPoint: .bottom))
         .ignoresSafeArea()
     }
 }

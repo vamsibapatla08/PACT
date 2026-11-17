@@ -12,18 +12,18 @@ struct HomeView: View {
 
     var body: some View {
         NavigationStack {
-            TabScreen(title: greeting) {
-                let owed = store.owed
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("You owe").font(.subheadline.weight(.semibold))
-                    Text(dollars(owed)).font(.system(size: 44, weight: .heavy)).contentTransition(.numericText())
-                    Text(owed > 0 ? "Open the pact to approve your share." : "You're all settled.")
-                        .font(.footnote.weight(.medium))
+            if !store.homeReady {
+                VStack(spacing: 18) {
+                    Image("Logo").resizable().scaledToFit().frame(width: 72)
+                    ProgressView().tint(PactColor.silver).controlSize(.large)
                 }
-                .foregroundStyle(.black)
-                .padding(20)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .liquidMetal()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(AmbientBackdrop())
+                .toolbar(.hidden, for: .navigationBar)
+                .task { await reload() }
+            } else {
+            TabScreen(title: greeting) {
+                BalanceCard(owed: store.owed, collecting: store.collecting)
 
                 ForEach(store.pactInvites) { invite in InviteCard(invite: invite) }
 
@@ -44,16 +44,21 @@ struct HomeView: View {
                 }
             }
             .refreshable { await reload() }
-            .task { await reload() }
             .navigationDestination(for: Pact.ID.self) { PactView(id: $0) }
+            }
         }
     }
 
+    /// Pacts first, then every pact's balance at once. Home shows only when all of it is in.
     private func reload() async {
         await store.refresh()
-        await store.loadSocial()
-        await store.loadWallet()
-        for pact in store.pacts { await store.loadPactSplit(pact.id) }
+        async let social: Void = store.loadSocial()
+        async let wallet: Void = store.loadWallet()
+        await withTaskGroup(of: Void.self) { group in
+            for pact in store.pacts { group.addTask { @MainActor in await store.loadPactSplit(pact.id) } }
+        }
+        _ = await (social, wallet)
+        withAnimation(.smooth) { store.homeReady = true }
     }
 }
 
@@ -130,5 +135,46 @@ private struct InviteCard: View {
     private func answer(_ accept: Bool) {
         answering = true
         Task { await store.answer(invite, accept: accept); answering = false }
+    }
+}
+
+/// What I owe across my pacts, and what's still coming in to the pacts I coordinate. All clear shows a green check.
+private struct BalanceCard: View {
+    let owed: Double
+    let collecting: Double
+
+    var body: some View {
+        Group {
+            if owed == 0 && collecting == 0 {
+                HStack(spacing: 14) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 44))
+                        .foregroundStyle(.white, PactColor.paid)
+                    Text("Up to date").font(.system(size: 30, weight: .heavy))
+                    Spacer()
+                }
+            } else {
+                HStack(alignment: .top) {
+                    amount("You owe", owed)
+                    if collecting > 0 {
+                        Spacer()
+                        amount("Coming to you", collecting).multilineTextAlignment(.trailing)
+                    }
+                }
+            }
+        }
+        .foregroundStyle(.black)
+        .padding(20)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .liquidMetal()
+        .animation(.smooth, value: owed)
+        .animation(.smooth, value: collecting)
+    }
+
+    private func amount(_ label: String, _ value: Double) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(label).font(.subheadline.weight(.semibold))
+            Text(dollars(value)).font(.system(size: 40, weight: .heavy)).contentTransition(.numericText())
+        }
     }
 }

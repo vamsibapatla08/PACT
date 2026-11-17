@@ -99,7 +99,10 @@ extension PactStore {
     /// Grok reads the chat, writes up the one thing to book, and the card goes to everyone to approve.
     func askGrokToBook(_ id: Pact.ID) async -> String? {
         if let failure = await askPilot(id, question: bookingQuestion) { return failure }
-        guard let booking = booking(id), consent(id, for: booking) == nil else { return nil }
+        guard let booking = booking(id) else {
+            return "Grok couldn't find one thing you've agreed to book yet. Agree on it in the chat, with the link and price, then try again."
+        }
+        guard consent(id, for: booking) == nil else { return nil }
         await createDecision(id, question: booking.question, options: ["Approve", "Not yet"], rule: "unanimous",
                              recommendationId: booking.recommendation.id)
         await importFromGrok(id)
@@ -251,5 +254,231 @@ extension PactStore {
         if details.budget == nil { details.budget = booking.perPerson }
         if details.about.isEmpty { details.about = booking.option.title }
         _ = await saveDetails(details, for: id)
+    }
+}
+
+extension PactStore {
+    /// Takes someone out of a pact. Coordinator only, and locked once the split is set up.
+    func removeMember(_ member: Member, from id: Pact.ID) async {
+        struct Params: Encodable { let p_pact_id: UUID; let p_user_id: UUID }
+        do {
+            try await client.rpc("remove_pact_member", params: Params(p_pact_id: id, p_user_id: member.userId)).execute()
+            await loadMembers(id)
+        } catch {
+            let text = String(describing: error).lowercased()
+            self.error = text.contains("locked") ? "People are locked once the split is set up."
+                : text.contains("could not find the function") || text.contains("pgrst202") ? "Removing people needs the latest database update."
+                : friendly(error, "Couldn't remove them.")
+        }
+    }
+
+    /// Money still to come in from other people to the pacts I coordinate. My own unpaid share is in "You owe", not here.
+    var collecting: Double {
+        pacts.reduce(0) { sum, pact in
+            guard amCoordinator(pact.id), let chain = pactSplit[pact.id], chain.state == "open" else { return sum }
+            let othersUnpaid = chain.members.filter { $0.userId != myId && $0.address != nil && !$0.paid }.count
+            return sum + (Double(chain.share.usdc) ?? 0) * Double(othersUnpaid)
+        }
+    }
+}
+
+/// What kind of thing an item is.
+enum ItemKind: String, CaseIterable, Identifiable, Codable {
+    case stay, flight, ticket, dinner, other
+
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .ticket: "Tickets"
+        default: rawValue.capitalized
+        }
+    }
+    var symbol: String {
+        switch self {
+        case .stay: "bed.double"
+        case .flight: "airplane"
+        case .ticket: "ticket"
+        case .dinner: "fork.knife"
+        case .other: "shippingbox"
+        }
+    }
+
+    /// A best guess from a title Grok wrote, for items added from the chat.
+    init(guessing title: String) {
+        let text = title.lowercased()
+        if ["flight", "fly", "airline", "plane"].contains(where: text.contains) { self = .flight }
+        else if ["hotel", "stay", "airbnb", "room", "house", "loft", "hostel"].contains(where: text.contains) { self = .stay }
+        else if ["ticket", "event", "show", "concert", "game", "festival", "pass"].contains(where: text.contains) { self = .ticket }
+        else if ["dinner", "lunch", "brunch", "restaurant", "meal"].contains(where: text.contains) { self = .dinner }
+        else { self = .other }
+    }
+}
+
+extension PactKind {
+    /// The items each kind of pact usually has, offered first when adding one.
+    var presets: [ItemKind] {
+        switch self {
+        case .trip: [.flight, .stay, .ticket, .dinner, .other]
+        case .event: [.ticket, .stay, .dinner, .other]
+        case .stay: [.stay, .other]
+        case .dinner: [.dinner, .other]
+        case .other: ItemKind.allCases
+        }
+    }
+}
+
+/// A row in `pact_items`: one thing the pact is booking.
+struct PactItem: Identifiable, Hashable, Decodable {
+    let id: UUID
+    var kind: ItemKind
+    var title: String
+    var location: String?
+    var startsOn: String?
+    var endsOn: String?
+    var link: String?
+    var priceEach: Double?
+    var source: String
+    var createdBy: UUID
+
+    enum CodingKeys: String, CodingKey {
+        case id = "item_id", kind, title, location, link, source
+        case startsOn = "starts_on", endsOn = "ends_on", priceEach = "price_each", createdBy = "created_by"
+    }
+
+    /// "Nov 20 – 22", or one day, or nil.
+    var dates: String? {
+        guard let start = startsOn.flatMap(dayDate) else { return nil }
+        let end = endsOn.flatMap(dayDate) ?? start
+        let short = Date.FormatStyle().month(.abbreviated).day()
+        return Calendar.current.isDate(start, inSameDayAs: end) ? start.formatted(short) : "\(start.formatted(short)) – \(end.formatted(short))"
+    }
+}
+
+/// What someone fills in to add an item.
+struct ItemDraft {
+    var kind: ItemKind = .stay
+    var title = ""
+    var location = ""
+    var hasDates = false
+    var startsOn = Date.now
+    var endsOn = Date.now
+    var link = ""
+    var priceEach: Double?
+}
+
+let itemsQuestion = """
+List each thing our group agreed to book in the chat above as its own option: a stay, a flight, tickets or a dinner. \
+Give each its price_per_person and link. Don't add anything we didn't agree on.
+"""
+
+extension PactStore {
+    func loadItems(_ id: Pact.ID) async {
+        let rows: [PactItem]? = try? await client.from("pact_items")
+            .select("item_id, kind, title, location, starts_on, ends_on, link, price_each, source, created_by")
+            .eq("pact_id", value: id)
+            .order("starts_on", ascending: true, nullsFirst: false)
+            .order("created_at", ascending: true)
+            .execute().value
+        withAnimation(.smooth) { items[id] = rows ?? [] }
+    }
+
+    /// What everyone pays for all the items, or nil while none has a price.
+    func itemsTotal(_ id: Pact.ID) -> Double? {
+        let prices = (items[id] ?? []).compactMap(\.priceEach)
+        return prices.isEmpty ? nil : prices.reduce(0, +)
+    }
+
+    /// Adds one item. Returns an error message, or nil.
+    func addItem(_ draft: ItemDraft, to id: Pact.ID, source: String = "manual") async -> String? {
+        struct Row: Encodable {
+            let pact_id: UUID; let kind: String; let title: String; let location: String?
+            let starts_on: String?; let ends_on: String?; let link: String?; let price_each: Double?; let source: String
+        }
+        let link = draft.link.trimmingCharacters(in: .whitespaces)
+        let place = draft.location.trimmingCharacters(in: .whitespaces)
+        let format = Date.ISO8601FormatStyle().year().month().day()
+        do {
+            try await client.from("pact_items").insert(Row(
+                pact_id: id, kind: draft.kind.rawValue, title: draft.title.trimmingCharacters(in: .whitespaces),
+                location: place.isEmpty ? nil : place,
+                starts_on: draft.hasDates ? draft.startsOn.formatted(format) : nil,
+                ends_on: draft.hasDates ? max(draft.startsOn, draft.endsOn).formatted(format) : nil,
+                link: link.isEmpty ? nil : (link.hasPrefix("http") ? link : "https://\(link)"),
+                price_each: draft.priceEach, source: source
+            )).execute()
+            await loadItems(id)
+            return nil
+        } catch {
+            let text = String(describing: error).lowercased()
+            if text.contains("pact_items") && (text.contains("does not exist") || text.contains("pgrst205")) {
+                return "Items need the latest database update."
+            }
+            if text.contains("row-level security") { return "Items are locked once the split is set up." }
+            return friendly(error, "Couldn't add that item.")
+        }
+    }
+
+    func removeItem(_ item: PactItem, from id: Pact.ID) async {
+        do {
+            try await client.from("pact_items").delete().eq("item_id", value: item.id).execute()
+            await loadItems(id)
+        } catch {
+            self.error = friendly(error, "Couldn't remove that item.")
+        }
+    }
+
+    /// Grok reads the chat and each thing the group agreed on becomes an item. Returns an error message, or nil.
+    func addItemsWithGrok(_ id: Pact.ID) async -> String? {
+        if messages[id] == nil { await loadMessages(id) }
+        do {
+            let answer: PilotAnswer = try await invoke("pactpilot", ["pact_id": key(id), "question": withChat(itemsQuestion, in: id)])
+            guard !answer.options.isEmpty else {
+                return "Grok didn't find anything agreed in the chat yet. Add an item by hand, or agree on one in the chat first."
+            }
+            for option in answer.options {
+                var draft = ItemDraft()
+                draft.kind = ItemKind(guessing: option.title + " " + option.description)
+                draft.title = String(option.title.prefix(120))
+                draft.link = option.link ?? ""
+                draft.priceEach = option.pricePerPerson
+                if let failure = await addItem(draft, to: id, source: "grok") { return failure }
+            }
+            return nil
+        } catch let failure as FunctionFailure {
+            return failure.message
+        } catch {
+            return friendly(error, "Grok couldn't read the chat. Try again.")
+        }
+    }
+
+    /// Book it from the items: one write-up of everything, priced at the items' total each, for everyone to approve.
+    func bookItems(_ id: Pact.ID) async -> String? {
+        let list = items[id] ?? []
+        guard let total = itemsTotal(id) else { return "Add a price to at least one item first." }
+        let name = pacts.first { $0.id == id }?.name ?? "The trip"
+        let lines = list.map { item in
+            [item.kind.title + ": " + item.title, item.dates, item.priceEach.map { dollars($0) + " each" }]
+                .compactMap { $0 }.joined(separator: " · ")
+        }
+        let option = PilotOption(title: name, description: lines.joined(separator: "\n"), tradeoff: "",
+                                 pricePerPerson: total, link: list.compactMap(\.link).first)
+        struct Params: Encodable {
+            let p_pact_id: UUID; let p_summary: String; let p_options: [PilotOption]
+            let p_tasks: [PilotTask]; let p_costs: [PilotCost]; let p_next_steps: [String]
+        }
+        do {
+            try await client.rpc("save_pact_recommendation", params: Params(
+                p_pact_id: id,
+                p_summary: "Everything you're booking: \(list.count) item\(list.count == 1 ? "" : "s"), \(dollars(total)) each.",
+                p_options: [option], p_tasks: [], p_costs: [], p_next_steps: ["Everyone approves", "Everyone approves their share"]
+            )).execute()
+            await loadPlan(id)
+        } catch {
+            return friendly(error, "Couldn't put the items up for approval.")
+        }
+        guard let booking = booking(id) else { return nil }
+        await createDecision(id, question: booking.question, options: ["Approve", "Not yet"], rule: "unanimous",
+                             recommendationId: booking.recommendation.id)
+        return nil
     }
 }
