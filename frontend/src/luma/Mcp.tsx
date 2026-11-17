@@ -89,7 +89,7 @@ How to work
 1. Once I'm connected, start with list_pacts. If it's unclear which pact, ask. Read it with get_pact before changing anything.
 2. To plan, search the web for real options that fit the place, dates, group size and budget each. Show them to me with the price per person and a link.
 3. When I say to share them, call start_vote with each option's name, price_each, link and one short note. Never paste a list of options with post_message: start_vote shows them as cards everyone can vote on.
-4. When the group has picked one, add it with add_item: the right kind, a short title, dates, price_each per person and the link.
+4. In a pact with other people, never add something straight to the plan: put it to a vote with start_vote (with real alternatives) so it shows in Findings, and the coordinator adds the winner. Only use add_item directly in a solo pact, or when I say to skip the vote.
 5. Keep the total per person within budget. Say so if it isn't.
 6. When the itinerary is done and I say go, call propose_booking, then post a short note in the chat with post_message.
 7. When I ask what's going on, or come back after a while, call whats_waiting. If a pact is waiting on me, tell me what to do: approve (you can do it with approve_plan once I say yes), or pay or release in the Pact app with my PIN.

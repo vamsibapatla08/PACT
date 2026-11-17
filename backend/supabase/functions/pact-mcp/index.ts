@@ -99,7 +99,7 @@ const tools = [
   {
     name: 'add_item',
     title: 'Add to the itinerary',
-    description: 'Add one thing the group is booking: a stay, flight, tickets, a dinner or other, with its price per person. Locked once the split is set up.',
+    description: "Add one thing straight to the plan: a stay, flight, tickets, a dinner or other, with its price per person. In a pact with other people, the group picks first: use start_vote with this and real alternatives, and the coordinator adds the winner from the Findings. Only use add_item in a group pact once the group has voted, or when I say to add it without a vote (then set skip_vote). Locked once the split is set up.",
     inputSchema: {
       type: 'object',
       properties: {
@@ -111,6 +111,7 @@ const tools = [
         starts_on: { type: 'string', description: 'YYYY-MM-DD' },
         ends_on: { type: 'string', description: 'YYYY-MM-DD' },
         link: { type: 'string', description: 'Booking link (https)' },
+        skip_vote: { type: 'boolean', description: 'Only when I said to add it without a group vote' },
       },
       required: ['pact_id', 'kind', 'title'],
       additionalProperties: false,
@@ -272,6 +273,12 @@ async function call(name: string, args: Json, me: Me): Promise<{ text: string; d
     case 'add_item': {
       const id = text(args.pact_id, 40)
       await memberOf(db, id)
+      // A group pact decides together: Grok's finds go to Findings as a vote first, unless I said to skip it.
+      if (args.skip_vote !== true) {
+        const { data: people } = await db.rpc('list_pact_members', { p_pact_id: id })
+        const others = ((people ?? []) as { user_id: string }[]).filter((m) => m.user_id !== me.id).length
+        need(others === 0, `This pact has ${others + 1} people, so the group picks first. Call start_vote with this option and 1 to 7 real alternatives (name, price_each, link, one short note each). It shows in the pact's Findings, everyone votes, and the coordinator adds the winner to the plan. Only add it directly if I say to skip the vote (skip_vote: true).`)
+      }
       need(KINDS.includes(String(args.kind)), `kind must be one of ${KINDS.join(', ')}.`)
       const title = text(args.title, 120)
       need(title, 'Give the item a title.')
@@ -449,7 +456,7 @@ async function handle(msg: Json, me: Me) {
           protocolVersion: typeof (msg.params as Json)?.protocolVersion === 'string' ? (msg.params as Json).protocolVersion : PROTOCOL,
           capabilities: { tools: { listChanged: false } },
           serverInfo: { name: 'pact', title: 'Pact', version: '1.0.0' },
-          instructions: `You're helping ${me.name} plan group trips in Pact. Read pacts with list_pacts and get_pact. When you find options (hotels, flights, dinners), put them to a vote with start_vote so they show as vote cards; never paste a list of options with post_message. Build the itinerary with add_item, and put it up for approval with propose_booking. Use whats_waiting to see who each pact is waiting on (start there when I ask what's going on); approve_plan approves for me and remind nudges the group, both only after I say yes. You can't pay or move money: everyone pays their own share with their PIN in the Pact app.`,
+          instructions: `You're helping ${me.name} plan group trips in Pact. Read pacts with list_pacts and get_pact. When you find options (hotels, flights, dinners, ways to get around), put them to a vote with start_vote so they show as vote cards in Findings; never paste a list of options with post_message. In a group pact, don't add things straight to the plan: the group votes first and the coordinator adds the winner. Build the itinerary with add_item, and put it up for approval with propose_booking. Use whats_waiting to see who each pact is waiting on (start there when I ask what's going on); approve_plan approves for me and remind nudges the group, both only after I say yes. You can't pay or move money: everyone pays their own share with their PIN in the Pact app.`,
         },
       }
     case 'ping':
