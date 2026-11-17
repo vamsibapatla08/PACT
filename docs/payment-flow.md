@@ -122,6 +122,45 @@ forge script script/DeployPactSplit.s.sol:DeployPactSplit --rpc-url https://rpc.
 - To match a payer to a person, take the last 40 hex digits of topic 2, add `0x`, and look it up in `wallets.address` (lowercase both sides, Circle may save it checksummed). That row's `user_id` is the person
 - To match `pactId` to a pact, take the first 32 hex digits of topic 1 and put the dashes back (8-4-4-4-12). That is `pacts.id`
 
+## For Nihar: release and refunds
+
+The Release, Cancel and Claim refund buttons already work in `PactMoneyPanel.tsx`, through `runPactAction` in `pactMoneyService.ts`. The backend is done for all three. These are the gaps around them.
+
+Where to work, all in `frontend/src/components/PactMoneyPanel.tsx` unless it says otherwise:
+
+- `actions` (around line 155) picks which buttons show. Add the "Waiting for N more" text and the deadline messages next to it
+- `handlePactAction` (around line 123) runs a button. Put the cancel confirm here, before `onPactAction`
+- `ACTION_LABEL`, `ACTION_DONE` and `CHAIN_TEXT` (lines 32–50) hold the button and result text
+- `pastDeadline` (around line 154) is the value to re-check on a timer
+- `paymentRows` has `share_status` (`owed`, `paid`, `refunded`) for each member's row. The types are in `frontend/src/types/pactMoney.ts`
+- `runPactAction` in `frontend/src/lib/pactMoneyService.ts` (line 199) calls the `wallet` function. Its error has the server's text and `reason`
+- Nothing in the frontend handles `low_balance` or `refunded` yet
+
+### Release (host)
+
+- [ ] Before the PIN, show what will happen: "You send `total` USDC to `payee`". Both come from `pact_status`
+- [ ] While shares are missing, show the host "Waiting for N more of M shares" in place of the Release button
+- [ ] After a release, keep showing "Released `total` USDC to `payee`" with the explorer link, not just until the page reloads. `state` is `released` in `pact_status`
+
+### Cancel
+
+- [ ] Ask before the PIN: "Cancel this pact? Everyone who paid will need to claim their share back." Cancel can't be undone
+- [ ] Members before the deadline: say "The host can cancel any time. You can cancel after `deadline`" so they know why there's no button
+- [ ] Once the deadline passes and the pact isn't full, show it clearly: "Deadline passed. Anyone can cancel to unlock refunds"
+- [ ] `pastDeadline` is only worked out when the panel renders. Re-check it on a timer so the Cancel button shows up when the deadline passes
+
+### Refunds (after a cancel)
+
+- [ ] Show each member's row as Paid, Refunded or Didn't pay, so the group can see who still has money to claim
+- [ ] After a refund goes through, hide Claim refund and show "Refunded `share` USDC". Tapping it again returns a 409 `NothingToRefund` error
+- [ ] People who didn't pay: show "Nothing to refund" and no button
+
+### For all three
+
+- [ ] On a 409 with `reason: "low_balance"`, add a link to faucet.circle.com (Arc Testnet). The wallet needs a little USDC for gas, even to claim a refund
+- [ ] Show the `error` text from the function as it is. Every check runs before the PIN, so the message is the real reason
+- [ ] Refresh the payment rows and the Progress bar after each action. Fund turns complete once every share is marked paid
+
 ## For Vamsi: what to store
 
 A suggestion, change it as you need:

@@ -49,11 +49,35 @@ export function PactWorkspacePage({ user, profile, pactId, onNavigate, onSignOut
     let active = true
     setPaymentRows(null)
     setPaymentStatusError(null)
-    getPactPaymentStatus(pact.id).then((rows) => { if (active) setPaymentRows(rows) }).catch((reason) => {
-      if (active && !isPaymentBackendUnavailable(reason)) setPaymentStatusError(reason instanceof Error ? reason.message : 'Payment status could not be loaded.')
-    })
-    const refresh = window.setInterval(() => { getPactPaymentStatus(pact.id).then((rows) => { if (active) { setPaymentRows(rows); setPaymentStatusError(null) } }).catch((reason) => { if (active && !isPaymentBackendUnavailable(reason)) setPaymentStatusError(reason instanceof Error ? reason.message : 'Payment status could not be loaded.') }) }, 10000)
-    return () => { active = false; window.clearInterval(refresh) }
+
+const refresh = async () => {
+  try {
+    const rows = await getPactPaymentStatus(pact.id)
+    if (!active) return
+
+    setPaymentRows(rows)
+    setPaymentStatusError(null)
+  } catch (reason) {
+    if (active && !isPaymentBackendUnavailable(reason)) {
+      setPaymentStatusError(
+        reason instanceof Error ? reason.message : 'Payment status could not be loaded.',
+      )
+    }
+    return
+  }
+
+  // Load progress after payment status has had a chance to sync it.
+  await loadPactFlow(pact.id).then((value) => {
+    if (active) setFlow(value)
+  }).catch(() => {})
+}
+
+void refresh()
+const timer = window.setInterval(() => { void refresh() }, 10000)
+return () => {
+  active = false
+  window.clearInterval(timer)
+}
   }, [pact?.id])
 
   useEffect(() => {
@@ -148,20 +172,24 @@ export function PactWorkspacePage({ user, profile, pactId, onNavigate, onSignOut
   async function handleCreateFundingPlan(input: { shareUsdc: string; deadline: string; payeeAddress: string }) {
     await createPactFundingPlan({ pactId, ...input, deadline: new Date(input.deadline).toISOString() })
     setPaymentRows(await getPactPaymentStatus(pactId))
+    setFlow(await loadPactFlow(pactId))
   }
 
   async function handlePactAction(action: PactAction) {
-    try {
-      const txHash = await runPactAction(action, pactId)
-      setPaymentRows(await getPactPaymentStatus(pactId))
-      getPactMoneyWalletStatus().then((wallet) => { if (wallet) setMoneyWallet(wallet) }).catch(() => {})
-      return txHash
-    } catch (reason) {
-      // Refresh even when Arc rejects or is still pending, so verified backend
-      // state replaces any stale row after a failed or delayed action.
-      await getPactPaymentStatus(pactId).then(setPaymentRows).catch(() => {})
-      throw reason
-    }
+   try {
+  const txHash = await runPactAction(action, pactId)
+  setPaymentRows(await getPactPaymentStatus(pactId))
+  void loadPactFlow(pactId).then(setFlow).catch(() => {})
+  void getPactMoneyWalletStatus().then((wallet) => {
+    if (wallet) setMoneyWallet(wallet)
+  }).catch(() => {})
+  return txHash
+} catch (reason) {
+  // Reload payment status and progress before surfacing the original error.
+  await getPactPaymentStatus(pactId).then(setPaymentRows).catch(() => {})
+  void loadPactFlow(pactId).then(setFlow).catch(() => {})
+  throw reason
+}
   }
 
   async function handleVote(decisionId: string, vote: 'approve' | 'reject') {
