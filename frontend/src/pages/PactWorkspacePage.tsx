@@ -11,10 +11,15 @@ import { askPactPilot } from '../lib/pactPilotService'
 import { listPactMessages, sendPactMessage, subscribeToPactMessages } from '../lib/chatService'
 import type { PactChatMessage } from '../types/chat'
 import { PactMoneyPanel } from '../components/PactMoneyPanel'
-import { createPactFundingPlan, createPactMoneyWallet, getPactMemberWallets, getPactMoneyWalletStatus, getPactPaymentStatus, isPaymentBackendUnavailable, pactMoneyWalletEnabled, resetPactMoneyPin, runPactAction, sendPactMoney, type PactAction } from '../lib/pactMoneyService'
+import { createPactFundingPlan, createPactMoneyWallet, getPactMemberWallets, getPactMoneyWalletStatus, getPactPaymentStatus, isPaymentBackendUnavailable, pactMoneyWalletEnabled, resetPactMoneyPin, retryPactEventVerification, runPactAction, sendPactMoney, type PactAction, type PactVerificationError } from '../lib/pactMoneyService'
 import type { PactMoneyStatus, PactMoneyTransfer, PactMoneyWallet, PactPaymentStatusRow } from '../types/pactMoney'
 import { PactFlowPanel } from '../components/PactFlowPanel'
 import { PactDecidePanel } from '../components/PactDecidePanel'
+import { BookingPanel } from '../components/BookingPanel'
+import { PeopleInvitesPanel } from '../components/PeopleInvitesPanel'
+import { WorkspaceDisclosure } from '../components/WorkspaceDisclosure'
+import { PactPilotActionCard } from '../components/PactPilotActionCard'
+import { associateBookingPayment, getLatestBookingStatus } from '../lib/bookingService'
 import { loadPactFlow, castPactDecisionVote, createPactDecision, savePactRecommendation, seedPactMilestones } from '../lib/pactFlowService'
 import type { PactDecision, PactMilestone, PactRecommendation } from '../types/pactFlow'
 
@@ -146,7 +151,10 @@ export function PactWorkspacePage({ user, profile, pactId, onNavigate, onSignOut
 
   // The date picker gives local time with no zone, so it becomes a UTC instant here, before the server reads it.
   async function handleCreateFundingPlan(input: { shareUsdc: string; deadline: string; payeeAddress: string }) {
-    await createPactFundingPlan({ pactId, ...input, deadline: new Date(input.deadline).toISOString() })
+    const created = await createPactFundingPlan({ pactId, ...input, deadline: new Date(input.deadline).toISOString() })
+    const latest = await getLatestBookingStatus(pactId)
+    const currentSplit = latest.splits[0]
+    if (latest.booking && currentSplit?.status === 'approved') await associateBookingPayment(pactId, latest.booking.booking_id, currentSplit.split_id, created.paymentId)
     setPaymentRows(await getPactPaymentStatus(pactId))
   }
 
@@ -162,6 +170,11 @@ export function PactWorkspacePage({ user, profile, pactId, onNavigate, onSignOut
       await getPactPaymentStatus(pactId).then(setPaymentRows).catch(() => {})
       throw reason
     }
+  }
+
+  async function handleRetryVerification(eventType: PactVerificationError['eventType'], txHash: string) {
+    await retryPactEventVerification(pactId, eventType, txHash)
+    setPaymentRows(await getPactPaymentStatus(pactId))
   }
 
   async function handleVote(decisionId: string, vote: 'approve' | 'reject') {
@@ -195,10 +208,9 @@ export function PactWorkspacePage({ user, profile, pactId, onNavigate, onSignOut
       {error ? <StatusPanel title="Pact unavailable." message={error} actionLabel="Return to dashboard" onAction={() => onNavigate('/dashboard')} /> : null}
       {pact ? <>
         <div className="workspace-heading"><div><p className="section-kicker">PACT / WORKSPACE</p><h1>{pact.name}</h1><p>Shared planning starts here.</p></div><span className="status-chip"><i /> Active</span></div>
-        <div className="workspace-grid">
-          <section className="workspace-card"><p className="section-kicker">MEMBERS / {pact.members.length.toString().padStart(2, '0')}</p><h2>People in this Pact</h2><div className="member-list">{pact.members.map((member) => { const isCurrentUser = member.user_id === user.id; const memberName = member.profile?.full_name || (isCurrentUser ? displayName(user, profile) : 'Pact member'); const memberAvatar = member.profile?.avatar_url || (isCurrentUser ? avatarUrl(user, profile) : null); return <div className="member-row" key={member.user_id}>{memberAvatar ? <img src={memberAvatar} alt="" referrerPolicy="no-referrer" /> : <span>{memberName.charAt(0)}</span>}<strong>{memberName}{isCurrentUser ? ' (you)' : ''}</strong><small>{member.role}</small></div> })}</div></section>
-          <section className="workspace-card invite-card"><p className="section-kicker">INVITATION / SHARE</p><h2>Bring your people in.</h2><p>Generate a secure invitation for someone you trust.</p><code>{inviteCode || 'NO INVITATION GENERATED'}</code>{inviteError ? <p className="form-error" role="alert">{inviteError}</p> : null}<button className="outline-button" type="button" onClick={handleInvite} disabled={inviteLoading}>{inviteLoading ? 'Creating invite…' : copied ? 'Copied' : inviteCode ? 'Copy invite code' : 'Generate invitation'}</button></section>
-        </div>
+        <WorkspaceDisclosure label="PACT / PEOPLE" title="People & Invites" summary={`${pact.members.length} member${pact.members.length === 1 ? '' : 's'} · secure sharing`}>
+          <PeopleInvitesPanel pact={pact} user={user} profile={profile} inviteCode={inviteCode} inviteError={inviteError} inviteLoading={inviteLoading} copied={copied} onInvite={() => { void handleInvite() }} />
+        </WorkspaceDisclosure>
         <div className="workspace-assist-tabs" role="tablist" aria-label="Pact workspace tools">
           <button className={`workspace-assist-tab ${activeTool === 'chat' ? 'is-active' : ''}`} type="button" role="tab" aria-selected={activeTool === 'chat'} aria-controls="pact-chat-panel" onClick={() => setActiveTool('chat')}>Chat</button>
           <button className={`workspace-assist-tab ${activeTool === 'pilot' ? 'is-active' : ''}`} type="button" role="tab" aria-selected={activeTool === 'pilot'} aria-controls="pact-pilot-panel" onClick={() => setActiveTool('pilot')}>PactPilot</button>
@@ -208,12 +220,23 @@ export function PactWorkspacePage({ user, profile, pactId, onNavigate, onSignOut
             <ChatPanel pactId={pact.id} pactName={pact.name} currentUserId={user.id} currentUserName={displayName(user, profile)} currentUserAvatar={avatarUrl(user, profile)} members={pact.members} messages={chatMessages} loading={chatLoading} error={chatError} backendReady={chatLive} onSend={sendPactMessage} />
           </div>
           <div className={`workspace-assist-panel workspace-assist-pilot ${activeTool === 'pilot' ? 'is-mobile-active' : ''}`} id="pact-pilot-panel">
-            <PactPilotPanel pactId={pact.id} pactName={pact.name} onAsk={askAndPersist} />
+            <div className="pilot-column">
+              <PactPilotPanel pactId={pact.id} pactName={pact.name} onAsk={askAndPersist} />
+              <div className="pilot-action-strip" aria-label="PactPilot workspace actions">
+                <PactPilotActionCard eyebrow="PLAN" title="Booking options" description="Search the simulated hotel inventory and bring a quote to the group." status="DEMO ONLY" actionLabel="Open below" onAction={() => document.getElementById('booking-panel')?.scrollIntoView({ behavior: 'smooth', block: 'center' })} />
+                <PactPilotActionCard eyebrow="DECIDE" title="Group approval" description="Turn a saved recommendation into a real decision for the Pact." status={flow.decisions.length ? `${flow.decisions.length} decision${flow.decisions.length === 1 ? '' : 's'}` : 'No open decisions'} actionLabel="Review below" onAction={() => document.getElementById('decide-panel')?.scrollIntoView({ behavior: 'smooth', block: 'center' })} />
+              </div>
+              <div className="pilot-operator-grid">
+                <div id="booking-panel"><WorkspaceDisclosure label="PACT / BOOKING" title="Hotel planning" summary="Search · approve · fund" defaultOpen><BookingPanel pactId={pact.id} memberCount={pact.members.length} currentUserId={user.id} isHost={pact.members.some((member) => member.user_id === user.id && member.role === 'host')} paymentRows={paymentRows} /></WorkspaceDisclosure></div>
+                <div id="decide-panel"><WorkspaceDisclosure label="PACT / DECIDE" title="Group decisions" summary="Votes and approvals"><PactDecidePanel decisions={flow.decisions} onVote={handleVote} onCreate={handleCreateDecision} error={flowError} /></WorkspaceDisclosure></div>
+              </div>
+            </div>
           </div>
         </div>
-        <PactMoneyPanel pactName={pact.name} memberCount={pact.members.length} members={pact.members.map((member) => ({ userId: member.user_id, name: member.profile?.full_name || (member.user_id === user.id ? displayName(user, profile) : 'Pact member') }))} isHost={pact.members.some((member) => member.user_id === user.id && member.role === 'host')} status={moneyStatus} wallet={moneyWallet} error={moneyError} paymentStatusError={paymentStatusError} walletEnabled={pactMoneyWalletEnabled} onCreateWallet={handleCreateWallet} onResetPin={pactMoneyWalletEnabled ? resetPactMoneyPin : undefined} recipients={pact.members.filter((m) => m.user_id !== user.id).map((m) => ({ userId: m.user_id, name: m.profile?.full_name || 'Pact member', hasWallet: memberWallets ? memberWallets.some((w) => w.user_id === m.user_id) : undefined, address: memberWallets?.find((w) => w.user_id === m.user_id)?.address }))} onSend={pactMoneyWalletEnabled ? handleSendMoney : undefined} paymentRows={paymentRows} onCreateFundingPlan={handleCreateFundingPlan} currentUserId={user.id} onPactAction={pactMoneyWalletEnabled ? handlePactAction : undefined} />
-        <div className="workspace-decision-grid"><PactFlowPanel milestones={flow.milestones} recommendations={flow.recommendations} decisions={flow.decisions} loading={flowLoading} error={flowError} onSubmitRecommendation={handleSubmitRecommendation} /><PactDecidePanel decisions={flow.decisions} onVote={handleVote} onCreate={handleCreateDecision} error={flowError} /></div>
-        <section className="workspace-coming"><span>PACT / NEXT LAYER</span><strong>Conversation, decisions, and payments will live here.</strong><p>Chat, plans, votes, and payment features are not in the current backend migration yet.</p></section>
+        <WorkspaceDisclosure label="PACT / MONEY" title="PactMoney" summary={moneyWallet ? 'Wallet connected · verified funding data' : 'Wallet, contributions, transfers and receipts'}>
+          <PactMoneyPanel pactName={pact.name} memberCount={pact.members.length} members={pact.members.map((member) => ({ userId: member.user_id, name: member.profile?.full_name || (member.user_id === user.id ? displayName(user, profile) : 'Pact member') }))} isHost={pact.members.some((member) => member.user_id === user.id && member.role === 'host')} status={moneyStatus} wallet={moneyWallet} error={moneyError} paymentStatusError={paymentStatusError} walletEnabled={pactMoneyWalletEnabled} onCreateWallet={handleCreateWallet} onResetPin={pactMoneyWalletEnabled ? resetPactMoneyPin : undefined} recipients={pact.members.filter((m) => m.user_id !== user.id).map((m) => ({ userId: m.user_id, name: m.profile?.full_name || 'Pact member', hasWallet: memberWallets ? memberWallets.some((w) => w.user_id === m.user_id) : undefined, address: memberWallets?.find((w) => w.user_id === m.user_id)?.address }))} onSend={pactMoneyWalletEnabled ? handleSendMoney : undefined} paymentRows={paymentRows} onCreateFundingPlan={handleCreateFundingPlan} currentUserId={user.id} onPactAction={pactMoneyWalletEnabled ? handlePactAction : undefined} onRetryVerification={pactMoneyWalletEnabled ? handleRetryVerification : undefined} />
+        </WorkspaceDisclosure>
+        <section className="workspace-flow-shell"><PactFlowPanel milestones={flow.milestones} recommendations={flow.recommendations} decisions={flow.decisions} loading={flowLoading} error={flowError} onSubmitRecommendation={handleSubmitRecommendation} /></section>
       </> : null}
     </motion.section>
   </AppShell>

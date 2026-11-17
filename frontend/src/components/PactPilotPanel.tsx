@@ -3,7 +3,7 @@ import type { PactPilotAskRequest } from '../lib/pactPilotService'
 import type { PactPilotMessage } from '../types/pactPilot'
 
 type Props = { pactId: string; pactName: string; messages?: PactPilotMessage[]; loading?: boolean; error?: string | null; onAsk?: (request: PactPilotAskRequest) => Promise<PactPilotMessage> }
-const suggestions = ['Plan a first meeting', 'Estimate shared costs', 'Suggest next steps']
+const suggestions = ['Plan a trip', 'Create a poll', 'Compare hotels', 'Split expenses', 'Rebalance contributions', 'Summarize progress']
 
 function money(amount: number, currency: string) {
   try { return new Intl.NumberFormat(undefined, { style: 'currency', currency, maximumFractionDigits: 0 }).format(amount) }

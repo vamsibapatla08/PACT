@@ -194,6 +194,24 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 export type PactAction = 'create_pact' | 'pay_share' | 'release' | 'cancel' | 'claim_refund'
 type ChallengeProgress = { status: 'awaiting_pin' | 'pending' | 'confirmed' | 'failed'; txHash: string | null; error?: string }
 
+type VerifiedPactEvent = { accepted: boolean; eventType: string; pactId: string; txHash: string; logIndex: number; confirmations: number }
+
+export class PactVerificationError extends Error {
+  constructor(message: string, readonly pactId: string, readonly eventType: 'paid' | 'released' | 'cancelled' | 'refunded', readonly txHash: string, readonly pending: boolean) {
+    super(message)
+    this.name = 'PactVerificationError'
+  }
+}
+
+export async function verifyPactEvent(pactId: string, eventType: 'paid' | 'released' | 'cancelled' | 'refunded', txHash: string): Promise<VerifiedPactEvent> {
+  const { data, error } = await client().functions.invoke('verify-pact-event', {
+    body: { source: 'direct_rpc', pactId, eventType, txHash },
+  })
+  if (error) throw new Error(await walletErrorMessage(error))
+  if (!data || data.accepted !== true || data.pactId !== pactId || data.txHash !== txHash) throw new Error('The Arc event was not verified.')
+  return data as VerifiedPactEvent
+}
+
 // Runs one PactSplit action from the user's wallet: the server checks it would go through, the user enters
 // their PIN, then this waits until Arc confirms it. Returns the tx hash; throws if it failed.
 export async function runPactAction(action: PactAction, pactId: string): Promise<string | null> {
@@ -202,9 +220,24 @@ export async function runPactAction(action: PactAction, pactId: string): Promise
   await runCircleChallenge(challenge)
   for (let attempt = 0; attempt < 40; attempt += 1) {
     const progress = await invokeWallet<ChallengeProgress>('challenge_status', { challengeId: challenge.challengeId }).catch(() => null)
-    if (progress?.status === 'confirmed') return progress.txHash
+    if (progress?.status === 'confirmed') {
+      const eventType = action === 'pay_share' ? 'paid' : action === 'release' ? 'released' : action === 'cancel' ? 'cancelled' : action === 'claim_refund' ? 'refunded' : null
+      if (eventType && progress.txHash) {
+        try { await verifyPactEvent(pactId, eventType, progress.txHash) }
+        catch (reason) {
+          const message = reason instanceof Error ? reason.message : 'PACT verification failed.'
+          throw new PactVerificationError(`Arc transaction confirmed, but PACT verification is ${/confirm|await|pending/i.test(message) ? 'pending' : 'failed'}: ${message}`, pactId, eventType, progress.txHash, /confirm|await|pending/i.test(message))
+        }
+      }
+      if (eventType && !progress.txHash) throw new Error('Arc transaction confirmed, but no transaction hash was returned for PACT verification.')
+      return progress.txHash
+    }
     if (progress?.status === 'failed') throw new Error(progress.error || 'The transaction failed on Arc.')
     await sleep(3000)
   }
   throw new Error('Approved, but Arc has not confirmed it yet. Refresh in a minute.')
+}
+
+export async function retryPactEventVerification(pactId: string, eventType: PactVerificationError['eventType'], txHash: string) {
+  return verifyPactEvent(pactId, eventType, txHash)
 }
