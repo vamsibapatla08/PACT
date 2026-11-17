@@ -154,7 +154,6 @@ export function PactPage({ id }: { id: string }) {
             <button className="l-send-btn" type="button" onClick={() => setSheet({ kind: 'send', to: null })}><ArrowNE size={17} />Send money</button>
             <button className="l-btn l-ghost l-wide-btn" type="button" onClick={() => setSheet({ kind: 'addPeople' })}><Icon name="plus" size={17} />Add people</button>
           </div>
-          <p className="l-side-note">Anyone can add people. Only the coordinator can remove them{d?.plan ? ', and not once the split is set up' : ''}.</p>
         </aside>
 
         {/* Middle: the trip itself, its plan, timeline and tab. */}
@@ -626,6 +625,7 @@ function AddPeople({ id, d, onClose }: { id: string; d: S.PactData; onClose: () 
         onClick={async () => { setBusy(true); try { await S.invite(id, picked); await refreshPact(id); onClose() } catch (e) { setError((e as Error).message); setBusy(false) } }}>
         {busy ? 'Asking…' : picked.length ? `Ask ${picked.length} in` : 'Ask them in'}
       </button>}
+      <p className="l-side-note" style={{ margin: '14px 0 0' }}>Anyone can add people. Only the coordinator can remove them{d.plan ? ', and not once the split is set up' : ''}.</p>
     </Modal>
   )
 }

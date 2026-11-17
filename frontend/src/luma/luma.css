@@ -1236,3 +1236,30 @@ button.l-net { border: 0; background: none; padding: 4px 0; cursor: pointer; }
 .l-pact-chat .l-chat-head { font-size: 30px; margin: 2px 2px 18px; padding-bottom: 14px; border-bottom: 1px solid var(--line); }
 /* My own balance is a figure, not a button, so it has no underline. */
 span.l-net.owe { text-decoration: none; }
+
+/* ---- One fixed frame. The header never moves; only the area under it scrolls, with no scrollbars showing.
+   The page itself never scrolls, so a trackpad's bounce can't move the header either. */
+html, body { overscroll-behavior: none; }
+.l-app:has(> .l-scroll) { height: 100vh; height: 100dvh; display: flex; flex-direction: column; overflow: hidden; }
+.l-app:has(> .l-scroll) > .l-top, .l-app:has(> .l-scroll) > .l-top:hover { position: relative; flex: none; background: transparent; backdrop-filter: none; -webkit-backdrop-filter: none; box-shadow: none; }
+.l-scroll { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; scrollbar-width: none; }
+.l-scroll::-webkit-scrollbar, .l-pact-main::-webkit-scrollbar, .l-pact-chat .l-chat::-webkit-scrollbar, .l-pact-people::-webkit-scrollbar { display: none; }
+.l-pact-chat .l-chat, .l-pact-people { scrollbar-width: none; }
+
+/* A pact on a wide screen: people on the left and the chat on the right stay put; only the middle scrolls. */
+@media (min-width: 1241px) {
+  .l-scroll.pact { overflow: hidden; }
+  .l-scroll.pact > .l-pact-full { height: 100%; padding-top: 28px; padding-bottom: 24px; }
+  .l-scroll.pact .l-pact-grid { height: 100%; align-items: stretch; }
+  .l-scroll.pact .l-pact-main { height: 100%; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: none; padding-bottom: 60px; }
+  .l-scroll.pact .l-pact-people { position: static; height: 100%; max-height: none; overflow-y: auto; }
+  .l-scroll.pact .l-pact-chat.l-chat-wide { position: static; height: 100%; min-height: 0; }
+}
+
+/* Title line: the place on the left, and dates, budget, info, settings and edit on the right, all on one line.
+   The place shortens with … before anything wraps. */
+@media (min-width: 641px) {
+  .l-meta-row { flex-wrap: nowrap; }
+  .l-meta-row > .l-chip { flex: 0 1 auto; }
+  .l-meta-right { flex: none; flex-wrap: nowrap; }
+}

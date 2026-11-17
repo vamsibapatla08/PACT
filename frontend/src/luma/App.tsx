@@ -66,7 +66,7 @@ function SignIn() {
 function usePath() {
   const [path, setPath] = useState(location.pathname)
   useEffect(() => { const on = () => setPath(location.pathname); addEventListener('popstate', on); return () => removeEventListener('popstate', on) }, [])
-  const go = useCallback((next: string) => { if (next !== location.pathname) history.pushState({}, '', next); setPath(next); scrollTo(0, 0) }, [])
+  const go = useCallback((next: string) => { if (next !== location.pathname) history.pushState({}, '', next); setPath(next); scrollTo(0, 0); document.getElementById('l-scroll')?.scrollTo(0, 0) }, [])
   return [path, go] as const
 }
 
@@ -133,12 +133,15 @@ function Signed({ me }: { me: string }) {
       <div className="l-app">
         <LiquidGold />
         <TopBar tab={tab} />
+        {/* Only this area scrolls. The header above it never moves. On a pact, only the middle column scrolls. */}
+        <div className={`l-scroll${parts[0] === 'pacts' && parts[1] ? ' pact' : ''}`} id="l-scroll">
         {parts[0] === 'pacts' && parts[1] ? <PactPage key={parts[1]} id={parts[1]} />
           : tab === 'pacts' ? <Timeline />
           : tab === 'friends' ? <Friends />
           : tab === 'wallet' ? <WalletPage />
           : tab === 'grok' ? <ConnectPage />
           : <Home />}
+        </div>
         {tab && <BottomBar tab={tab} />}
         {creating && <NewPact onClose={() => setCreating(false)} />}
       </div>

@@ -169,7 +169,10 @@ export async function loadPactData(id: string, me: string): Promise<PactData> {
 export const coordinator = (d: Pick<PactData, 'members'>) => d.members.find((m) => m.role === 'host') ?? null
 
 export function booking(d: PactData) {
-  const rec = d.recommendations[0]
+  // The plan the group is voting on (or approved) stays in charge, even if Grok writes a newer summary afterwards.
+  // Recommendations are newest first, so a plan sent for approval later still wins. With no vote yet, the newest one.
+  const voted = d.recommendations.find((r) => d.decisions.some((x) => x.recommendation_id === r.recommendation_id && x.status !== 'rejected'))
+  const rec = voted ?? d.recommendations[0]
   const option = rec?.options[0]
   if (!rec || !option) return null
   const people = Math.max(1, d.members.length)
