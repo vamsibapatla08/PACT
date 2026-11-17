@@ -166,7 +166,7 @@ export function Landing() {
         <GoogleButton big />
       </section>
 
-      <footer className="x-foot"><img src="/pact-mark.png" alt="" /><span>Pact · made by Rory Geddes · UBC Hackathon 2026</span></footer>
+      <footer className="x-foot"><img src="/pact-mark.png" alt="" /><span>Pact · made by the Pact team · UBC Hackathon 2026</span></footer>
     </div>
   )
 }
