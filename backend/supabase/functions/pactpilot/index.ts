@@ -1,5 +1,5 @@
 import { createClient } from "npm:@supabase/supabase-js@2"
-import { executePactPilotTool, isSupportedTool } from "./tools.ts"
+import { executePactPilotTool, isSupportedTool, pactPilotTools } from "./tools.ts"
 
 const headers = {
   "Access-Control-Allow-Origin": "*",
@@ -105,13 +105,55 @@ const planSchema = {
         additionalProperties: false,
         required: ["tool", "args", "requires_confirmation"],
         properties: {
-          tool: { type: "string", enum: ["read_pact_state", "read_booking_options", "read_booking_state", "prepare_booking_proposal", "read_split_state", "prepare_split", "read_rebalance", "prepare_rebalance", "vote_rebalance", "apply_rebalance", "create_poll", "publish_action_card", "enqueue_email"] },
+          tool: { type: "string", enum: [...pactPilotTools] },
           args: { type: "object", additionalProperties: true },
           requires_confirmation: { type: "boolean" },
         },
       },
     },
   },
+}
+
+// How Grok reasons about splitting. The database does every sum; Grok only picks who and what.
+const tabRules = "MONEY: tab is the group's live tab in dollars. members has each " +
+  "person's id, name and balance (positive = the group owes them, negative = " +
+  "they owe). expenses shows who paid and how each is split. settle_up is the " +
+  "fewest paybacks that square everyone up. you is the asker's member id. " +
+  "Answer who-owes-whom questions from these numbers exactly; never recompute " +
+  "balances yourself. Paid shares are never rewritten: when someone new joins " +
+  "something already paid, the cost is re-split evenly over everyone on it and " +
+  "the newcomer pays the earlier payers back through settle_up. To change the " +
+  "tab propose actions: add_expense {title, total_cents (whole cents), paid_by " +
+  "(member id, omit for the asker), split_with (member ids, omit for everyone " +
+  "in the pact) or custom_shares ({member id: cents} that add up to " +
+  "total_cents)} for anything someone paid, e.g. 'I got the coffees'; " +
+  "join_expense {expense_id} when the asker wants in on an expense already on " +
+  "the tab, or join_expense {booking: true} to join the pact's funded booking; " +
+  "resplit_expense {expense_id, split_with or custom_shares} when the payer " +
+  "wants to add or drop people; import_plan_to_tab {} to put the funded " +
+  "booking on the tab. Only people in members can be on a split; if someone " +
+  "is not in the pact yet, say they must be invited first. In reply, say in " +
+  "plain words who will owe whom after the change, using the tab's numbers."
+
+type Tab = {
+  members?: { user_id: string; name: string; balance_cents: number }[]
+  expenses?: { expense_id: string; title: string; total_cents: number; payers: Record<string, number>; shares: Record<string, number> }[]
+  settle_up?: { from: string; to: string; amount_cents: number }[]
+}
+
+/** The tab in dollars and first names, small enough to send with every question. */
+function tabForGrok(raw: unknown, me: string) {
+  const tab = (raw ?? {}) as Tab
+  const names = new Map((tab.members ?? []).map((m) => [m.user_id, m.name.split(" ")[0] || "Someone"]))
+  const usd = (cents: number) => Math.round(cents) / 100
+  const byName = (split: Record<string, number>) =>
+    Object.fromEntries(Object.entries(split ?? {}).map(([id, cents]) => [names.get(id) ?? id, usd(cents)]))
+  return {
+    you: me,
+    members: (tab.members ?? []).map((m) => ({ id: m.user_id, name: names.get(m.user_id), balance: usd(m.balance_cents) })),
+    expenses: (tab.expenses ?? []).slice(0, 25).map((e) => ({ id: e.expense_id, title: e.title, total: usd(e.total_cents), paid_by: byName(e.payers), split: byName(e.shares) })),
+    settle_up: (tab.settle_up ?? []).map((s) => ({ from: names.get(s.from), to: names.get(s.to), amount: usd(s.amount_cents) })),
+  }
 }
 
 const estimateLabel =
@@ -197,12 +239,7 @@ function cleanOptions(options: unknown) {
     }))
 }
 
-const allowedTools = [
-  "read_pact_state", "read_booking_options", "read_booking_state",
-  "prepare_booking_proposal", "read_split_state", "prepare_split",
-  "read_rebalance", "prepare_rebalance", "vote_rebalance",
-  "apply_rebalance", "create_poll", "publish_action_card", "enqueue_email",
-]
+const allowedTools: readonly string[] = pactPilotTools
 
 function cleanActions(value: unknown) {
   return (Array.isArray(value) ? value : [])
@@ -458,7 +495,7 @@ Deno.serve(async (request) => {
 
   // Reads run as the caller, so RLS limits the agent to what they can see.
   const contextStartedAt = performance.now()
-  const [{ data: recent, error: chatError }, { count: memberCount, error: countError }] =
+  const [{ data: recent, error: chatError }, { count: memberCount, error: countError }, { data: tab }] =
     await Promise.all([
       supabase
         .from("pact_messages")
@@ -471,6 +508,8 @@ Deno.serve(async (request) => {
         .select("user_id", { count: "exact", head: true })
         .eq("pact_id", pactId)
         .eq("membership_status", "active"),
+      // The live tab; a pact with nothing on it yet still reads fine.
+      supabase.rpc("get_pact_tab", { p_pact_id: pactId }),
     ])
 
   if (chatError || countError) {
@@ -504,7 +543,7 @@ Deno.serve(async (request) => {
   }
 
   const isComplexRequest = question.length > 240 ||
-    /\b(plan|trip|hotel|project|hackathon|poll|budget|task|booking|expense|split|decision|rebalance)\b/i.test(question)
+    /\b(plan|trip|hotel|project|hackathon|poll|budget|task|booking|expense|split|decision|rebalance|owe|owes|paid|pay|crash|tab|settle)\b/i.test(question)
   const maxOutputTokens = isComplexRequest ? 1600 : 700
   const grokInput = [
     {
@@ -536,11 +575,8 @@ Deno.serve(async (request) => {
         "group_size from the question or 0 if unknown, budget from the " +
         "question or 0 if none is stated), next_steps (short actions " +
         "the group can take), and actions. Actions must use only " +
-        "read_pact_state, read_booking_options, read_booking_state, " +
-        "prepare_booking_proposal, read_split_state, prepare_split, " +
-        "read_rebalance, prepare_rebalance, vote_rebalance, apply_rebalance, create_poll, " +
-        "publish_action_card, or enqueue_email, and every " +
-        "action requires confirmation. Keep the total of costs within any budget " +
+        `${pactPilotTools.join(", ")}, and every ` +
+        "action requires confirmation. " + tabRules + " Keep the total of costs within any budget " +
         "and say in the summary if it cannot fit. All costs are " +
         "estimates, never quotes. Never claim to approve commitments, " +
         "book anything, or move money. Only propose actions when the " +
@@ -552,7 +588,7 @@ Deno.serve(async (request) => {
     },
     {
       role: "user",
-      content: JSON.stringify({ pact, active_members: memberCount ?? null, chat, question }),
+      content: JSON.stringify({ pact, active_members: memberCount ?? null, tab: tabForGrok(tab, user.id), chat, question }),
     },
   ]
 

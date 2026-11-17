@@ -1,19 +1,31 @@
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2"
 
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
-const tools = [
+export const pactPilotTools = [
   "read_pact_state", "read_booking_options", "read_booking_state", "prepare_booking_proposal",
   "read_split_state", "prepare_split", "read_rebalance", "prepare_rebalance", "vote_rebalance", "apply_rebalance", "create_poll", "publish_action_card", "enqueue_email",
+  "read_tab", "add_expense", "join_expense", "resplit_expense", "import_plan_to_tab",
 ] as const
-export type PactPilotToolName = typeof tools[number]
+export type PactPilotToolName = typeof pactPilotTools[number]
 
 type Args = Record<string, unknown>
 type ToolInput = { client: SupabaseClient; pactId: string; tool: string; args: Args }
 
 const isUuid = (value: unknown): value is string => typeof value === "string" && uuid.test(value)
 
+// undefined means "present but malformed", so callers can reject it instead of silently splitting with everyone.
+function uuidList(value: unknown): string[] | undefined {
+  return Array.isArray(value) && value.length > 0 && value.length <= 50 && value.every(isUuid) ? value : undefined
+}
+
+function centsMap(value: unknown): Record<string, number> | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined
+  const entries = Object.entries(value)
+  return entries.length > 0 && entries.every(([id, cents]) => isUuid(id) && Number.isSafeInteger(cents) && (cents as number) >= 0) ? value as Record<string, number> : undefined
+}
+
 export function isSupportedTool(value: unknown): value is PactPilotToolName {
-  return typeof value === "string" && (tools as readonly string[]).includes(value)
+  return typeof value === "string" && (pactPilotTools as readonly string[]).includes(value)
 }
 
 export async function executePactPilotTool({ client, pactId, tool, args }: ToolInput) {
@@ -151,6 +163,53 @@ export async function executePactPilotTool({ client, pactId, tool, args }: ToolI
     const { data, error } = await client.rpc("create_pact_action_card", { p_pact_id: pactId, p_action_type: actionType, p_state: state, p_title: title, p_description: description, p_payload: payload, p_target_id: targetId, p_operation_id: operationId, p_idempotency_key: idempotencyKey })
     if (error) throw new Error(error.message)
     return { tool, status: "completed", card_id: data }
+  }
+
+  if (tool === "read_tab") {
+    const { data, error } = await client.rpc("get_pact_tab", { p_pact_id: pactId })
+    if (error) throw new Error(error.message)
+    return { tool, status: "completed", tab: data }
+  }
+
+  if (tool === "add_expense") {
+    const title = typeof args.title === "string" ? args.title.trim() : ""
+    const totalCents = args.total_cents
+    const paidBy = args.paid_by == null ? null : args.paid_by
+    const splitWith = args.split_with == null ? null : uuidList(args.split_with)
+    const custom = args.custom_shares == null ? null : centsMap(args.custom_shares)
+    if (!title || title.length > 120 || !Number.isSafeInteger(totalCents) || (totalCents as number) <= 0 || (paidBy !== null && !isUuid(paidBy)) || splitWith === undefined || custom === undefined) throw new Error("Invalid expense details")
+    const { data, error } = await client.rpc("add_pact_expense", { p_pact_id: pactId, p_title: title, p_total_cents: totalCents, p_paid_by: paidBy, p_split_with: splitWith, p_custom_shares: custom, p_source: "grok" })
+    if (error) throw new Error(error.message)
+    return { tool, status: "completed", expense_id: data }
+  }
+
+  if (tool === "join_expense") {
+    // "booking": true joins the pact's funded booking, putting it on the tab first if it isn't there yet.
+    let expenseId = args.expense_id
+    if (args.booking === true && !isUuid(expenseId)) {
+      const imported = await client.rpc("import_pact_plan_to_tab", { p_pact_id: pactId })
+      if (imported.error) throw new Error(imported.error.message)
+      expenseId = imported.data
+    }
+    if (!isUuid(expenseId)) throw new Error("A valid expense_id is required")
+    const { data, error } = await client.rpc("join_pact_expense", { p_expense_id: expenseId })
+    if (error) throw new Error(error.message)
+    return { tool, ...data }
+  }
+
+  if (tool === "resplit_expense") {
+    const splitWith = args.split_with == null ? null : uuidList(args.split_with)
+    const custom = args.custom_shares == null ? null : centsMap(args.custom_shares)
+    if (!isUuid(args.expense_id) || splitWith === undefined || custom === undefined || (!splitWith && !custom)) throw new Error("Invalid re-split details")
+    const { data, error } = await client.rpc("resplit_pact_expense", { p_expense_id: args.expense_id, p_split_with: splitWith, p_custom_shares: custom })
+    if (error) throw new Error(error.message)
+    return { tool, ...data }
+  }
+
+  if (tool === "import_plan_to_tab") {
+    const { data, error } = await client.rpc("import_pact_plan_to_tab", { p_pact_id: pactId })
+    if (error) throw new Error(error.message)
+    return { tool, status: "completed", expense_id: data }
   }
 
   const entityId = args.entity_id
