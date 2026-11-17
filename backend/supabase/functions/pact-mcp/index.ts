@@ -337,11 +337,14 @@ async function handle(msg: Json, me: Me) {
 // The client registers, sends the person to /authorize, which hands over to the Pact app. They sign in with Google
 // and approve there, and the app sends them back with a one-time code. /token swaps the code for a pact_ token.
 
-const BASE = `${SUPABASE_URL.replace(/\/$/, '')}/functions/v1/pact-mcp`
+// The connector lives on the Pact site (pact-chi-nine.vercel.app/mcp), which forwards to this function. That way the
+// sign-in details sit at the root of a domain we own (/.well-known/…), where Grok and other apps look for them.
 const APP_URL = (Deno.env.get('PACT_APP_URL') ?? 'https://pact-chi-nine.vercel.app').replace(/\/$/, '')
+const BASE = (Deno.env.get('PACT_MCP_URL') ?? `${APP_URL}/mcp`).replace(/\/$/, '')
+const ISSUER = new URL(BASE).origin
 
 const authServer = {
-  issuer: BASE,
+  issuer: ISSUER,
   authorization_endpoint: `${BASE}/authorize`,
   token_endpoint: `${BASE}/token`,
   registration_endpoint: `${BASE}/register`,
@@ -351,7 +354,11 @@ const authServer = {
   token_endpoint_auth_methods_supported: ['none'],
   scopes_supported: ['pact'],
 }
-const resource = { resource: BASE, authorization_servers: [BASE], scopes_supported: ['pact'], bearer_methods_supported: ['header'] }
+const resource = { resource: BASE, authorization_servers: [ISSUER], scopes_supported: ['pact'], bearer_methods_supported: ['header'], resource_name: 'Pact' }
+const signInFirst = () => reply(
+  { jsonrpc: '2.0', id: null, error: { code: -32001, message: 'Sign in to Pact: your app should show a Sign in button. Or make a token on the Grok tab in Pact.' } },
+  401, { 'WWW-Authenticate': `Bearer realm="pact", resource_metadata="${ISSUER}/.well-known/oauth-protected-resource/mcp", scope="pact"` },
+)
 
 const oauthError = (error: string, description: string, status = 400) => reply({ error, error_description: description }, status, { 'Cache-Control': 'no-store' })
 const page = (message: string, status = 400) => new Response(`<!doctype html><meta charset="utf-8"><title>Pact</title><p style="font:16px system-ui;margin:40px">${message}</p>`, { status, headers: { 'Content-Type': 'text/html; charset=utf-8' } })
@@ -442,15 +449,17 @@ Deno.serve(async (request) => {
   const url = new URL(request.url)
   // Everything after the function name: "", "/token", "/.well-known/…". Works for /pact-mcp/… and /functions/v1/pact-mcp/….
   const route = url.pathname.replace(/^.*?\/pact-mcp/, '').replace(/\/$/, '')
+  const signedIn = /^Bearer\s+pact_/i.test(request.headers.get('Authorization') ?? '') || url.searchParams.has('key')
   if (request.method === 'GET' && route.startsWith('/.well-known/oauth-protected-resource')) return reply(resource)
   if (request.method === 'GET' && (route.startsWith('/.well-known/oauth-authorization-server') || route.startsWith('/.well-known/openid-configuration'))) return reply(authServer)
   if (request.method === 'GET' && route === '/authorize') return authorize(url)
   if (request.method === 'POST' && route === '/register') return register(request)
   if (request.method === 'POST' && route === '/token') return token(request)
   if (route !== '') return reply({ error: 'Not found' }, 404)
-  if (request.method !== 'POST') return reply({ error: 'Pact MCP takes POST requests (Streamable HTTP).' }, 405, { Allow: 'POST, OPTIONS' })
+  // An app checking the server with GET or DELETE before it has signed in gets "sign in first", so it shows Sign in.
+  if (request.method !== 'POST') return signedIn ? reply({ error: 'Pact MCP takes POST requests (Streamable HTTP).' }, 405, { Allow: 'POST, OPTIONS' }) : signInFirst()
   const me = await signIn(request)
-  if (!me) return reply({ jsonrpc: '2.0', id: null, error: { code: -32001, message: 'Connect with Google, or make a token in Pact (Connect Grok) and send it as: Authorization: Bearer pact_…' } }, 401, { 'WWW-Authenticate': `Bearer realm="pact", resource_metadata="${BASE}/.well-known/oauth-protected-resource"` })
+  if (!me) return signInFirst()
   let body: unknown
   try { body = await request.json() } catch { return reply({ jsonrpc: '2.0', id: null, error: { code: -32700, message: 'Parse error' } }, 400) }
   if (Array.isArray(body)) {

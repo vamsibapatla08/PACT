@@ -1,3 +1,13 @@
 {
-  "rewrites": [{ "source": "/(.*)", "destination": "/" }]
+  "rewrites": [
+    { "source": "/mcp", "destination": "https://gnueyjkepcquehiigcis.supabase.co/functions/v1/pact-mcp" },
+    { "source": "/mcp/:path*", "destination": "https://gnueyjkepcquehiigcis.supabase.co/functions/v1/pact-mcp/:path*" },
+    { "source": "/.well-known/oauth-protected-resource", "destination": "https://gnueyjkepcquehiigcis.supabase.co/functions/v1/pact-mcp/.well-known/oauth-protected-resource" },
+    { "source": "/.well-known/oauth-protected-resource/:path*", "destination": "https://gnueyjkepcquehiigcis.supabase.co/functions/v1/pact-mcp/.well-known/oauth-protected-resource" },
+    { "source": "/.well-known/oauth-authorization-server", "destination": "https://gnueyjkepcquehiigcis.supabase.co/functions/v1/pact-mcp/.well-known/oauth-authorization-server" },
+    { "source": "/.well-known/oauth-authorization-server/:path*", "destination": "https://gnueyjkepcquehiigcis.supabase.co/functions/v1/pact-mcp/.well-known/oauth-authorization-server" },
+    { "source": "/.well-known/openid-configuration", "destination": "https://gnueyjkepcquehiigcis.supabase.co/functions/v1/pact-mcp/.well-known/openid-configuration" },
+    { "source": "/.well-known/openid-configuration/:path*", "destination": "https://gnueyjkepcquehiigcis.supabase.co/functions/v1/pact-mcp/.well-known/openid-configuration" },
+    { "source": "/(.*)", "destination": "/" }
+  ]
 }

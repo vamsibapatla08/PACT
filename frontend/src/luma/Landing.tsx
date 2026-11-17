@@ -2,7 +2,7 @@ import { useState } from 'react'
 import * as S from './store'
 import { BankCard } from './BankCard'
 import { LiquidGold } from './LiquidGold'
-import { Copy, GROK_PROMPT, ToolGrid, connectorUrl } from './Mcp'
+import { Copy, GROK_PROMPT, MCP_URL, ToolGrid } from './Mcp'
 import { Grok, Icon, VerifiedBadge } from './ui'
 
 // Everything below is the real Pact UI with made-up data. Rory is the coordinator; the friends are fictional.
@@ -156,7 +156,7 @@ export function Landing() {
               <span className="l-faint" style={{ fontSize: 13 }}>The Pact Planner prompt for your Grok bot</span>
               <Copy text={GROK_PROMPT} label="Copy prompt" />
             </div>
-            <span className="l-faint" style={{ fontSize: 12.5 }}>Connector: <code>{connectorUrl().replace(/^https:\/\//, '').replace(/\.supabase\.co/, '…')}</code></span>
+            <span className="l-faint" style={{ fontSize: 12.5 }}>Connector: <code>{MCP_URL.replace(/^https:\/\//, '')}</code></span>
           </div>
         </div>
         <ToolGrid />

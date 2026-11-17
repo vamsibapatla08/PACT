@@ -6,7 +6,9 @@ import { GoogleButton } from './Landing'
 import { LiquidGold } from './LiquidGold'
 
 /** Where Grok (or any MCP client) connects. */
-export const MCP_URL = `${(import.meta.env.VITE_SUPABASE_URL ?? 'https://your-project.supabase.co').replace(/\/$/, '')}/functions/v1/pact-mcp`
+// The connector lives on the Pact site, which forwards to the pact-mcp function, so its sign-in details sit at the
+// root of our own domain where Grok looks for them.
+export const MCP_URL = (import.meta.env.VITE_PACT_MCP_URL ?? 'https://pact-chi-nine.vercel.app/mcp').replace(/\/$/, '')
 
 export type McpTool = { name: string; label: string; does: string; read?: boolean; detail: string; ask: string; result: string[] }
 
@@ -44,25 +46,32 @@ export const mcpTools: McpTool[] = [
 /** The link for Grok's connector dialog, which only takes a URL: the token rides along as ?key=. */
 export const connectorUrl = (token = 'pact_…') => `${MCP_URL}?key=${token}`
 
-/** Instructions for a Grok bot that plans in Pact. Paste into a Grok project. */
-export const GROK_PROMPT = `You are Pact Planner, a travel planner for group trips in Pact.
-Pact's rule: collect money before you book.
+/** The whole setup in one paste: Grok connects Pact (Sign in with Google), then plans. */
+export const GROK_PROMPT = `Connect the Pact connector, then be my Pact Planner.
 
-You have the Pact connector:
-- list_pacts, get_pact: read pacts, people, itinerary, stage
+Connector
+- Name: Pact
+- URL: ${MCP_URL}
+- Sign-in: OAuth. Show me the Connect / Sign in button. I'll sign in with Google and tap Allow, then come back here.
+- Don't ask me for a token or an API key.
+
+You are Pact Planner, a travel planner for group trips in Pact. Pact's rule: collect money before you book.
+
+Tools on the Pact connector
+- list_pacts, get_pact: read my pacts, people, itinerary and stage
 - create_pact: start a pact (name, place, dates, budget each)
 - add_item: add a stay, flight, tickets, dinner or other, priced per person
-- post_message: post in the pact's group chat
+- post_message: post in a pact's group chat
 - propose_booking: put the itinerary up for everyone to approve
 - payment_status: see who has paid
 
-How to work:
-1. Start with list_pacts. If it's unclear which pact, ask. Read it with get_pact before changing anything.
+How to work
+1. Once I'm connected, start with list_pacts. If it's unclear which pact, ask. Read it with get_pact before changing anything.
 2. To plan, search the web for real options that fit the place, dates, group size and budget each. Show 2-3 with the price per person and a link.
-3. When the user picks one, add it with add_item: the right kind, a short title, dates, price_each per person and the link.
+3. When I pick one, add it with add_item: the right kind, a short title, dates, price_each per person and the link.
 4. Keep the total per person within budget. Say so if it isn't.
-5. When the itinerary is done and the user says go, call propose_booking, then post a short note in the chat with post_message.
-6. You can't pay or move money. Everyone approves and pays their own share with their PIN in the Pact app. Use payment_status to see who's paid.
+5. When the itinerary is done and I say go, call propose_booking, then post a short note in the chat with post_message.
+6. You can't pay or move money. Everyone approves and pays their own share with their PIN in the Pact app.
 
 Ask before create_pact, propose_booking or post_message. Keep replies short.`
 
@@ -149,21 +158,23 @@ export function ConnectPage() {
       <div className="l-card m-hero">
         {tokens && tokens.length > 0
           ? <span className="m-status on"><Icon name="check" size={16} />Connected to Grok</span>
-          : <span className="m-status">Not connected yet. It takes one link and a Google sign-in.</span>}
+          : <span className="m-status">Not connected yet. One paste in Grok and a Google sign-in.</span>}
         <div className="m-hero-actions">
-          <Copy text={MCP_URL} label="Copy Pact link" />
-          <a className="l-btn" href="https://grok.com/connectors" target="_blank" rel="noreferrer">Open Grok</a>
+          <Copy text={GROK_PROMPT} label="Copy setup prompt" />
+          <a className="l-btn" href="https://grok.com" target="_blank" rel="noreferrer">Open Grok</a>
         </div>
       </div>
 
-      <h2 className="l-h2">1. Add Pact to Grok</h2>
+      <h2 className="l-h2">Set up Grok</h2>
       <div className="l-card m-setup">
         <ol className="m-steps">
-          <li><span>1</span>Open <a href="https://grok.com/connectors" target="_blank" rel="noreferrer">grok.com/connectors</a>, then <b>New Connector → Custom</b>.</li>
-          <li><span>2</span>Name it <b>Pact</b> and paste this link as the server URL.</li>
-          <li><span>3</span>Grok sends you to Pact. <b>Continue with Google</b>, tap <b>Allow</b>, and you're connected.</li>
+          <li><span>1</span><b>Copy the setup prompt</b> below.</li>
+          <li><span>2</span>Paste it into a new chat on <a href="https://grok.com" target="_blank" rel="noreferrer">grok.com</a>.</li>
+          <li><span>3</span>Tap <b>Connect</b>, sign in with Google, tap <b>Allow</b>, then <b>Return to Grok</b>. You're set.</li>
         </ol>
-        <div className="m-token-row"><code>{MCP_URL}</code><Copy text={MCP_URL} label="Copy link" /></div>
+        <pre className="m-code m-prompt">{GROK_PROMPT}</pre>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}><Copy text={MCP_URL} label="Copy link only" /><Copy text={GROK_PROMPT} label="Copy setup prompt" /></div>
+        <p className="l-faint" style={{ fontSize: 13, margin: 0 }}>No Connect button? In Grok, open Connectors, then New Connector → Custom, and paste the link only. It signs in the same way.</p>
       </div>
 
       <h2 className="l-h2">Connections</h2>
@@ -181,23 +192,12 @@ export function ConnectPage() {
         {error && <p className="l-error">{error}</p>}
       </div>
 
-      <h2 className="l-h2">2. Make your Grok bot</h2>
-      <div className="l-card m-setup">
-        <ol className="m-steps">
-          <li><span>1</span>In Grok, start a new <b>Project</b> called <b>Pact Planner</b>.</li>
-          <li><span>2</span>Paste this as its instructions, and turn on the Pact connector.</li>
-          <li><span>3</span>Ask it: <i>"Plan our Austin weekend under $400 each."</i></li>
-        </ol>
-        <pre className="m-code m-prompt">{GROK_PROMPT}</pre>
-        <div style={{ display: 'flex', justifyContent: 'flex-end' }}><Copy text={GROK_PROMPT} label="Copy prompt" /></div>
-      </div>
-
       <h2 className="l-h2">Using the xAI API instead</h2>
       <div className="l-card m-setup">
         <div className="m-token-row"><span className="l-dim">Server</span><code>{MCP_URL}</code><Copy text={MCP_URL} /></div>
         <pre className="m-code">{grokSnippet()}</pre>
         <div style={{ display: 'flex', justifyContent: 'flex-end' }}><Copy text={grokSnippet()} label="Copy request" /></div>
-        <p className="l-faint" style={{ fontSize: 13, margin: 0 }}>Any MCP client works the same way: this URL, with your token as a Bearer header.</p>
+        <p className="l-faint" style={{ fontSize: 13, margin: 0 }}>Any MCP client works the same way: this URL, and it signs in with Google.</p>
       </div>
 
       <h2 className="l-h2">What Grok can do</h2>
