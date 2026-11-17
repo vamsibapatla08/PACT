@@ -152,9 +152,14 @@ export function PactWorkspacePage({ user, profile, pactId, onNavigate, onSignOut
   // The date picker gives local time with no zone, so it becomes a UTC instant here, before the server reads it.
   async function handleCreateFundingPlan(input: { shareUsdc: string; deadline: string; payeeAddress: string }) {
     const created = await createPactFundingPlan({ pactId, ...input, deadline: new Date(input.deadline).toISOString() })
-    const latest = await getLatestBookingStatus(pactId)
-    const currentSplit = latest.splits[0]
-    if (latest.booking && currentSplit?.status === 'approved') await associateBookingPayment(pactId, latest.booking.booking_id, currentSplit.split_id, created.paymentId)
+    // The plan is already saved, so a booking error must not make the host create it twice.
+    try {
+      const latest = await getLatestBookingStatus(pactId)
+      const currentSplit = latest.splits[0]
+      if (latest.booking && currentSplit?.status === 'approved') await associateBookingPayment(pactId, latest.booking.booking_id, currentSplit.split_id, created.paymentId)
+    } catch (reason) {
+      console.warn('Funding plan saved, but it could not be linked to a booking', reason)
+    }
     setPaymentRows(await getPactPaymentStatus(pactId))
   }
 
