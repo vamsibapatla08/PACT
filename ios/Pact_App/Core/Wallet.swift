@@ -27,7 +27,7 @@ struct Transfer: Identifiable, Hashable, Decodable {
     }
 }
 
-/// Where a send got to: confirmed on Arc, failed, or still going when we stopped watching.
+/// Where a send got to: confirmed on Base, failed, or still going when we stopped watching.
 enum SendOutcome {
     case confirmed, pending, failed(String)
 }
@@ -50,7 +50,7 @@ private struct WalletReply: Decodable {
 
     var wallet: Wallet? {
         guard status == "ready", let address else { return nil }
-        return Wallet(address: address, blockchain: blockchain ?? "ARC-TESTNET", usdcBalance: usdc_balance)
+        return Wallet(address: address, blockchain: blockchain ?? "BASE-SEPOLIA", usdcBalance: usdc_balance)
     }
 }
 
@@ -75,7 +75,7 @@ extension PactStore {
     }
 
     /// Sends USDC to someone in one of my pacts, the same way the website does: the server checks we're
-    /// both members and looks up their address, Circle asks for my PIN, then we watch Arc confirm it.
+    /// both members and looks up their address, Circle asks for my PIN, then we watch Base confirm it.
     /// `requestId` is made once per Send tap, so a retry never sends twice.
     func send(to friend: Friend, amount: String, requestId: UUID, onStep: (String) -> Void) async -> SendOutcome {
         guard let pact = friend.pacts.first else { return .failed("You don't share a pact with them.") }
@@ -101,8 +101,8 @@ extension PactStore {
                 return .failed(failure)
             }
 
-            // Arc confirms in seconds; stop watching after two minutes and leave it pending.
-            onStep("Sending on Arc…")
+            // Base confirms in seconds; stop watching after two minutes and leave it pending.
+            onStep("Sending on Base…")
             for _ in 0..<40 {
                 let state = try await walletCall(["action": "transfer_status", "transferId": transferId])
                 switch state.transfer?.status {

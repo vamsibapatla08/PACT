@@ -1,4 +1,5 @@
-// The signed-in user's own Circle wallet on Arc Testnet (user-controlled: only their PIN moves money).
+// The signed-in user's own Circle smart wallet on Base Sepolia (user-controlled: only their PIN moves money).
+// Gas is paid by Circle's Gas Station, so members only ever hold USDC.
 // The Circle user ID is the Supabase auth.uid(), so one wallet follows a person across every Pact.
 //
 //   GET  /functions/v1/wallet                                   status: read only, never creates
@@ -21,12 +22,13 @@
 // Calls Circle's REST API directly: its Node SDK fails to boot in the Edge runtime.
 import { createClient } from 'npm:@supabase/supabase-js@2'
 import {
-  challengeOutcome, closeBlocker, CONTRACT_GAS, decodeBool, decodePact, gasReserve, lowBalance, paidCallData, pactKey, PACTS_SELECTOR, pactStatusView, payShareBlocker, PIN_MARGIN_SECONDS, refundBlocker,
-  TRANSFER_GAS, type TxStatus, txOutcome, usdcString, usdcWei,
+  allowanceCallData, balanceOfCallData, challengeOutcome, closeBlocker, decodeBool, decodePact, lowBalance, paidCallData, pactKey,
+  PACTS_SELECTOR, pactStatusView, payShareBlocker, PIN_MARGIN_SECONDS, refundBlocker, type TxStatus, txOutcome, usdcString, usdcWei,
 } from './chain.ts'
 
-const BLOCKCHAIN = 'ARC-TESTNET'
-const ARC_RPC = 'https://rpc.testnet.arc.network'
+const BLOCKCHAIN = 'BASE-SEPOLIA'
+const RPC = Deno.env.get('BASE_SEPOLIA_RPC_URL') ?? 'https://sepolia.base.org'
+const USDC_ADDRESS = '0x036CbD53842c5426634e7929541eC2318f3dCF7e' // Circle USDC on Base Sepolia, 6 decimals
 const CIRCLE_API = 'https://api.circle.com/v1/w3s'
 const CIRCLE_API_KEY = Deno.env.get('CIRCLE_API_KEY')!
 const PACT_SPLIT_ADDRESS = Deno.env.get('PACT_SPLIT_ADDRESS')
@@ -93,41 +95,43 @@ async function findUserWallet(userId: string, userToken: string): Promise<Circle
 async function saveWallet(userId: string, wallet: CircleWallet): Promise<WalletRow> {
   const { error } = await admin.from('wallets').upsert(
     { user_id: userId, circle_wallet_id: wallet.id, address: wallet.address, blockchain: wallet.blockchain },
-    { onConflict: 'user_id', ignoreDuplicates: true },
+    { onConflict: 'user_id' },
   )
   if (error) throw error
-  const { data } = await admin.from('wallets').select('address, blockchain').eq('user_id', userId).single()
+  const { data } = await admin.from('wallets').select('address, blockchain').eq('user_id', userId).eq('blockchain', BLOCKCHAIN).single()
   return data!
 }
 
-// USDC is Arc's native token, so the native balance is the USDC balance (18 decimals).
+// A read-only call. Returns the raw hex result, or undefined if the RPC gave an error.
+async function ethCall(to: string | undefined, data: string): Promise<unknown> {
+  const res = await fetch(RPC, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_call', params: [{ to, data }, 'latest'] }),
+  })
+  const { result } = await res.json()
+  return result
+}
+
+// A uint256 read from USDC (balanceOf, allowance). Throws if the RPC reply is not one.
+async function readUsdc(data: string): Promise<bigint> {
+  const result = await ethCall(USDC_ADDRESS, data)
+  if (typeof result !== 'string' || !/^0x[0-9a-fA-F]{1,64}$/.test(result)) throw new Error('USDC read failed')
+  return BigInt(result)
+}
+
+// The wallet's USDC as a 2-decimal string for the app, or null if Base could not be reached.
 async function usdcBalance(address: string): Promise<string | null> {
   try {
-    const res = await fetch(ARC_RPC, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_getBalance', params: [address, 'latest'] }),
-    })
-    const { result } = await res.json()
-    const wei = BigInt(result)
-    const whole = wei / 10n ** 18n
-    const cents = (wei % 10n ** 18n) / 10n ** 16n
-    return `${whole}.${cents.toString().padStart(2, '0')}`
+    const units = await readUsdc(balanceOfCallData(address))
+    return `${units / 1_000_000n}.${((units % 1_000_000n) / 10_000n).toString().padStart(2, '0')}`
   } catch {
     return null
   }
 }
 
 // A read-only call to PactSplit. Returns the raw hex result, or undefined if the RPC gave an error.
-async function callPactSplit(data: string): Promise<unknown> {
-  const res = await fetch(ARC_RPC, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_call', params: [{ to: PACT_SPLIT_ADDRESS, data }, 'latest'] }),
-  })
-  const { result } = await res.json()
-  return result
-}
+const callPactSplit = (data: string) => ethCall(PACT_SPLIT_ADDRESS, data)
 
 // Reads PactSplit.pacts(key) in any state. Throws if the RPC reply is not one, so a dead RPC is never read as "none".
 async function readPact(key: string) {
@@ -143,31 +147,17 @@ async function readPaid(key: string, address: string) {
   return paid
 }
 
-// An Arc RPC call whose result is a hex quantity. Throws on an RPC error.
-async function rpcQuantity(method: string, params: unknown[]): Promise<bigint> {
-  const res = await fetch(ARC_RPC, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
-  })
-  const { result } = await res.json()
-  if (typeof result !== 'string' || !/^0x[0-9a-fA-F]+$/.test(result)) throw new Error(`Arc ${method} failed`)
-  return BigInt(result)
-}
-
-// Checks the wallet's native USDC covers `valueWei` plus gas before a PIN challenge is made. The error reply, or null.
-async function fundsCheck(address: string, valueWei: bigint, gasLimit: bigint): Promise<Response | null> {
-  const [balance, gasPrice] = await Promise.all([
-    rpcQuantity('eth_getBalance', [address, 'latest']),
-    rpcQuantity('eth_gasPrice', []),
-  ])
-  const error = lowBalance(balance, valueWei, gasReserve(gasPrice, gasLimit))
+// Checks the wallet's USDC covers `valueWei` before a PIN challenge is made. The error reply, or null.
+// Gas is sponsored by Circle's Gas Station, so it needs no check.
+async function fundsCheck(address: string, valueWei: bigint): Promise<Response | null> {
+  if (valueWei === 0n) return null
+  const error = lowBalance(await readUsdc(balanceOfCallData(address)), valueWei)
   return error ? reply(409, { error, reason: 'low_balance' }) : null
 }
 
 // The receipt's status ('0x1' success, '0x0' reverted), or null while it is not on chain yet.
 async function receiptStatus(txHash: string): Promise<string | null> {
-  const res = await fetch(ARC_RPC, {
+  const res = await fetch(RPC, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_getTransactionReceipt', params: [txHash] }),
@@ -186,7 +176,7 @@ async function ready(row: WalletRow) {
 
 // The user's Circle wallet id and its address, from our wallets table.
 async function myWallet(userId: string): Promise<{ id: string; address: string } | null> {
-  const { data, error } = await admin.from('wallets').select('circle_wallet_id, address').eq('user_id', userId).maybeSingle()
+  const { data, error } = await admin.from('wallets').select('circle_wallet_id, address').eq('user_id', userId).eq('blockchain', BLOCKCHAIN).maybeSingle()
   if (error) throw error
   return data ? { id: data.circle_wallet_id, address: data.address } : null
 }
@@ -223,16 +213,16 @@ async function challenge(userId: string, path: string, body: Record<string, unkn
 const isAmount = (amount: unknown): amount is string =>
   typeof amount === 'string' && /^\d+(\.\d{1,6})?$/.test(amount) && Number(amount) > 0
 
-// USDC is Arc's native token, so a transfer sends the native token (empty tokenAddress).
+// Sends USDC, the token at USDC_ADDRESS, not the chain's native ETH.
 async function transfer(userId: string, to: unknown, amount: unknown) {
   if (typeof to !== 'string' || !ADDRESS.test(to)) return reply(400, { error: 'to must be a 0x address' })
   if (!isAmount(amount)) return reply(400, { error: 'amount must be a USDC amount like "1.50"' })
   const wallet = await myWallet(userId)
   if (!wallet) return reply(409, { error: 'Set up your wallet first' })
-  const low = await fundsCheck(wallet.address, usdcWei(amount)!, TRANSFER_GAS)
+  const low = await fundsCheck(wallet.address, usdcWei(amount)!)
   if (low) return low
   return await challenge(userId, '/user/transactions/transfer', {
-    walletId: wallet.id, destinationAddress: to, amounts: [amount], tokenAddress: '', blockchain: BLOCKCHAIN,
+    walletId: wallet.id, destinationAddress: to, amounts: [amount], tokenAddress: USDC_ADDRESS, blockchain: BLOCKCHAIN,
   })
 }
 
@@ -285,11 +275,11 @@ async function memberTransfer(userId: string, userJwt: string, body: Record<stri
   if (t.circle_challenge_id) {
     c = { ...(await userSession(userId)), challengeId: t.circle_challenge_id }
   } else {
-    const low = await fundsCheck(wallet.address, usdcWei(amount)!, TRANSFER_GAS)
+    const low = await fundsCheck(wallet.address, usdcWei(amount)!)
     if (low) return low
     c = await startChallenge(userId, '/user/transactions/transfer', {
       idempotencyKey: requestId, walletId: wallet.id, destinationAddress: t.recipient_address,
-      amounts: [amount], tokenAddress: '', blockchain: BLOCKCHAIN,
+      amounts: [amount], tokenAddress: USDC_ADDRESS, blockchain: BLOCKCHAIN,
     })
     const { error: saveError } = await admin.from('pact_transfers')
       .update({ circle_challenge_id: c.challengeId, updated_at: new Date().toISOString() }).eq('transfer_id', t.transfer_id)
@@ -300,7 +290,7 @@ async function memberTransfer(userId: string, userJwt: string, body: Record<stri
 
 type Progress = { status: TxStatus; transactionId: string | null; txHash: string | null; reason: string | null }
 
-// Follows a PIN challenge through Circle: the challenge, the transaction it made, then the receipt on Arc.
+// Follows a PIN challenge through Circle: the challenge, the transaction it made, then the receipt on Base.
 // Confirmed only when the receipt says success, so a call that reverted on chain reads failed.
 async function followChallenge(userToken: string, challengeId: string, transactionId: string | null): Promise<Progress> {
   let txId = transactionId
@@ -362,19 +352,19 @@ async function pactRoster(userJwt: string, pactId: string) {
   return (members ?? []) as { user_id: string; role: string }[]
 }
 
-// A PactSplit call from the user's wallet, once their balance covers `valueWei` plus gas.
+// A contract call from the user's wallet (PactSplit unless `contract` says otherwise), once their USDC covers
+// `needsUsdc`. No native value is ever sent: USDC moves by approve and transferFrom.
 async function contractChallenge(
-  userId: string, wallet: { id: string; address: string }, signature: string, params: string[], valueWei = 0n,
-  details: Record<string, unknown> = {},
+  userId: string, wallet: { id: string; address: string }, signature: string, params: string[], needsUsdc = 0n,
+  details: Record<string, unknown> = {}, contract = PACT_SPLIT_ADDRESS,
 ) {
-  const low = await fundsCheck(wallet.address, valueWei, CONTRACT_GAS)
+  const low = await fundsCheck(wallet.address, needsUsdc)
   if (low) return low
   return await challenge(userId, '/user/transactions/contractExecution', {
     walletId: wallet.id,
-    contractAddress: PACT_SPLIT_ADDRESS,
+    contractAddress: contract,
     abiFunctionSignature: signature,
     abiParameters: params,
-    ...(valueWei > 0n ? { amount: usdcString(valueWei) } : {}),
   }, details)
 }
 
@@ -400,9 +390,15 @@ async function payShare(userId: string, userJwt: string, pactId: unknown) {
   const blocked = payShareBlocker(pact, await readPaid(key, wallet.address), Date.now() / 1000)
   if (blocked) return reply(409, { error: blocked })
 
-  return await contractChallenge(userId, wallet, 'payShare(bytes32)', [key], pact.share, {
-    amount: usdcString(pact.share), payee: pact.payee, sharesPaid: pact.sharesPaid, sharesNeeded: pact.sharesNeeded,
-  })
+  const details = { amount: usdcString(pact.share), payee: pact.payee, sharesPaid: pact.sharesPaid, sharesNeeded: pact.sharesNeeded }
+  // PactSplit pulls the share with transferFrom, so it must be approved for exactly one share first. That is its own
+  // PIN, marked step 'approve'; once it confirms, the app calls pay_share again and gets the payShare PIN.
+  const allowance = await readUsdc(allowanceCallData(wallet.address, PACT_SPLIT_ADDRESS))
+  if (allowance < pact.share) {
+    return await contractChallenge(userId, wallet, 'approve(address,uint256)', [PACT_SPLIT_ADDRESS, pact.share.toString()],
+      pact.share, { ...details, step: 'approve' }, USDC_ADDRESS)
+  }
+  return await contractChallenge(userId, wallet, 'payShare(bytes32)', [key], pact.share, { ...details, step: 'pay' })
 }
 
 // Only the pact's active host may open, release or cancel it. Returns their wallet, or the error reply.
@@ -503,7 +499,7 @@ async function pactStatus(userId: string, userJwt: string, pactId: unknown) {
   const roster = await pactRoster(userJwt, pactId)
   if (!roster.some((m) => m.user_id === userId)) return reply(403, { error: 'You are not in this pact' })
   const { data: wallets, error } = await admin.from('wallets').select('user_id, address')
-    .in('user_id', roster.map((m) => m.user_id))
+    .in('user_id', roster.map((m) => m.user_id)).eq('blockchain', BLOCKCHAIN)
   if (error) throw error
   const addressOf = new Map((wallets ?? []).map((w: { user_id: string; address: string }) => [w.user_id, w.address]))
 
@@ -535,13 +531,13 @@ async function pactMemberWallets(userId: string, userJwt: string, pactId: unknow
   if (typeof pactId !== 'string' || !UUID.test(pactId)) return reply(400, { error: 'pactId must be a pact id' })
   const roster = await pactRoster(userJwt, pactId)
   if (!roster.some((m) => m.user_id === userId)) return reply(403, { error: 'You are not in this pact' })
-  const { data, error } = await admin.from('wallets').select('user_id, address').in('user_id', roster.map((m) => m.user_id))
+  const { data, error } = await admin.from('wallets').select('user_id, address').in('user_id', roster.map((m) => m.user_id)).eq('blockchain', BLOCKCHAIN)
   if (error) throw error
   return reply(200, { members: data ?? [] })
 }
 
 async function savedWallet(userId: string) {
-  const { data, error } = await admin.from('wallets').select('address, blockchain').eq('user_id', userId).maybeSingle()
+  const { data, error } = await admin.from('wallets').select('address, blockchain').eq('user_id', userId).eq('blockchain', BLOCKCHAIN).maybeSingle()
   if (error) throw error
   return data as WalletRow | null
 }
@@ -559,19 +555,19 @@ async function start(userId: string) {
 
   let challengeId: string
   if (user.pinStatus === 'ENABLED') {
-    // PIN already set: they may already have the wallet (confirm was missed), or need one on Arc.
+    // PIN already set: they may already have the wallet (confirm was missed), or need one on Base (an old Arc user).
     const existing = await findUserWallet(userId, session.userToken)
     if (existing) return ready(await saveWallet(userId, existing))
     challengeId = (await circle('/user/wallets', {
       method: 'POST',
       userToken: session.userToken,
-      body: { idempotencyKey: crypto.randomUUID(), blockchains: [BLOCKCHAIN], accountType: 'EOA' },
+      body: { idempotencyKey: crypto.randomUUID(), blockchains: [BLOCKCHAIN], accountType: 'SCA' },
     })).challengeId
   } else {
     challengeId = (await circle('/user/initialize', {
       method: 'POST',
       userToken: session.userToken,
-      body: { idempotencyKey: crypto.randomUUID(), blockchains: [BLOCKCHAIN], accountType: 'EOA' },
+      body: { idempotencyKey: crypto.randomUUID(), blockchains: [BLOCKCHAIN], accountType: 'SCA' },
     })).challengeId
   }
 

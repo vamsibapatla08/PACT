@@ -32,7 +32,7 @@ struct WalletView: View {
     private func reloadLedger() async {
         guard store.wallet != nil else { return }
         do { ledger = try await store.loadLedger(); ledgerError = nil }
-        catch { ledgerError = (error as? FunctionFailure)?.message ?? "The Arc explorer could not be reached. Your balance is still right." }
+        catch { ledgerError = (error as? FunctionFailure)?.message ?? "The Base explorer could not be reached. Your balance is still right." }
     }
 
     private func addressRow(_ wallet: Wallet) -> some View {
@@ -78,7 +78,7 @@ struct WalletView: View {
                         icon("sparkles", tint: .white)
                         VStack(alignment: .leading, spacing: 2) {
                             Text("Network fees").font(.body.weight(.semibold))
-                            Text("Arc charges a tiny fee in USDC for each payment you send").font(.caption).foregroundStyle(.secondary)
+                            Text("Gas is covered for you, so payments cost nothing extra").font(.caption).foregroundStyle(.secondary)
                         }
                         Spacer()
                         Text("−\(ledger.fees.formatted(.number.precision(.fractionLength(4))))").font(.body.weight(.bold)).monospacedDigit()
@@ -103,7 +103,7 @@ struct WalletView: View {
         }
     }
 
-    /// A pact payment opens that pact; everything else opens the transaction on the Arc explorer.
+    /// A pact payment opens that pact; everything else opens the transaction on the Base explorer.
     @ViewBuilder private func rowLink(_ row: LedgerRow) -> some View {
         if let id = row.pactId, store.pacts.contains(where: { $0.id == id }) {
             NavigationLink(value: id) { line(row) }.buttonStyle(.plain)
@@ -157,7 +157,7 @@ struct WalletView: View {
 
     private var create: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Label("Arc Testnet", systemImage: "wallet.bifold").font(.subheadline.weight(.semibold))
+            Label("Base Sepolia", systemImage: "wallet.bifold").font(.subheadline.weight(.semibold))
             Text("Make a wallet so you can send and get test USDC. Circle keeps it safe with your own PIN.")
                 .font(.subheadline)
             Button {
@@ -318,11 +318,11 @@ struct SendSheet: View {
                 Image(systemName: "checkmark.circle.fill").font(.system(size: 72)).foregroundStyle(PactColor.paid)
                     .symbolEffect(.bounce, value: true)
                 Text("Sent \(amount) USDC").font(.title.weight(.heavy))
-                Text("to \(to?.member.name ?? "your friend"), confirmed on Arc.").foregroundStyle(.secondary)
+                Text("to \(to?.member.name ?? "your friend"), confirmed on Base.").foregroundStyle(.secondary)
             case .pending:
                 Image(systemName: "clock.fill").font(.system(size: 64)).silver()
                 Text("On its way").font(.title.weight(.heavy))
-                Text("Arc is still confirming it. It'll show in Activity.").foregroundStyle(.secondary)
+                Text("Base is still confirming it. It'll show in Activity.").foregroundStyle(.secondary)
             case .failed(let reason):
                 Image(systemName: "xmark.circle.fill").font(.system(size: 64)).foregroundStyle(.red)
                 Text("Didn't send").font(.title.weight(.heavy))
@@ -417,7 +417,7 @@ struct ReceiveSheet: View {
                     .font(.footnote.monospaced().weight(.medium))
                     .multilineTextAlignment(.center)
                     .textSelection(.enabled)
-                Text("Friends in your pacts can send to you straight from Pact. Others can send USDC on Arc Testnet to this address.")
+                Text("Friends in your pacts can send to you straight from Pact. Others can send USDC on Base Sepolia to this address.")
                     .font(.footnote).foregroundStyle(.secondary).multilineTextAlignment(.center)
                 Spacer()
                 HStack(spacing: 10) {

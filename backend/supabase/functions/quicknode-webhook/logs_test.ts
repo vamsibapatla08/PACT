@@ -5,7 +5,7 @@ const CONTRACT = '0x6eadb2b3829e6d9c30208ff4122c40df7682d79d'
 const PACT_TOPIC = '0x123e4567e89b12d3a456426614174000' + '0'.repeat(32)
 const PAYER = '0x5D56000000000000000000000000000000007748'
 const payerTopic = '0x' + '0'.repeat(24) + PAYER.slice(2).toLowerCase()
-const oneUsdc = '0x' + (10n ** 18n).toString(16).padStart(64, '0')
+const oneUsdc = '0x' + (10n ** 6n).toString(16).padStart(64, '0')
 const tx = (n: number) => '0x' + n.toString(16).padStart(64, '0')
 
 const log = (topics: string[], data: string, logIndex: string, extra: Record<string, unknown> = {}) => ({
@@ -17,10 +17,10 @@ Deno.test('pactIdFromTopic puts the dashes back and refuses a non-pact key', () 
   assertEquals(pactIdFromTopic('0x' + '1'.repeat(64)), null)
 })
 
-Deno.test('usdcFromWord turns 18-decimal wei into a 6-decimal amount', () => {
+Deno.test('usdcFromWord turns 6-decimal USDC units into an amount', () => {
   assertEquals(usdcFromWord(oneUsdc), '1')
-  assertEquals(usdcFromWord('0x' + (25n * 10n ** 17n).toString(16).padStart(64, '0')), '2.5')
-  assertEquals(usdcFromWord('0x' + 1n.toString(16).padStart(64, '0')), null)
+  assertEquals(usdcFromWord('0x' + 2_500_000n.toString(16).padStart(64, '0')), '2.5')
+  assertEquals(usdcFromWord('0x' + 1n.toString(16).padStart(64, '0')), '0.000001')
 })
 
 Deno.test('collectLogs finds logs however the Stream nests them', () => {
@@ -35,7 +35,7 @@ Deno.test('pactEvents decodes PactSplit events in order and drops the rest', () 
     log([TOPICS.released, PACT_TOPIC, payerTopic], oneUsdc, '0x2'),
     log([TOPICS.paid, PACT_TOPIC, payerTopic], oneUsdc, '0x1'),
     log([TOPICS.paid, PACT_TOPIC, payerTopic], oneUsdc, '0x3', { removed: true }),
-    log([TOPICS.paid, PACT_TOPIC, payerTopic], oneUsdc, '0x4', { address: '0x3600000000000000000000000000000000000000' }),
+    log([TOPICS.paid, PACT_TOPIC, payerTopic], oneUsdc, '0x4', { address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e' }),
     log(['0x' + 'a'.repeat(64), PACT_TOPIC], oneUsdc, '0x5'),
   ]], CONTRACT)
   assertEquals(events.map((event) => [event.kind, event.logIndex]), [['paid', 1], ['released', 2]])

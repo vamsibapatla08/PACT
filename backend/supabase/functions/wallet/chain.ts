@@ -1,17 +1,26 @@
-// Pure helpers for talking to PactSplit on Arc. No imports, so they test without the Edge runtime.
+// Pure helpers for talking to PactSplit and USDC on Base Sepolia. No imports, so they test without the Edge runtime.
+// USDC on Base is an ERC-20 with 6 decimals. "wei" below means its base units (1 USDC = 1,000,000).
+const ONE_USDC = 10n ** 6n
 
-// Full-precision decimal string of an 18-decimal amount, which is the form Circle takes amounts in.
+// Full-precision decimal string of a USDC base-unit amount, which is the form Circle takes amounts in.
 export function usdcString(wei: bigint) {
-  const frac = (wei % 10n ** 18n).toString().padStart(18, '0').replace(/0+$/, '')
-  return frac ? `${wei / 10n ** 18n}.${frac}` : `${wei / 10n ** 18n}`
+  const frac = (wei % ONE_USDC).toString().padStart(6, '0').replace(/0+$/, '')
+  return frac ? `${wei / ONE_USDC}.${frac}` : `${wei / ONE_USDC}`
 }
 
-// A USDC amount like "25.50" (up to 6 decimals) as the 18-decimal wei PactSplit stores. Null if not one.
+// A USDC amount like "25.50" (up to 6 decimals) as the base units PactSplit stores. Null if not one.
 export function usdcWei(amount: unknown): bigint | null {
   if (typeof amount !== 'string' || !/^\d+(\.\d{1,6})?$/.test(amount)) return null
   const [whole, frac = ''] = amount.split('.')
-  return BigInt(whole) * 10n ** 18n + BigInt(frac.padEnd(18, '0'))
+  return BigInt(whole) * ONE_USDC + BigInt(frac.padEnd(6, '0'))
 }
+
+// ERC-20 reads PactSplit payments depend on.
+export const BALANCE_OF_SELECTOR = '0x70a08231' // balanceOf(address)
+export const ALLOWANCE_SELECTOR = '0xdd62ed3e' // allowance(address,address)
+const word = (address: string) => address.slice(2).toLowerCase().padStart(64, '0')
+export const balanceOfCallData = (owner: string) => BALANCE_OF_SELECTOR + word(owner)
+export const allowanceCallData = (owner: string, spender: string) => ALLOWANCE_SELECTOR + word(owner) + word(spender)
 
 // A pact's uuid as the bytes32 key PactSplit stores it under: the 16 uuid bytes, left-aligned.
 export function pactKey(pactId: string) {
@@ -98,24 +107,12 @@ export function pactStatusView(
 // Seconds a PIN step and the block after it may take. A deadline closer than this would revert by the time it lands.
 export const PIN_MARGIN_SECONDS = 120
 
-// Gas units budgeted per call: PactSplit calls stay well under 150k, a plain send is 21k.
-export const CONTRACT_GAS = 150_000n
-export const TRANSFER_GAS = 21_000n
-
-// The most gas a call may cost: the gas price doubled for the MEDIUM fee level's headroom, times the gas budget.
-export function gasReserve(gasPriceWei: bigint, gasLimit: bigint) {
-  return gasPriceWei * 2n * gasLimit
-}
-
-// A clear error when the wallet can't cover `valueWei` plus gas, so the user isn't asked for a PIN for a send
-// that fails. Null when it can.
-export function lowBalance(balanceWei: bigint, valueWei: bigint, gasWei: bigint): string | null {
-  const need = valueWei + gasWei
-  if (balanceWei >= need) return null
-  const up = (wei: bigint) => usdcString(((wei + 10n ** 12n - 1n) / 10n ** 12n) * 10n ** 12n) // rounded up to 6 decimals
-  const down = (wei: bigint) => usdcString((wei / 10n ** 12n) * 10n ** 12n)
-  return `Not enough USDC: this needs ${up(need)} USDC (${usdcString(valueWei)} plus up to ${up(gasWei)} for gas) ` +
-    `and your wallet has ${down(balanceWei)}. Add at least ${up(need - balanceWei)} USDC.`
+// A clear error when the wallet's USDC can't cover `valueWei`, so the user isn't asked for a PIN for a send
+// that fails. Gas is paid in ETH by Circle's Gas Station, so it is not part of this. Null when it can.
+export function lowBalance(balanceWei: bigint, valueWei: bigint): string | null {
+  if (balanceWei >= valueWei) return null
+  return `Not enough USDC: this needs ${usdcString(valueWei)} USDC and your wallet has ${usdcString(balanceWei)}. ` +
+    `Add at least ${usdcString(valueWei - balanceWei)} USDC.`
 }
 
 // Why payShare(key) would revert, checked in PactSplit's own order, so no PIN is asked for a tx that fails.
@@ -125,8 +122,6 @@ export function payShareBlocker(pact: PactRecord, alreadyPaid: boolean, nowSecon
   if (nowSeconds + PIN_MARGIN_SECONDS > pact.deadline) return 'The deadline to pay into this pact has passed'
   if (alreadyPaid) return 'You already paid your share of this pact'
   if (pact.sharesPaid >= pact.sharesNeeded) return 'Every share of this pact is already paid'
-  // Circle takes USDC amounts with at most 6 decimals; a finer share could not be sent exactly.
-  if (pact.share % 10n ** 12n !== 0n) return 'This pact asks for a share Circle cannot send'
   return null
 }
 

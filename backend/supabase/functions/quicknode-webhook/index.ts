@@ -1,10 +1,12 @@
-// QuickNode Stream destination. Turns PactSplit events on Arc into Paid, Released, Cancelled and Refunded in Supabase.
+// QuickNode Stream destination. Turns PactSplit events on Base Sepolia into Paid, Released, Cancelled and Refunded in Supabase.
 // Only this function marks a share paid, and only after QuickNode's signature checks out.
 import { createClient } from 'npm:@supabase/supabase-js@2'
 import { type PactEvent, pactEvents, validSignature } from './logs.ts'
 
-const CHAIN_ID = 5042002
+const CHAIN_ID = 84532 // Base Sepolia
 const TOKEN = Deno.env.get('QUICKNODE_SECURITY_TOKEN')
+// QuickNode's connection check sends no signature headers, so the destination URL can carry ?key= instead.
+const URL_KEY = Deno.env.get('QUICKNODE_URL_KEY')
 const CONTRACT = Deno.env.get('PACT_SPLIT_ADDRESS')?.toLowerCase()
 
 const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!, {
@@ -56,6 +58,42 @@ async function record(event: PactEvent): Promise<Outcome> {
   return settle(eventError)
 }
 
+// Temporary: says why a delivery failed the signature check, without logging the token or the signature.
+async function signatureHints(headers: Headers, body: string) {
+  const encoder = new TextEncoder()
+  const hmac = async (key: string, message: string) => {
+    const cryptoKey = await crypto.subtle.importKey('raw', encoder.encode(key), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign'])
+    return new Uint8Array(await crypto.subtle.sign('HMAC', cryptoKey, encoder.encode(message)))
+  }
+  const hex = (bytes: Uint8Array) => [...bytes].map((b) => b.toString(16).padStart(2, '0')).join('')
+  const nonce = headers.get('x-qn-nonce') ?? ''
+  const timestamp = headers.get('x-qn-timestamp') ?? ''
+  const given = (headers.get('x-qn-signature') ?? '').trim()
+  const token = TOKEN ?? ''
+  const matches: string[] = []
+  for (const [keyName, key] of [['token', token], ['token trimmed', token.trim().replace(/^['"<]+|['">]+$/g, '')]]) {
+    for (const [order, message] of [['nonce+timestamp+body', nonce + timestamp + body], ['timestamp+nonce+body', timestamp + nonce + body], ['body', body]]) {
+      const mac = await hmac(key, message)
+      if (hex(mac) === given.toLowerCase().replace(/^0x/, '')) matches.push(`${keyName}, ${order}, hex`)
+      if (btoa(String.fromCharCode(...mac)) === given) matches.push(`${keyName}, ${order}, base64`)
+    }
+  }
+  const tokenHash = hex(new Uint8Array(await crypto.subtle.digest('SHA-256', encoder.encode(token)))).slice(0, 6)
+  return {
+    headers: [...headers.keys()],
+    nonceLength: nonce.length, timestamp, signatureLength: given.length, bodyLength: body.length,
+    tokenLength: token.length, tokenSha256Start: tokenHash, tokenHasExtraChars: token !== token.trim().replace(/^['"<]+|['">]+$/g, ''),
+    matches,
+  }
+}
+
+function sameSecret(given: string | null, expected: string | undefined) {
+  if (!given || !expected || given.length !== expected.length) return false
+  let diff = 0
+  for (let i = 0; i < expected.length; i += 1) diff |= expected.charCodeAt(i) ^ given.charCodeAt(i)
+  return diff === 0
+}
+
 Deno.serve(async (request) => {
   if (request.method !== 'POST') return Response.json({ error: 'Method not allowed' }, { status: 405 })
   if (!TOKEN || !CONTRACT) return Response.json({ error: 'Webhook is missing QUICKNODE_SECURITY_TOKEN or PACT_SPLIT_ADDRESS' }, { status: 503 })
@@ -64,7 +102,9 @@ Deno.serve(async (request) => {
   const nonce = request.headers.get('x-qn-nonce')
   const timestamp = request.headers.get('x-qn-timestamp')
   const signature = request.headers.get('x-qn-signature')
-  if (!nonce || !timestamp || !signature || !await validSignature(TOKEN, nonce, timestamp, body, signature)) {
+  const signed = Boolean(nonce && timestamp && signature) && await validSignature(TOKEN, nonce!, timestamp!, body, signature!)
+  if (!signed && !sameSecret(new URL(request.url).searchParams.get('key'), URL_KEY)) {
+    console.warn('Signature check failed', JSON.stringify(await signatureHints(request.headers, body)))
     return Response.json({ error: 'Invalid signature' }, { status: 401 })
   }
 

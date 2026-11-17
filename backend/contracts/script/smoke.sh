@@ -1,35 +1,37 @@
 #!/usr/bin/env bash
-# Live smoke test of PactSplit on Arc Testnet, with Foundry cast.
+# Live smoke test of PactSplit on Base Sepolia, with Foundry cast.
 #
 # What it does, at 0.01 USDC a share:
 #   Pact 1: host opens a 2-share pact, host pays share 1, PAYER2 pays share 2, host releases to the payee
 #   Pact 2: host opens a 1-share pact, host pays it, host cancels, host claims the refund
 #   Must-revert checks (simulated with cast call, no gas, no password):
-#     double pay, wrong amount, release by a non-host, plus release before full and a second refund
+#     double pay, release by a non-host, plus release before full and a second refund
 #
-# PactSplit takes native USDC as msg.value (18 decimals), so there is no approve step.
+# PactSplit pulls USDC (an ERC-20, 6 decimals) with transferFrom, so each payer approves it first.
+# Both wallets need a little Base Sepolia ETH for gas and USDC from faucet.circle.com.
 # One wallet can pay a pact only once (AlreadyPaid), so pact 1 needs a second keystore: PAYER2_ACCOUNT.
 #
-# cast asks for a keystore password on every signed tx: 7 times for ACCOUNT, once for PAYER2_ACCOUNT.
+# cast asks for a keystore password on every signed tx: 9 times for ACCOUNT, twice for PAYER2_ACCOUNT.
 # No key or password is read, printed or written by this script.
 #
 # Usage, from anywhere:
-#   PAYER2_ACCOUNT=pact-payer2 PAYER2_ADDRESS=0x... bash backend/contracts/script/smoke.sh
+#   PACT_SPLIT=0x... PAYER2_ACCOUNT=pact-payer2 PAYER2_ADDRESS=0x... bash backend/contracts/script/smoke.sh
 #   bash backend/contracts/script/smoke.sh --dry-run      # print every command, send nothing
 set -euo pipefail
 
 # ---- Config (override any of these with env vars) ----
-RPC_URL="${RPC_URL:-https://rpc.testnet.arc.network}"
-CHAIN_ID="${CHAIN_ID:-5042002}"
-PACT_SPLIT="${PACT_SPLIT:-0x6eadb2b3829e6d9c30208ff4122c40df7682d79d}"
+RPC_URL="${RPC_URL:-${BASE_SEPOLIA_RPC_URL:-https://sepolia.base.org}}"
+CHAIN_ID="${CHAIN_ID:-84532}"
+PACT_SPLIT="${PACT_SPLIT:-}"                                                     # the Base Sepolia deploy
+USDC="${USDC:-0x036CbD53842c5426634e7929541eC2318f3dCF7e}"                       # Circle USDC on Base Sepolia
 ACCOUNT="${ACCOUNT:-pact-deployer}"                                              # host, cast keystore name
 HOST_ADDRESS="${HOST_ADDRESS:-0xc9c4a5cd709df38f2a3a9058361d6a3e9b295aac}"       # pact-deployer, from broadcast/
 PAYER2_ACCOUNT="${PAYER2_ACCOUNT:-}"                                             # second cast keystore name
 PAYER2_ADDRESS="${PAYER2_ADDRESS:-}"                                             # its address (asked from cast if unset)
 PAYEE="${PAYEE:-$HOST_ADDRESS}"                                                  # who gets pact 1's total
-SHARE_WEI="${SHARE_WEI:-10000000000000000}"                                      # 0.01 USDC at 18 decimals
+SHARE_WEI="${SHARE_WEI:-10000}"                                                  # 0.01 USDC at 6 decimals
 DEADLINE_SECS="${DEADLINE_SECS:-3600}"                                           # pacts close an hour from now
-EXPLORER_TX="${EXPLORER_TX:-https://explorer.testnet.arc.io/tx/}"                # same as PactMoneyPanel.tsx
+EXPLORER_TX="${EXPLORER_TX:-https://sepolia.basescan.org/tx/}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RESULTS_FILE="${RESULTS_FILE:-$SCRIPT_DIR/smoke-results.md}"
 
@@ -45,7 +47,6 @@ done
 # ---- Selectors of the errors we expect ----
 ERR_NOT_OPEN=0xddafad98         # NotOpen()
 ERR_ALREADY_PAID=0xd70a0e30     # AlreadyPaid()
-ERR_WRONG_AMOUNT=0x49986e73     # WrongAmount()
 ERR_NOT_HOST=0x8ff4f0c9         # NotHost()
 ERR_NOT_FULL="$(cast sig 'NotFull()')"
 ERR_NOTHING_TO_REFUND="$(cast sig 'NothingToRefund()')"
@@ -67,9 +68,10 @@ command -v jq   >/dev/null || die "jq not found. brew install jq"
 command -v bc   >/dev/null || die "bc not found"
 
 if [[ $DRY_RUN -eq 0 ]]; then
+  [[ -n "$PACT_SPLIT" ]] || die "PACT_SPLIT is not set. Deploy first, then run with PACT_SPLIT=0x..."
   [[ -n "$PAYER2_ACCOUNT" ]] || die "PAYER2_ACCOUNT is not set. One wallet can only pay a pact once, so pact 1 needs a
 second cast keystore. Make one with: cast wallet new, then cast wallet import pact-payer2 --interactive,
-fund it with ~0.05 USDC from faucet.circle.com, and run with PAYER2_ACCOUNT=pact-payer2 PAYER2_ADDRESS=0x..."
+fund it with a little Base Sepolia ETH and ~0.05 USDC from faucet.circle.com, and run with PAYER2_ACCOUNT=pact-payer2 PAYER2_ADDRESS=0x..."
   [[ "$(cast chain-id --rpc-url "$RPC_URL")" == "$CHAIN_ID" ]] || die "RPC $RPC_URL is not chain $CHAIN_ID"
   [[ "$(cast code "$PACT_SPLIT" --rpc-url "$RPC_URL")" != "0x" ]] || die "No contract at $PACT_SPLIT"
   if [[ -z "$PAYER2_ADDRESS" ]]; then
@@ -77,6 +79,7 @@ fund it with ~0.05 USDC from faucet.circle.com, and run with PAYER2_ACCOUNT=pact
     PAYER2_ADDRESS="$(cast wallet address --account "$PAYER2_ACCOUNT")"
   fi
 else
+  PACT_SPLIT="${PACT_SPLIT:-<pact_split>}"
   PAYER2_ACCOUNT="${PAYER2_ACCOUNT:-<payer2_account>}"
   PAYER2_ADDRESS="${PAYER2_ADDRESS:-<payer2_address>}"
 fi
@@ -91,10 +94,10 @@ new_pact_key() { echo "0x$(uuidgen | tr -d '-' | tr 'A-F' 'a-f')0000000000000000
 
 # ---- Chain helpers ----
 
-# send LABEL KEYSTORE [cast send args...]  -> sends, checks status, logs the hash
-send() {
-  local label="$1" acct="$2"; shift 2
-  local cmd=(cast send "$PACT_SPLIT" "$@" --account "$acct" --rpc-url "$RPC_URL" --chain "$CHAIN_ID" --json)
+# send_to TARGET LABEL KEYSTORE [cast send args...]  -> sends, checks status, logs the hash
+send_to() {
+  local target="$1" label="$2" acct="$3"; shift 3
+  local cmd=(cast send "$target" "$@" --account "$acct" --rpc-url "$RPC_URL" --chain "$CHAIN_ID" --json)
   info "\$$(printf ' %q' "${cmd[@]}")"
   if [[ $DRY_RUN -eq 1 ]]; then return 0; fi
   local out hash status
@@ -107,6 +110,9 @@ send() {
   [[ "$status" == "0x1" || "$status" == "1" ]] || die "$label: tx $hash reverted (status $status)"
   pass "$label mined"
 }
+send() { send_to "$PACT_SPLIT" "$@"; }
+# approve LABEL KEYSTORE  -> lets PactSplit pull one share of USDC
+approve() { send_to "$USDC" "$1 approve" "$2" "approve(address,uint256)" "$PACT_SPLIT" "$SHARE_WEI"; }
 
 # expect_revert LABEL FROM ERR_SELECTOR ERR_NAME [cast call args...]  -> simulate, assert it reverts with that error
 expect_revert() {
@@ -155,22 +161,23 @@ check_paid() {
   if [[ "$got" == "$want" ]]; then pass "$label: paid[$who] = $got"; else fail "$label: paid[$who] = $got, wanted $want"; fi
 }
 
-balance() { if [[ $DRY_RUN -eq 1 ]]; then echo 0; else cast balance "$1" --rpc-url "$RPC_URL"; fi; }
+# USDC balance in base units (6 decimals)
+balance() { if [[ $DRY_RUN -eq 1 ]]; then echo 0; else cast call "$USDC" "balanceOf(address)(uint256)" "$1" --rpc-url "$RPC_URL" | awk '{print $1}'; fi; }
+usdc() { echo "scale=6; $(balance "$1") / 1000000" | bc; }
 
 # check_delta LABEL BEFORE AFTER WANT_DELTA  (big-number safe; balances overflow bash ints)
 check_delta() {
   local label="$1" before="$2" after="$3" want="$4"
-  if [[ $DRY_RUN -eq 1 ]]; then info "(dry run) would check $label changes by $want wei"; return 0; fi
+  if [[ $DRY_RUN -eq 1 ]]; then info "(dry run) would check $label changes by $want units"; return 0; fi
   local got
   got="$(echo "$after - $before" | bc)"
-  if [[ "$got" == "$want" ]]; then pass "$label changed by $got wei"; else fail "$label changed by $got wei, wanted $want"; fi
+  if [[ "$got" == "$want" ]]; then pass "$label changed by $got units"; else fail "$label changed by $got units, wanted $want"; fi
 }
 
 # ---- Run ----
 TOTAL_WEI="$(echo "$SHARE_WEI * 2" | bc)"
 NEG_SHARE="$(echo "0 - $SHARE_WEI" | bc)"
 NEG_TOTAL="$(echo "0 - $TOTAL_WEI" | bc)"
-WRONG_WEI="$(echo "$SHARE_WEI + 1" | bc)"
 DEADLINE="$(( $(date +%s) + DEADLINE_SECS ))"
 PACT1="$(new_pact_key)"
 PACT2="$(new_pact_key)"
@@ -181,14 +188,14 @@ info "contract  $PACT_SPLIT"
 info "host      $HOST_ADDRESS ($ACCOUNT)"
 info "payer2    $PAYER2_ADDRESS ($PAYER2_ACCOUNT)"
 info "payee     $PAYEE"
-info "share     $SHARE_WEI wei (0.01 USDC), deadline $DEADLINE"
+info "share     $SHARE_WEI units (0.01 USDC), deadline $DEADLINE"
 info "pact 1    $PACT1"
 info "pact 2    $PACT2"
 info "results   $RESULTS_FILE"
 
 if [[ $DRY_RUN -eq 0 ]]; then
-  info "host balance   $(cast balance "$HOST_ADDRESS" --rpc-url "$RPC_URL" --ether) USDC"
-  info "payer2 balance $(cast balance "$PAYER2_ADDRESS" --rpc-url "$RPC_URL" --ether) USDC"
+  info "host balance   $(usdc "$HOST_ADDRESS") USDC"
+  info "payer2 balance $(usdc "$PAYER2_ADDRESS") USDC"
   {
     printf '\n## Run %s\n\n' "$(date -u '+%Y-%m-%d %H:%M:%S UTC')"
     printf -- '- Contract `%s` on chain %s\n- Host `%s`, payer2 `%s`, payee `%s`\n' \
@@ -205,23 +212,23 @@ check_pact "pact1 after create" "$PACT1" 1 0
 
 say "Pact 1: host pays share 1"
 c0="$(balance "$PACT_SPLIT")"
-send "pact1 payShare (host)" "$ACCOUNT" "payShare(bytes32)" "$PACT1" --value "$SHARE_WEI"
+approve "pact1 host" "$ACCOUNT"
+send "pact1 payShare (host)" "$ACCOUNT" "payShare(bytes32)" "$PACT1"
 check_pact "pact1 after share 1" "$PACT1" 1 1
 check_paid "pact1 after share 1" "$PACT1" "$HOST_ADDRESS" true
 check_delta "contract balance after share 1" "$c0" "$(balance "$PACT_SPLIT")" "$SHARE_WEI"
 
 say "Pact 1: calls that must revert (simulated, nothing sent)"
 expect_revert "double pay by host" "$HOST_ADDRESS" "$ERR_ALREADY_PAID" "AlreadyPaid" \
-  "payShare(bytes32)" "$PACT1" --value "$SHARE_WEI"
-expect_revert "wrong amount by payer2" "$PAYER2_ADDRESS" "$ERR_WRONG_AMOUNT" "WrongAmount" \
-  "payShare(bytes32)" "$PACT1" --value "$WRONG_WEI"
+  "payShare(bytes32)" "$PACT1"
 expect_revert "release by non-host (payer2)" "$PAYER2_ADDRESS" "$ERR_NOT_HOST" "NotHost" \
   "release(bytes32)" "$PACT1"
 expect_revert "release by host before full" "$HOST_ADDRESS" "$ERR_NOT_FULL" "NotFull" \
   "release(bytes32)" "$PACT1"
 
 say "Pact 1: payer2 pays share 2"
-send "pact1 payShare (payer2)" "$PAYER2_ACCOUNT" "payShare(bytes32)" "$PACT1" --value "$SHARE_WEI"
+approve "pact1 payer2" "$PAYER2_ACCOUNT"
+send "pact1 payShare (payer2)" "$PAYER2_ACCOUNT" "payShare(bytes32)" "$PACT1"
 check_pact "pact1 after share 2" "$PACT1" 1 2
 check_paid "pact1 after share 2" "$PACT1" "$PAYER2_ADDRESS" true
 expect_revert "release by non-host when full (payer2)" "$PAYER2_ADDRESS" "$ERR_NOT_HOST" "NotHost" \
@@ -233,11 +240,7 @@ p0="$(balance "$PAYEE")"
 send "pact1 release" "$ACCOUNT" "release(bytes32)" "$PACT1"
 check_pact "pact1 after release" "$PACT1" 2 2
 check_delta "contract balance after release" "$c0" "$(balance "$PACT_SPLIT")" "$NEG_TOTAL"
-if [[ "$PAYEE" != "$HOST_ADDRESS" && "$PAYEE" != "$PAYER2_ADDRESS" ]]; then
-  check_delta "payee balance after release" "$p0" "$(balance "$PAYEE")" "$TOTAL_WEI"
-else
-  info "payee is a signer here, so its balance also moves by gas; checked the contract balance instead"
-fi
+check_delta "payee balance after release" "$p0" "$(balance "$PAYEE")" "$TOTAL_WEI"
 expect_revert "release again" "$HOST_ADDRESS" "$ERR_NOT_OPEN" "NotOpen" "release(bytes32)" "$PACT1"
 
 # ---------- Pact 2: open, pay, cancel, refund ----------
@@ -248,7 +251,8 @@ check_pact "pact2 after create" "$PACT2" 1 0
 
 say "Pact 2: host pays its share"
 c0="$(balance "$PACT_SPLIT")"
-send "pact2 payShare (host)" "$ACCOUNT" "payShare(bytes32)" "$PACT2" --value "$SHARE_WEI"
+approve "pact2 host" "$ACCOUNT"
+send "pact2 payShare (host)" "$ACCOUNT" "payShare(bytes32)" "$PACT2"
 check_pact "pact2 after pay" "$PACT2" 1 1
 check_delta "contract balance after pact2 pay" "$c0" "$(balance "$PACT_SPLIT")" "$SHARE_WEI"
 expect_revert "cancel by non-host before deadline (payer2)" "$PAYER2_ADDRESS" "$(cast sig 'CannotCancel()')" \
@@ -258,7 +262,7 @@ say "Pact 2: host cancels"
 send "pact2 cancel" "$ACCOUNT" "cancel(bytes32)" "$PACT2"
 check_pact "pact2 after cancel" "$PACT2" 3 1
 expect_revert "pay after cancel (payer2)" "$PAYER2_ADDRESS" "$ERR_NOT_OPEN" "NotOpen" \
-  "payShare(bytes32)" "$PACT2" --value "$SHARE_WEI"
+  "payShare(bytes32)" "$PACT2"
 
 say "Pact 2: host claims the refund"
 c0="$(balance "$PACT_SPLIT")"
@@ -274,8 +278,8 @@ expect_revert "refund by non-payer (payer2)" "$PAYER2_ADDRESS" "$ERR_NOTHING_TO_
 say "Done: $PASS passed, $FAIL failed"
 if [[ $DRY_RUN -eq 0 ]]; then
   printf '\n**Result: %s passed, %s failed**\n' "$PASS" "$FAIL" >> "$RESULTS_FILE"
-  info "host balance   $(cast balance "$HOST_ADDRESS" --rpc-url "$RPC_URL" --ether) USDC"
-  info "payer2 balance $(cast balance "$PAYER2_ADDRESS" --rpc-url "$RPC_URL" --ether) USDC"
+  info "host balance   $(usdc "$HOST_ADDRESS") USDC"
+  info "payer2 balance $(usdc "$PAYER2_ADDRESS") USDC"
   info "tx hashes saved to $RESULTS_FILE"
 fi
 [[ $FAIL -eq 0 ]]

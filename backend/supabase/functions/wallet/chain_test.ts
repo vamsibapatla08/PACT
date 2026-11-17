@@ -1,13 +1,13 @@
 import { assertEquals } from 'jsr:@std/assert@1'
 import {
-  challengeOutcome, closeBlocker, CONTRACT_GAS, decodeBool, decodePact, gasReserve, lowBalance, type MemberPaid,
+  allowanceCallData, balanceOfCallData, challengeOutcome, closeBlocker, decodeBool, decodePact, lowBalance, type MemberPaid,
   PAID_SELECTOR, paidCallData, PACTS_SELECTOR, pactKey, pactStatusView, payShareBlocker, PIN_MARGIN_SECONDS,
   refundBlocker, txOutcome, usdcString, usdcWei,
 } from './chain.ts'
 
-// Replies of pacts(key) as Solidity encodes them (made with cast abi-encode).
-const OPEN = '0x000000000000000000000000000000000000000000000000000000000000a11c0000000000000000000000000000000000000000000000000000000000000b0b0000000000000000000000000000000000000000000000015af1d78b58c4000000000000000000000000000000000000000000000000000000000000000000040000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000006b49d2000000000000000000000000000000000000000000000000000000000000000001'
-const RELEASED = '0x000000000000000000000000000000000000000000000000000000000000a11c0000000000000000000000000000000000000000000000000000000000000b0b0000000000000000000000000000000000000000000000015af1d78b58c4000000000000000000000000000000000000000000000000000000000000000000040000000000000000000000000000000000000000000000000000000000000004000000000000000000000000000000000000000000000000000000006b49d2000000000000000000000000000000000000000000000000000000000000000002'
+// Replies of pacts(key) as Solidity encodes them (made with cast abi-encode). The share is 25 USDC (25,000,000 units).
+const OPEN = '0x000000000000000000000000000000000000000000000000000000000000a11c0000000000000000000000000000000000000000000000000000000000000b0b00000000000000000000000000000000000000000000000000000000017d784000000000000000000000000000000000000000000000000000000000000000040000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000006b49d2000000000000000000000000000000000000000000000000000000000000000001'
+const RELEASED = '0x000000000000000000000000000000000000000000000000000000000000a11c0000000000000000000000000000000000000000000000000000000000000b0b00000000000000000000000000000000000000000000000000000000017d784000000000000000000000000000000000000000000000000000000000000000040000000000000000000000000000000000000000000000000000000000000004000000000000000000000000000000000000000000000000000000006b49d2000000000000000000000000000000000000000000000000000000000000000002'
 
 Deno.test('pactKey left-aligns the uuid bytes', () => {
   assertEquals(
@@ -17,15 +17,15 @@ Deno.test('pactKey left-aligns the uuid bytes', () => {
 })
 
 Deno.test('usdcString keeps full precision', () => {
-  assertEquals(usdcString(25n * 10n ** 18n), '25')
-  assertEquals(usdcString(1_500_000_000_000_000_000n), '1.5')
-  assertEquals(usdcString(1n), '0.000000000000000001')
+  assertEquals(usdcString(25_000_000n), '25')
+  assertEquals(usdcString(1_500_000n), '1.5')
+  assertEquals(usdcString(1n), '0.000001')
 })
 
-Deno.test('usdcWei turns a USDC amount into 18-decimal wei', () => {
-  assertEquals(usdcWei('25'), 25n * 10n ** 18n)
-  assertEquals(usdcWei('1.50'), 1_500_000_000_000_000_000n)
-  assertEquals(usdcWei('0.000001'), 10n ** 12n)
+Deno.test('usdcWei turns a USDC amount into 6-decimal base units', () => {
+  assertEquals(usdcWei('25'), 25_000_000n)
+  assertEquals(usdcWei('1.50'), 1_500_000n)
+  assertEquals(usdcWei('0.000001'), 1n)
   assertEquals(usdcWei('1.1234567'), null)
   assertEquals(usdcWei('-1'), null)
   assertEquals(usdcWei(25), null)
@@ -66,7 +66,7 @@ Deno.test('decodePact reads every field', () => {
   assertEquals(decodePact(RELEASED), {
     host: '0x000000000000000000000000000000000000a11c',
     payee: '0x0000000000000000000000000000000000000b0b',
-    share: 25n * 10n ** 18n,
+    share: 25_000_000n,
     sharesNeeded: 4,
     sharesPaid: 4,
     deadline: 1_800_000_000,
@@ -103,9 +103,9 @@ Deno.test('pact_status: open and part paid is not funded, lists payers and amoun
   assertEquals(v.funded, false)
   assertEquals([v.sharesPaid, v.sharesNeeded], [2, 4])
   assertEquals(v.openedByHost, true)
-  assertEquals(v.share, { usdc: '25', wei: '25000000000000000000' })
-  assertEquals(v.total, { usdc: '100', wei: '100000000000000000000' })
-  assertEquals(v.paidIn, { usdc: '50', wei: '50000000000000000000' })
+  assertEquals(v.share, { usdc: '25', wei: '25000000' })
+  assertEquals(v.total, { usdc: '100', wei: '100000000' })
+  assertEquals(v.paidIn, { usdc: '50', wei: '50000000' })
   assertEquals(v.payers.map((p) => p.userId), ['user-0', 'user-2'])
   assertEquals(v.payers[0].amount.usdc, '25')
   assertEquals(v.otherPayers, 0)
@@ -167,11 +167,6 @@ Deno.test('payShareBlocker stops every case PactSplit reverts on, before the PIN
   )
 })
 
-Deno.test('payShareBlocker refuses a share finer than the 6 decimals Circle sends', () => {
-  const pact = { ...decodePact(reply(1, 1))!, share: 25n * 10n ** 18n + 1n }
-  assertEquals(payShareBlocker(pact, false, EARLY), 'This pact asks for a share Circle cannot send')
-})
-
 Deno.test('refundBlocker: only a payer of a cancelled pact can claim', () => {
   assertEquals(refundBlocker(decodePact(reply(2, 3))!, true), null)
   assertEquals(refundBlocker(decodePact(reply(2, 3))!, false), 'You have no share to refund in this pact')
@@ -179,29 +174,23 @@ Deno.test('refundBlocker: only a payer of a cancelled pact can claim', () => {
   assertEquals(refundBlocker(decodePact(reply(4, 2))!, true), 'Refunds open only after the pact is cancelled')
 })
 
-Deno.test('gasReserve doubles the gas price over the gas budget', () => {
-  assertEquals(gasReserve(160n * 10n ** 9n, CONTRACT_GAS), 48n * 10n ** 15n) // 0.048 USDC
+Deno.test('lowBalance passes a balance that covers the USDC (gas is sponsored)', () => {
+  assertEquals(lowBalance(25_000_000n, 25_000_000n), null)
+  assertEquals(lowBalance(100_000_000n, 25_000_000n), null)
 })
 
-Deno.test('lowBalance passes a balance that covers value plus gas', () => {
-  const share = 25n * 10n ** 18n
-  const gas = 48n * 10n ** 15n
-  assertEquals(lowBalance(share + gas, share, gas), null)
-  assertEquals(lowBalance(100n * 10n ** 18n, share, gas), null)
+Deno.test('lowBalance explains a shortfall in USDC', () => {
+  assertEquals(
+    lowBalance(20_500_000n, 25_000_000n),
+    'Not enough USDC: this needs 25 USDC and your wallet has 20.5. Add at least 4.5 USDC.',
+  )
 })
 
-Deno.test('lowBalance explains a shortfall in USDC, counting gas', () => {
-  const share = 25n * 10n ** 18n
-  const gas = 48n * 10n ** 15n
-  assertEquals(
-    lowBalance(25n * 10n ** 18n, share, gas),
-    'Not enough USDC: this needs 25.048 USDC (25 plus up to 0.048 for gas) and your wallet has 25. Add at least 0.048 USDC.',
-  )
-  // Enough for the share alone is still short once gas counts; dust is rounded up so the advice is enough.
-  assertEquals(
-    lowBalance(0n, 0n, 1n),
-    'Not enough USDC: this needs 0.000001 USDC (0 plus up to 0.000001 for gas) and your wallet has 0. Add at least 0.000001 USDC.',
-  )
+Deno.test('USDC call data pads addresses into words', () => {
+  const owner = '0x000000000000000000000000000000000000BEEF'
+  const spender = '0x6eadb2b3829e6d9c30208ff4122c40df7682d79d'
+  assertEquals(balanceOfCallData(owner), '0x70a08231' + '0'.repeat(60) + 'beef')
+  assertEquals(allowanceCallData(owner, spender), '0xdd62ed3e' + '0'.repeat(60) + 'beef' + '0'.repeat(24) + spender.slice(2))
 })
 
 Deno.test('challengeOutcome maps Circle challenge states', () => {

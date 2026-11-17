@@ -8,8 +8,8 @@ const cors = {
 }
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const ADDRESS = /^0x[0-9a-fA-F]{40}$/
-const ARC_CHAIN_ID = 5042002
-const ARC_RPC = 'https://rpc.testnet.arc.network'
+const CHAIN_ID = 84532 // Base Sepolia
+const RPC = Deno.env.get('BASE_SEPOLIA_RPC_URL') ?? 'https://sepolia.base.org'
 const MAX_DEADLINE_MS = 90 * 24 * 60 * 60 * 1000
 
 const reply = (status: number, body: unknown) =>
@@ -28,7 +28,7 @@ async function main(req: Request) {
 
   const supabaseUrl = Deno.env.get('SUPABASE_URL')!
   const pactSplitAddress = Deno.env.get('PACT_SPLIT_ADDRESS')?.trim()
-  if (!pactSplitAddress || !ADDRESS.test(pactSplitAddress)) return reply(503, { error: 'PactSplit is not configured for Arc Testnet' })
+  if (!pactSplitAddress || !ADDRESS.test(pactSplitAddress)) return reply(503, { error: 'PactSplit is not configured for Base Sepolia' })
   const userClient = createClient(supabaseUrl, Deno.env.get('SUPABASE_ANON_KEY')!, {
     global: { headers: { Authorization: authorization } },
   })
@@ -67,7 +67,7 @@ async function main(req: Request) {
   if (existingError) return reply(500, { error: 'Existing funding plans could not be checked' })
   if (existing) {
     const onChain = await pactOnChain(pactSplitAddress, pactId)
-    if (onChain === null) return reply(502, { error: 'Arc could not be read, try again' })
+    if (onChain === null) return reply(502, { error: 'Base could not be read, try again' })
     if (onChain) return reply(409, { error: 'This Pact is already open on chain, so its plan cannot change' })
   }
 
@@ -75,6 +75,7 @@ async function main(req: Request) {
     .from('wallets')
     .select('address')
     .eq('user_id', user.id)
+    .eq('blockchain', 'BASE-SEPOLIA')
     .maybeSingle()
   if (walletError) return reply(500, { error: 'Host wallet could not be checked' })
   if (!wallet) return reply(409, { error: 'Connect your Circle wallet before creating a funding plan' })
@@ -86,7 +87,7 @@ async function main(req: Request) {
     p_payee_address: payeeAddress,
     p_share_usdc: shareUsdc,
     p_deadline: new Date(deadline).toISOString(),
-    p_chain_id: ARC_CHAIN_ID,
+    p_chain_id: CHAIN_ID,
     p_contract_address: pactSplitAddress,
     p_replace: Boolean(existing),
   })
@@ -98,10 +99,10 @@ async function main(req: Request) {
   return reply(200, { paymentId: plan.payment_id, sharesNeeded: plan.shares_needed })
 }
 
-// Whether PactSplit already holds this pact (any state but None). Null if Arc could not be read.
+// Whether PactSplit already holds this pact (any state but None). Null if Base could not be read.
 async function pactOnChain(contract: string, pactId: string): Promise<boolean | null> {
   try {
-    const res = await fetch(ARC_RPC, {
+    const res = await fetch(RPC, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_call', params: [{ to: contract, data: PACTS_SELECTOR + pactKey(pactId).slice(2) }, 'latest'] }),

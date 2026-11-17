@@ -1,8 +1,15 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
+/// The two USDC calls PactSplit makes, so the repo needs no token library.
+interface IUSDC {
+    function transfer(address to, uint256 amount) external returns (bool);
+    function transferFrom(address from, address to, uint256 amount) external returns (bool);
+}
+
 /// Holds each member's share of a pact's cost until the host releases it to the payee, or refunds everyone.
-/// Shares are paid in native USDC on Arc (msg.value, 18 decimals), so paying is one call with no approve step.
+/// Shares are paid in USDC on Base (an ERC-20 with 6 decimals): a member approves PactSplit, then calls payShare,
+/// which pulls exactly one share. A smart wallet sends both calls in one transaction.
 /// One contract serves every pact. A pact is keyed by its Supabase pact id as bytes32.
 contract PactSplit {
     enum State {
@@ -22,6 +29,7 @@ contract PactSplit {
         State state;
     }
 
+    IUSDC public immutable usdc;
     mapping(bytes32 => Pact) public pacts;
     mapping(bytes32 => mapping(address => bool)) public paid;
 
@@ -37,7 +45,6 @@ contract PactSplit {
     error BadPact();
     error NotOpen();
     error NotHost();
-    error WrongAmount();
     error AlreadyPaid();
     error Full();
     error PastDeadline();
@@ -46,6 +53,10 @@ contract PactSplit {
     error NothingToRefund();
     error TransferFailed();
 
+    constructor(IUSDC usdc_) {
+        usdc = usdc_;
+    }
+
     function createPact(bytes32 pactId, address payee, uint128 share, uint32 sharesNeeded, uint64 deadline) external {
         if (pacts[pactId].state != State.None) revert PactExists();
         if (payee == address(0) || share == 0 || sharesNeeded == 0 || deadline <= block.timestamp) revert BadPact();
@@ -53,16 +64,17 @@ contract PactSplit {
         emit PactCreated(pactId, msg.sender, payee, share, sharesNeeded, deadline);
     }
 
-    function payShare(bytes32 pactId) external payable {
+    /// Pulls exactly one share from the caller, who must have approved PactSplit for at least that much.
+    function payShare(bytes32 pactId) external {
         Pact storage p = pacts[pactId];
         if (p.state != State.Open) revert NotOpen();
         if (block.timestamp > p.deadline) revert PastDeadline();
-        if (msg.value != p.share) revert WrongAmount();
         if (paid[pactId][msg.sender]) revert AlreadyPaid();
         if (p.sharesPaid == p.sharesNeeded) revert Full();
         paid[pactId][msg.sender] = true;
         p.sharesPaid++;
-        emit SharePaid(pactId, msg.sender, msg.value);
+        if (!usdc.transferFrom(msg.sender, address(this), p.share)) revert TransferFailed();
+        emit SharePaid(pactId, msg.sender, p.share);
     }
 
     /// The host sends the full amount to the payee once every share is in.
@@ -98,7 +110,6 @@ contract PactSplit {
     }
 
     function _send(address to, uint256 amount) private {
-        (bool ok,) = to.call{value: amount}("");
-        if (!ok) revert TransferFailed();
+        if (!usdc.transfer(to, amount)) revert TransferFailed();
     }
 }
