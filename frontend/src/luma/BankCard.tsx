@@ -146,7 +146,7 @@ function drawFace(info: CardInfo, finish: Finish) {
   g.letterSpacing = '0px'
   g.font = font(700, 20)
   g.textAlign = 'right'
-  text('BASE SEPOLIA', 940 * s, 88 * s, soft)
+  text('ARC TESTNET', 940 * s, 88 * s, soft)
   g.textAlign = 'left'
 
   drawChip(g, 60 * s, 132 * s, 120 * s, 92 * s, s)
@@ -233,7 +233,7 @@ function Card({ info, finish }: { info: CardInfo; finish: Finish }) {
 function FlatCard({ info }: { info: CardInfo }) {
   return (
     <div className="l-flatcard">
-      <div className="l-flatcard-top"><b>PACT MONEY</b><span>BASE SEPOLIA</span></div>
+      <div className="l-flatcard-top"><b>PACT MONEY</b><span>ARC TESTNET</span></div>
       <span className="l-flatcard-chip" aria-hidden />
       <span className="l-faint">BALANCE</span>
       <div className="l-flatcard-bal">{info.balance ?? '0.00'} <small>USDC</small></div>

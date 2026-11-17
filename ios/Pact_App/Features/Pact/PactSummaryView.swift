@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// The pact on one page: what the group agreed, where the money went, and a receipt line for each person,
-/// with links to check it on Base.
+/// with links to check it on Arc.
 struct PactSummaryView: View {
     @Environment(PactStore.self) private var store
     let id: Pact.ID
@@ -83,7 +83,7 @@ struct PactSummaryView: View {
         return summary
     }
 
-    /// One line per person: paid, refunded or not, and their payment on Base when it was recorded.
+    /// One line per person: paid, refunded or not, and their payment on Arc when it was recorded.
     private func receipt(plan: FundingPlan, chain: PactSplitStatus?, people: [Member]) -> some View {
         let receipts = store.shareReceipts[id] ?? []
         return VStack(alignment: .leading, spacing: 14) {
@@ -105,14 +105,14 @@ struct PactSummaryView: View {
                 }
             }
             Divider().overlay(Color.white.opacity(0.15))
-            if let contract = receipts.compactMap(\.contractAddress).first, let url = URL(string: "https://base-sepolia.blockscout.com/address/\(contract)") {
+            if let contract = receipts.compactMap(\.contractAddress).first, let url = URL(string: "https://explorer.testnet.arc.io/address/\(contract)") {
                 Link(destination: url) {
-                    Label("PactSplit \(shortAddress(contract)) on Base explorer", systemImage: "arrow.up.right.square")
+                    Label("PactSplit \(shortAddress(contract)) on Arc explorer", systemImage: "arrow.up.right.square")
                         .font(.footnote.weight(.semibold))
                 }
                 .silver()
             }
-            Text("Who paid is read live from PactSplit on Base, not from the app.").font(.caption).foregroundStyle(.secondary)
+            Text("Who paid is read live from PactSplit on Arc, not from the app.").font(.caption).foregroundStyle(.secondary)
         }
         .pactCard()
     }

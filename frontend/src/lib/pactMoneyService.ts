@@ -7,11 +7,10 @@ export const pactMoneyWalletEnabled = import.meta.env.DEV
 
 type WalletStatusResponse =
   | { status: 'none' }
-  | { status: 'ready'; address: string; blockchain: 'BASE-SEPOLIA'; usdc_balance: string | null }
+  | { status: 'ready'; address: string; blockchain: 'ARC-TESTNET'; usdc_balance: string | null }
   | { status: 'pending' | 'failed'; error?: string }
 
-// step is 'approve' when pay_share first needs USDC approved for PactSplit; the payment itself is a second PIN.
-type WalletChallengeResponse = { status: 'challenge'; appId: string; userToken: string; encryptionKey: string; challengeId: string; step?: 'approve' | 'pay' }
+type WalletChallengeResponse = { status: 'challenge'; appId: string; userToken: string; encryptionKey: string; challengeId: string }
 type WalletStartResponse = WalletChallengeResponse | Extract<WalletStatusResponse, { status: 'ready' }>
 
 function client() {
@@ -188,7 +187,7 @@ export async function sendPactMoney(pactId: string, toUserId: string, amount: st
   if (challenge.status !== 'challenge') throw new Error('The send did not return a Circle PIN challenge.')
   await runCircleChallenge(challenge)
 
-  // Base confirms in seconds; give up watching after two minutes and leave it pending. A failed status check
+  // Arc confirms in seconds; give up watching after two minutes and leave it pending. A failed status check
   // is retried, never reported as a failed send: the PIN was accepted, so the money may already be moving.
   let last: PactMoneyTransfer | null = null
   for (let attempt = 0; attempt < 40; attempt += 1) {
@@ -228,54 +227,36 @@ export async function verifyPactEvent(pactId: string, eventType: 'paid' | 'relea
     if (response instanceof Response && response.status === 404) return null
     throw new Error(await walletErrorMessage(error))
   }
-  if (!data || data.accepted !== true || data.pactId !== pactId || data.txHash !== txHash) throw new Error('The Base event was not verified.')
+  if (!data || data.accepted !== true || data.pactId !== pactId || data.txHash !== txHash) throw new Error('The Arc event was not verified.')
   return data as VerifiedPactEvent
 }
 
 // Runs one PactSplit action from the user's wallet: the server checks it would go through, the user enters
-// their PIN, then this waits until Base confirms it. Returns the tx hash; throws if it failed.
+// their PIN, then this waits until Arc confirms it. Returns the tx hash; throws if it failed.
 export async function runPactAction(action: PactAction, pactId: string): Promise<string | null> {
-  let challenge = await invokeWallet<WalletChallengeResponse>(action, { pactId })
+  const challenge = await invokeWallet<WalletChallengeResponse>(action, { pactId })
   if (challenge.status !== 'challenge') throw new Error('The wallet did not return a Circle PIN challenge.')
-  // Paying a share takes two PINs the first time: approve USDC for PactSplit, then pay. Wait for the approve to land.
-  if (challenge.step === 'approve') {
-    await runCircleChallenge(challenge)
-    await waitForChallenge(challenge.challengeId)
-    challenge = await invokeWallet<WalletChallengeResponse>(action, { pactId })
-    if (challenge.status !== 'challenge' || challenge.step === 'approve') throw new Error('The USDC approval has not landed yet. Try paying again in a moment.')
-  }
   await runCircleChallenge(challenge)
   for (let attempt = 0; attempt < 40; attempt += 1) {
     const progress = await invokeWallet<ChallengeProgress>('challenge_status', { challengeId: challenge.challengeId }).catch(() => null)
     if (progress?.status === 'confirmed') {
       const eventType = action === 'pay_share' ? 'paid' : action === 'release' ? 'released' : action === 'cancel' ? 'cancelled' : action === 'claim_refund' ? 'refunded' : null
       if (eventType && progress.txHash) {
-        // Base already confirmed it, so the money moved. A verify error is only ever "still checking", never a failure,
+        // Arc already confirmed it, so the money moved. A verify error is only ever "still checking", never a failure,
         // or people pay again.
         try { await verifyPactEvent(pactId, eventType, progress.txHash) }
         catch (reason) {
           const message = reason instanceof Error ? reason.message : 'PACT verification is not done yet.'
-          throw new PactVerificationError(`Done on Base, so the money moved. Pact is still checking it: ${message}`, pactId, eventType, progress.txHash, true)
+          throw new PactVerificationError(`Done on Arc, so the money moved. Pact is still checking it: ${message}`, pactId, eventType, progress.txHash, true)
         }
       }
-      if (eventType && !progress.txHash) throw new Error('Base transaction confirmed, but no transaction hash was returned for PACT verification.')
+      if (eventType && !progress.txHash) throw new Error('Arc transaction confirmed, but no transaction hash was returned for PACT verification.')
       return progress.txHash
     }
-    if (progress?.status === 'failed') throw new Error(progress.error || 'The transaction failed on Base.')
+    if (progress?.status === 'failed') throw new Error(progress.error || 'The transaction failed on Arc.')
     await sleep(3000)
   }
-  throw new Error('Approved, but Base has not confirmed it yet. Refresh in a minute.')
-}
-
-// Waits until a PIN-approved transaction is confirmed on Base. Throws if it failed or takes over two minutes.
-async function waitForChallenge(challengeId: string) {
-  for (let attempt = 0; attempt < 40; attempt += 1) {
-    const progress = await invokeWallet<ChallengeProgress>('challenge_status', { challengeId }).catch(() => null)
-    if (progress?.status === 'confirmed') return
-    if (progress?.status === 'failed') throw new Error(progress.error || 'The USDC approval failed on Base.')
-    await sleep(3000)
-  }
-  throw new Error('The USDC approval has not confirmed yet. Try paying again in a minute.')
+  throw new Error('Approved, but Arc has not confirmed it yet. Refresh in a minute.')
 }
 
 export async function retryPactEventVerification(pactId: string, eventType: PactVerificationError['eventType'], txHash: string) {

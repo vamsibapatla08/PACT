@@ -144,7 +144,7 @@ struct PactProgressCard: View {
 
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Label("PactSplit on Base", systemImage: "lock.shield.fill").font(.subheadline.weight(.semibold))
+                Label("PactSplit on Arc", systemImage: "lock.shield.fill").font(.subheadline.weight(.semibold))
                 Spacer()
                 Text(stateText(state))
                     .font(.caption.weight(.heavy))
@@ -261,7 +261,7 @@ private struct FundingPlanForm: View {
     }
 }
 
-/// One PactSplit step: what the PIN approves, the PIN, Base confirming it, and the receipt.
+/// One PactSplit step: what the PIN approves, the PIN, Arc confirming it, and the receipt.
 struct PactActionSheet: View {
     @Environment(PactStore.self) private var store
     @Environment(\.dismiss) private var dismiss

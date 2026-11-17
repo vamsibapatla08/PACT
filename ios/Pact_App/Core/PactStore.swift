@@ -13,11 +13,11 @@ final class PactStore {
     var pacts: [Pact] = []
     var members: [Pact.ID: [Member]] = [:]
     var messages: [Pact.ID: [Message]] = [:]
-    /// My Circle wallet on Base Sepolia, once it's made.
+    /// My Circle wallet on Arc Testnet, once it's made.
     var wallet: Wallet?
     /// My recent sends and receives.
     var activity: [Transfer] = []
-    /// Each pact's funding plan, and where it stands on PactSplit, read live from Base.
+    /// Each pact's funding plan, and where it stands on PactSplit, read live from Arc.
     var fundingPlans: [Pact.ID: FundingPlan] = [:]
     var pactSplit: [Pact.ID: PactSplitStatus] = [:]
     var shareReceipts: [Pact.ID: [ShareReceipt]] = [:]

@@ -58,10 +58,12 @@ function addressFromTopic(topic: unknown): string | null {
   return typeof topic === 'string' && word.test(topic.toLowerCase()) ? `0x${topic.toLowerCase().slice(26)}` : null
 }
 
-// PactSplit amounts are USDC on Base, an ERC-20 with 6 decimals, so the word is already in micro-USDC.
+// PactSplit amounts are native USDC with 18 decimals. Anything finer than 6 decimals can't match a share.
 export function usdcFromWord(data: unknown): string | null {
   if (typeof data !== 'string' || !/^0x[0-9a-f]{64}/i.test(data)) return null
-  const micro = BigInt(data.slice(0, 66))
+  const wei = BigInt(data.slice(0, 66))
+  if (wei % 10n ** 12n !== 0n) return null
+  const micro = wei / 10n ** 12n
   const frac = (micro % 1_000_000n).toString().padStart(6, '0').replace(/0+$/, '')
   return frac ? `${micro / 1_000_000n}.${frac}` : `${micro / 1_000_000n}`
 }

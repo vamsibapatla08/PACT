@@ -168,7 +168,7 @@ struct WalletCard: View {
             HStack {
                 Text("PACT").font(.system(size: 17, weight: .heavy)).tracking(5)
                 Spacer()
-                Text("BASE SEPOLIA").font(.system(size: 10, weight: .semibold)).foregroundStyle(.white.opacity(0.55))
+                Text("ARC TESTNET").font(.system(size: 10, weight: .semibold)).foregroundStyle(.white.opacity(0.55))
             }
             Spacer(minLength: 10)
             Text("BALANCE").font(.system(size: 10, weight: .semibold)).foregroundStyle(.white.opacity(0.55))

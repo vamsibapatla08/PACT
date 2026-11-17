@@ -101,13 +101,13 @@ export function Switch({ on, label, onChange }: { on: boolean; label: string; on
   return <button type="button" className={on ? 'l-switch on' : 'l-switch'} onClick={() => onChange(!on)} aria-pressed={on}><span>{label}</span><i /></button>
 }
 
-/** Pact Verified: QuickNode confirmed every payment on Base. Confirmed on Base: the chain shows it, QuickNode hasn't yet. */
+/** Pact Verified: QuickNode confirmed every payment on Arc. Confirmed on Arc: the chain shows it, QuickNode hasn't yet. */
 export function VerifiedBadge({ level, compact }: { level: 'verified' | 'onchain'; compact?: boolean }) {
   const verified = level === 'verified'
   return (
-    <span className={`l-verify ${verified ? 'ok' : 'wait'}${compact ? ' compact' : ''}`} title={verified ? 'Every payment was checked on Base by QuickNode' : 'On the Base chain. Waiting for QuickNode to confirm it.'}>
+    <span className={`l-verify ${verified ? 'ok' : 'wait'}${compact ? ' compact' : ''}`} title={verified ? 'Every payment was checked on Arc by QuickNode' : 'On the Arc chain. Waiting for QuickNode to confirm it.'}>
       <Icon name={verified ? 'shield' : 'chain'} />
-      {verified ? 'Pact Verified' : compact ? 'On Base' : 'Confirmed on Base'}
+      {verified ? 'Pact Verified' : compact ? 'On Arc' : 'Confirmed on Arc'}
     </span>
   )
 }

@@ -1,6 +1,6 @@
 import Foundation
 
-/// One USDC movement in or out of my wallet, read from the Base explorer: test money, a friend, a pact share or payout.
+/// One USDC movement in or out of my wallet, read from the Arc explorer: test money, a friend, a pact share or payout.
 struct LedgerRow: Identifiable, Hashable {
     enum Kind: Hashable { case person, share, payout, deposit, address }
 
@@ -23,18 +23,18 @@ struct Ledger: Hashable {
     var total: Double
 }
 
-private let explorer = "https://base-sepolia.blockscout.com"
-private let usdcToken = "0x036cbd53842c5426634e7929541ec2318f3dcf7e" // Circle USDC on Base Sepolia
+private let explorer = "https://explorer.testnet.arc.io"
+private let usdcToken = "0x3600000000000000000000000000000000000000"
 
 func explorerTx(_ hash: String) -> URL? { URL(string: "\(explorer)/tx/\(hash)") }
 
 /// PactSplit calls take the pact's id as their first argument: the uuid without dashes, padded to 32 bytes.
-/// A smart wallet wraps the PactSplit call inside its own, so look for a PactSplit selector anywhere in the input,
-/// followed by a pact key (16 uuid bytes, then 16 zero bytes).
-private let pactCall = /(?:dd668b0a|67d42a8b|c4d252f5|71de2ffc|9f40efc6)([0-9a-f]{32})0{32}/
 private func pactId(fromCall input: String) -> UUID? {
-    guard let match = input.lowercased().firstMatch(of: pactCall) else { return nil }
-    let s = Array(String(match.1))
+    let hex = input.hasPrefix("0x") ? String(input.dropFirst(2)) : input
+    guard hex.count >= 40 else { return nil }
+    let arg = hex.dropFirst(8).prefix(32).lowercased()
+    guard arg.count == 32, arg.allSatisfy(\.isHexDigit) else { return nil }
+    let s = Array(arg)
     return UUID(uuidString: "\(String(s[0..<8]))-\(String(s[8..<12]))-\(String(s[12..<16]))-\(String(s[16..<20]))-\(String(s[20..<32]))")
 }
 
@@ -50,7 +50,7 @@ extension PactStore {
             let (data, response) = try await URLSession.shared.data(from: parts.url!)
             guard (response as? HTTPURLResponse)?.statusCode == 200,
                   let body = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-                throw FunctionFailure(message: "The Base explorer could not be reached. Your balance is still right.")
+                throw FunctionFailure(message: "The Arc explorer could not be reached. Your balance is still right.")
             }
             all += body["items"] as? [[String: Any]] ?? []
             params = body["next_page_params"] as? [String: Any]
@@ -128,8 +128,12 @@ extension PactStore {
             rows[index].pactId = pactId(fromCall: input)
         }
 
-        // Gas is paid in ETH by Circle's Gas Station, so no USDC goes to fees.
-        let fees = 0.0
+        // Every transaction I send pays a small network fee in USDC.
+        let fees = txs.reduce(0.0) { sum, tx in
+            guard ((tx["from"] as? [String: Any])?["hash"] as? String)?.lowercased() == me,
+                  let fee = (tx["fee"] as? [String: Any])?["value"] as? String else { return sum }
+            return sum + (Double(fee) ?? 0) / 1e18
+        }
         let total = rows.reduce(0.0) { $0 + ($1.incoming ? $1.amount : -$1.amount) } - fees
         return Ledger(rows: rows, fees: fees, total: total)
     }

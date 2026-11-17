@@ -15,7 +15,7 @@ struct FundingPlan: Hashable, Decodable {
     }
 }
 
-/// Where a pact stands on PactSplit, from the `wallet` function's `pact_status`. Read live from Base.
+/// Where a pact stands on PactSplit, from the `wallet` function's `pact_status`. Read live from Arc.
 struct PactSplitStatus: Hashable, Decodable {
     struct Amount: Hashable, Decodable { var usdc: String }
     struct MemberPaid: Hashable, Decodable {
@@ -56,8 +56,8 @@ enum ActionOutcome {
     case confirmed(txHash: String?), pending, failed(String)
 }
 
-private let baseExplorer = "https://base-sepolia.blockscout.com/tx/"
-func arcTxURL(_ hash: String) -> URL? { URL(string: baseExplorer + hash) }
+private let arcExplorer = "https://explorer.testnet.arc.io/tx/"
+func arcTxURL(_ hash: String) -> URL? { URL(string: arcExplorer + hash) }
 
 func shortAddress(_ address: String) -> String { "\(address.prefix(6))…\(address.suffix(4))" }
 
@@ -86,8 +86,6 @@ private struct ChallengeReply: Decodable {
     var userToken: String?
     var encryptionKey: String?
     var challengeId: String?
-    /// "approve" when pay_share first needs USDC approved for PactSplit; the payment is a second PIN.
-    var step: String?
 }
 
 private struct ChallengeProgress: Decodable {
@@ -96,7 +94,7 @@ private struct ChallengeProgress: Decodable {
     var error: String?
 }
 
-/// PactSplit on Base: the host saves a plan and opens it on chain, each member pays a share with their PIN,
+/// PactSplit on Arc: the host saves a plan and opens it on chain, each member pays a share with their PIN,
 /// then the host releases to the payee, or cancels so everyone claims their share back.
 /// The server checks every call would go through before it hands back a PIN challenge.
 extension PactStore {
@@ -127,49 +125,41 @@ extension PactStore {
         }
     }
 
-    /// Runs one PactSplit call: the server's checks, Circle's PIN screen, then Base's receipt.
+    /// Runs one PactSplit call: the server's checks, Circle's PIN screen, then Arc's receipt.
     /// Confirmed only once the receipt says success, so a call that reverted reads as failed.
-    /// Paying a share takes two PINs the first time: approve USDC for PactSplit, then pay.
     func runPactAction(_ action: PactSplitAction, in id: Pact.ID, onStep: (String) -> Void) async -> ActionOutcome {
         do {
-            for _ in 0..<2 {
-                let reply: ChallengeReply = try await invoke("wallet", ["action": action.rawValue, "pactId": key(id)])
-                guard reply.status == "challenge", let appId = reply.appId, let userToken = reply.userToken,
-                      let encryptionKey = reply.encryptionKey, let challengeId = reply.challengeId else {
-                    return .failed("The wallet didn't hand back a PIN step.")
-                }
-                let approving = reply.step == "approve"
-
-                onStep(approving ? "Approve USDC with your PIN" : "Confirm with your PIN")
-                try configureCircle(appId: appId)
-                if let failure = await runChallenge(userToken: userToken, encryptionKey: encryptionKey, challengeId: challengeId) {
-                    return .failed(failure)
-                }
-
-                // Base confirms in seconds; stop watching after two minutes and leave it pending.
-                // A failed status read is retried, since the PIN went through and the call may already be on chain.
-                onStep(approving ? "Approving USDC…" : "Waiting for Base…")
-                var outcome: ActionOutcome = .pending
-                watch: for _ in 0..<40 {
-                    let progress: ChallengeProgress? = try? await invoke("wallet", ["action": "challenge_status", "challengeId": challengeId])
-                    switch progress?.status {
-                    case "confirmed":
-                        outcome = .confirmed(txHash: progress?.txHash)
-                        break watch
-                    case "failed":
-                        outcome = .failed(progress?.error ?? "The transaction failed on Base.")
-                        break watch
-                    default:
-                        try await Task.sleep(for: .seconds(3))
-                    }
-                }
-                // Once the approval lands, go round again for the payment's own PIN.
-                if approving, case .confirmed = outcome { continue }
-                await loadPactSplit(id)
-                if case .confirmed = outcome { await loadWallet() }
-                return outcome
+            let reply: ChallengeReply = try await invoke("wallet", ["action": action.rawValue, "pactId": key(id)])
+            guard reply.status == "challenge", let appId = reply.appId, let userToken = reply.userToken,
+                  let encryptionKey = reply.encryptionKey, let challengeId = reply.challengeId else {
+                return .failed("The wallet didn't hand back a PIN step.")
             }
-            return .failed("The USDC approval has not landed yet. Try paying again in a moment.")
+
+            onStep("Confirm with your PIN")
+            try configureCircle(appId: appId)
+            if let failure = await runChallenge(userToken: userToken, encryptionKey: encryptionKey, challengeId: challengeId) {
+                return .failed(failure)
+            }
+
+            // Arc confirms in seconds; stop watching after two minutes and leave it pending.
+            // A failed status read is retried, since the PIN went through and the call may already be on chain.
+            onStep("Waiting for Arc…")
+            for _ in 0..<40 {
+                let progress: ChallengeProgress? = try? await invoke("wallet", ["action": "challenge_status", "challengeId": challengeId])
+                switch progress?.status {
+                case "confirmed":
+                    await loadPactSplit(id)
+                    await loadWallet()
+                    return .confirmed(txHash: progress?.txHash)
+                case "failed":
+                    await loadPactSplit(id)
+                    return .failed(progress?.error ?? "The transaction failed on Arc.")
+                default:
+                    try await Task.sleep(for: .seconds(3))
+                }
+            }
+            await loadPactSplit(id)
+            return .pending
         } catch let failure as FunctionFailure {
             return .failed(failure.lowBalance ? "\(failure.message) Add test USDC from the Wallet tab." : failure.message)
         } catch {
