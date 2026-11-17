@@ -11,10 +11,12 @@ import { askPactPilot } from '../lib/pactPilotService'
 import { listPactMessages, sendPactMessage, subscribeToPactMessages } from '../lib/chatService'
 import type { PactChatMessage } from '../types/chat'
 import { PactMoneyPanel } from '../components/PactMoneyPanel'
-import { createPactFundingPlan, createPactMoneyWallet, getPactMemberWallets, getPactMoneyWalletStatus, getPactPaymentStatus, isPaymentBackendUnavailable, pactMoneyWalletEnabled, resetPactMoneyPin, runPactAction, sendPactMoney, type PactAction } from '../lib/pactMoneyService'
+import { createPactFundingPlan, createPactMoneyWallet, getPactMemberWallets, getPactMoneyWalletStatus, getPactPaymentStatus, isPaymentBackendUnavailable, pactMoneyWalletEnabled, resetPactMoneyPin, retryPactEventVerification, runPactAction, sendPactMoney, type PactAction, type PactVerificationError } from '../lib/pactMoneyService'
 import type { PactMoneyStatus, PactMoneyTransfer, PactMoneyWallet, PactPaymentStatusRow } from '../types/pactMoney'
 import { PactFlowPanel } from '../components/PactFlowPanel'
 import { PactDecidePanel } from '../components/PactDecidePanel'
+import { BookingPanel } from '../components/BookingPanel'
+import { associateBookingPayment, getLatestBookingStatus } from '../lib/bookingService'
 import { loadPactFlow, castPactDecisionVote, createPactDecision, savePactRecommendation, seedPactMilestones } from '../lib/pactFlowService'
 import type { PactDecision, PactMilestone, PactRecommendation } from '../types/pactFlow'
 
@@ -146,7 +148,10 @@ export function PactWorkspacePage({ user, profile, pactId, onNavigate, onSignOut
 
   // The date picker gives local time with no zone, so it becomes a UTC instant here, before the server reads it.
   async function handleCreateFundingPlan(input: { shareUsdc: string; deadline: string; payeeAddress: string }) {
-    await createPactFundingPlan({ pactId, ...input, deadline: new Date(input.deadline).toISOString() })
+    const created = await createPactFundingPlan({ pactId, ...input, deadline: new Date(input.deadline).toISOString() })
+    const latest = await getLatestBookingStatus(pactId)
+    const currentSplit = latest.splits[0]
+    if (latest.booking && currentSplit?.status === 'approved') await associateBookingPayment(pactId, latest.booking.booking_id, currentSplit.split_id, created.paymentId)
     setPaymentRows(await getPactPaymentStatus(pactId))
   }
 
@@ -162,6 +167,11 @@ export function PactWorkspacePage({ user, profile, pactId, onNavigate, onSignOut
       await getPactPaymentStatus(pactId).then(setPaymentRows).catch(() => {})
       throw reason
     }
+  }
+
+  async function handleRetryVerification(eventType: PactVerificationError['eventType'], txHash: string) {
+    await retryPactEventVerification(pactId, eventType, txHash)
+    setPaymentRows(await getPactPaymentStatus(pactId))
   }
 
   async function handleVote(decisionId: string, vote: 'approve' | 'reject') {
@@ -211,7 +221,8 @@ export function PactWorkspacePage({ user, profile, pactId, onNavigate, onSignOut
             <PactPilotPanel pactId={pact.id} pactName={pact.name} onAsk={askAndPersist} />
           </div>
         </div>
-        <PactMoneyPanel pactName={pact.name} memberCount={pact.members.length} members={pact.members.map((member) => ({ userId: member.user_id, name: member.profile?.full_name || (member.user_id === user.id ? displayName(user, profile) : 'Pact member') }))} isHost={pact.members.some((member) => member.user_id === user.id && member.role === 'host')} status={moneyStatus} wallet={moneyWallet} error={moneyError} paymentStatusError={paymentStatusError} walletEnabled={pactMoneyWalletEnabled} onCreateWallet={handleCreateWallet} onResetPin={pactMoneyWalletEnabled ? resetPactMoneyPin : undefined} recipients={pact.members.filter((m) => m.user_id !== user.id).map((m) => ({ userId: m.user_id, name: m.profile?.full_name || 'Pact member', hasWallet: memberWallets ? memberWallets.some((w) => w.user_id === m.user_id) : undefined, address: memberWallets?.find((w) => w.user_id === m.user_id)?.address }))} onSend={pactMoneyWalletEnabled ? handleSendMoney : undefined} paymentRows={paymentRows} onCreateFundingPlan={handleCreateFundingPlan} currentUserId={user.id} onPactAction={pactMoneyWalletEnabled ? handlePactAction : undefined} />
+        <PactMoneyPanel pactName={pact.name} memberCount={pact.members.length} members={pact.members.map((member) => ({ userId: member.user_id, name: member.profile?.full_name || (member.user_id === user.id ? displayName(user, profile) : 'Pact member') }))} isHost={pact.members.some((member) => member.user_id === user.id && member.role === 'host')} status={moneyStatus} wallet={moneyWallet} error={moneyError} paymentStatusError={paymentStatusError} walletEnabled={pactMoneyWalletEnabled} onCreateWallet={handleCreateWallet} onResetPin={pactMoneyWalletEnabled ? resetPactMoneyPin : undefined} recipients={pact.members.filter((m) => m.user_id !== user.id).map((m) => ({ userId: m.user_id, name: m.profile?.full_name || 'Pact member', hasWallet: memberWallets ? memberWallets.some((w) => w.user_id === m.user_id) : undefined, address: memberWallets?.find((w) => w.user_id === m.user_id)?.address }))} onSend={pactMoneyWalletEnabled ? handleSendMoney : undefined} paymentRows={paymentRows} onCreateFundingPlan={handleCreateFundingPlan} currentUserId={user.id} onPactAction={pactMoneyWalletEnabled ? handlePactAction : undefined} onRetryVerification={pactMoneyWalletEnabled ? handleRetryVerification : undefined} />
+        <BookingPanel pactId={pact.id} memberCount={pact.members.length} currentUserId={user.id} isHost={pact.members.some((member) => member.user_id === user.id && member.role === 'host')} paymentRows={paymentRows} />
         <div className="workspace-decision-grid"><PactFlowPanel milestones={flow.milestones} recommendations={flow.recommendations} decisions={flow.decisions} loading={flowLoading} error={flowError} onSubmitRecommendation={handleSubmitRecommendation} /><PactDecidePanel decisions={flow.decisions} onVote={handleVote} onCreate={handleCreateDecision} error={flowError} /></div>
         <section className="workspace-coming"><span>PACT / NEXT LAYER</span><strong>Conversation, decisions, and payments will live here.</strong><p>Chat, plans, votes, and payment features are not in the current backend migration yet.</p></section>
       </> : null}
