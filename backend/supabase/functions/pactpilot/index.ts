@@ -127,7 +127,7 @@ const isAmount = (value: unknown): value is number =>
 
 const round = (value: number) => Math.round(value * 100) / 100
 
-const chatLimit = 24
+const chatLimit = 16
 const chatMessageLimit = 600
 const grokBudgetMs = 25_000
 const grokAttemptBudgetMs = 18_000
@@ -325,11 +325,15 @@ async function callGrok(apiKey: string, model: string, input: unknown, requestId
   let lastStatus = 502
   let retries = 0
   let outputChars = 0
+  let phase = "headers"
+  let headerDurationMs = 0
+  let bodyDurationMs = 0
   for (let attempt = 0; attempt < 2; attempt += 1) {
     const remainingMs = deadline - Date.now()
     if (remainingMs <= 1000) break
     try {
       const timeoutMs = Math.min(grokAttemptBudgetMs, remainingMs - 500)
+      const fetchStartedAt = performance.now()
       const response = await fetch("https://api.x.ai/v1/responses", {
         method: "POST",
         headers: {
@@ -345,21 +349,26 @@ async function callGrok(apiKey: string, model: string, input: unknown, requestId
           text: { format: { type: "json_schema", name: "pact_plan", schema: planSchema, strict: false } },
         }),
       })
+      headerDurationMs = Math.round(performance.now() - fetchStartedAt)
+      phase = "body"
       if (response.ok) {
+        const bodyStartedAt = performance.now()
         const result = await response.json()
+        bodyDurationMs = Math.round(performance.now() - bodyStartedAt)
         outputChars = JSON.stringify(result).length
-        console.info("[PactPilot]", JSON.stringify({ requestId, stage: "grok", durationMs: Math.round(performance.now() - startedAt), model, status: response.status, retries, inputChars: JSON.stringify(input).length, outputChars }))
+        console.info("[PactPilot]", JSON.stringify({ requestId, stage: "grok", durationMs: Math.round(performance.now() - startedAt), model, status: response.status, retries, phase, headerDurationMs, bodyDurationMs, inputChars: JSON.stringify(input).length, outputChars }))
         return result
       }
       lastStatus = response.status
       if (![429, 500, 502].includes(response.status) || deadline - Date.now() <= 8_000) break
       retries += 1
-    } catch {
+    } catch (reason) {
       lastStatus = 504
+      console.info("[PactPilot]", JSON.stringify({ requestId, stage: "grok_timeout", durationMs: Math.round(performance.now() - startedAt), model, retries, phase, headerDurationMs, bodyDurationMs, errorType: reason instanceof DOMException && reason.name === "TimeoutError" ? "timeout" : "upstream_fetch_error" }))
       break
     }
   }
-  console.info("[PactPilot]", JSON.stringify({ requestId, stage: "grok", durationMs: Math.round(performance.now() - startedAt), model, status: lastStatus, retries, inputChars: JSON.stringify(input).length, outputChars: 0 }))
+  console.info("[PactPilot]", JSON.stringify({ requestId, stage: "grok", durationMs: Math.round(performance.now() - startedAt), model, status: lastStatus, retries, phase, headerDurationMs, bodyDurationMs, inputChars: JSON.stringify(input).length, outputChars: 0 }))
   throw new Error(lastStatus === 504 ? "Grok timed out before producing a response" : `Grok request failed (${lastStatus})`)
 }
 
@@ -495,7 +504,7 @@ Deno.serve(async (request) => {
 
   const isComplexRequest = question.length > 240 ||
     /\b(plan|trip|hotel|project|hackathon|poll|budget|task|booking|expense|split|decision|rebalance)\b/i.test(question)
-  const maxOutputTokens = isComplexRequest ? 2200 : 900
+  const maxOutputTokens = isComplexRequest ? 1600 : 700
   const grokInput = [
     {
       role: "system",
