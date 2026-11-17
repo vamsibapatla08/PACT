@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 
 const service = fs.readFileSync('frontend/src/lib/pactPilotService.ts', 'utf8')
-const migration = fs.readFileSync('backend/supabase/migrations/20261117140000_pactpilot_action_engine.sql', 'utf8')
+const migration = fs.readFileSync('backend/supabase/migrations/20261117190800_pactpilot_action_engine.sql', 'utf8')
 const backend = fs.readFileSync('backend/supabase/functions/pactpilot/index.ts', 'utf8')
 
 assert.match(service, /activeOperationIds\.has\(operationId\)/)
