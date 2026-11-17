@@ -358,7 +358,7 @@ function json(body: unknown, status = 200) {
   return Response.json(body, { status, headers })
 }
 
-async function callGrok(apiKey: string, model: string, input: unknown, requestId: string, maxOutputTokens: number) {
+async function callGrok(apiKey: string, model: string, input: unknown, requestId: string, maxOutputTokens: number, extra: Record<string, unknown> = {}) {
   const startedAt = performance.now()
   const deadline = Date.now() + grokBudgetMs
   let lastStatus = 502
@@ -384,6 +384,7 @@ async function callGrok(apiKey: string, model: string, input: unknown, requestId
           model,
           store: false,
           max_output_tokens: maxOutputTokens,
+          ...extra,
           input,
           text: { format: { type: "json_schema", name: "pact_plan", schema: planSchema, strict: false } },
         }),
@@ -594,7 +595,19 @@ Deno.serve(async (request) => {
   ]
 
   try {
-    const result = await callGrok(apiKey, model, grokInput, requestId, maxOutputTokens)
+    // Everyday questions (a summary, "who owes what") use the quick model with no reasoning when one is set,
+    // which answers in seconds instead of a minute. Planning keeps the main model. If xAI turns the quick setup
+    // down (an unknown model or setting), it falls back to the main model, so nothing breaks.
+    const fastModel = Deno.env.get("GROK_FAST_MODEL")
+    const fastEffort = Deno.env.get("GROK_FAST_REASONING") ?? "none"
+    const useFast = Boolean(fastModel) && (input?.quick === true || !isComplexRequest)
+    const result = useFast
+      ? await callGrok(apiKey, fastModel!, grokInput, requestId, maxOutputTokens, fastEffort ? { reasoning: { effort: fastEffort } } : {})
+          .catch((e) => {
+            if (!/failed \((400|404|422)\)/.test(String((e as Error).message))) throw e
+            return callGrok(apiKey, model, grokInput, requestId, maxOutputTokens)
+          })
+      : await callGrok(apiKey, model, grokInput, requestId, maxOutputTokens)
     const text = (typeof result.output_text === "string" ? result.output_text : (result.output ?? [])
       .filter((item: { type: string }) => item.type === "message")
       .flatMap((item: { content?: unknown[] }) => item.content ?? [])

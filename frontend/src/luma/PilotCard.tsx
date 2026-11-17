@@ -14,9 +14,6 @@ export function PilotCard({ id, me, members, onDone }: { id: string; me: string;
     try { await work() } catch (e) { setError((e as Error).message) }
     setWorking(null)
   }
-  const who = (userId: string) => (userId === me ? 'you' : S.firstName(members.find((m) => m.user_id === userId)?.name))
-  const changes = answer?.actions.filter((a) => !a.tool.startsWith('read_')) ?? []
-
   return (
     <div className="l-about l-pilot">
       <div className="l-section-title">Ask Grok</div>
@@ -26,25 +23,39 @@ export function PilotCard({ id, me, members, onDone }: { id: string; me: string;
           placeholder="“I got coffee for everyone, $18” · “Start a vote on Friday or Saturday” · “Can I crash at the hotel too?”" />
       </form>
 
-      {answer && (
-        <div className="l-tab-answer">
-          <p>{answer.reply}</p>
-          {changes.length > 0 && (
-            <div className="l-pilot-plan">
-              <span className="l-dim">Grok wants to</span>
-              <ul>{changes.map((a, i) => <li key={i}>{label(a, who)}</li>)}</ul>
-              {answer.operationId ? (
-                <div className="l-pilot-buttons">
-                  <button className="l-btn l-small" type="button" disabled={Boolean(working)}
-                    onClick={() => void run('Making the changes…', async () => { await S.approveGrok(id, answer.operationId!); setAnswer(null); onDone() })}>Approve</button>
-                  <button className="l-btn l-ghost l-small" type="button" disabled={Boolean(working)} onClick={() => setAnswer(null)}>Not now</button>
-                </div>
-              ) : <p className="l-error">Grok's plan wasn't saved, so it can't run. Ask again.</p>}
+      {answer && <PilotAnswerView id={id} me={me} members={members} answer={answer} onDone={() => { setAnswer(null); onDone() }} onDismiss={() => setAnswer(null)} />}
+      {working && <Busy text={working} />}
+      {error && <p className="l-error">{error}</p>}
+    </div>
+  )
+}
+
+/** Grok's reply, and any changes it wants to make as one card you approve. Used by the Ask Grok card and by @Grok in the chat. */
+export function PilotAnswerView({ id, me, members, answer, onDone, onDismiss }: {
+  id: string; me: string; members: S.Member[]; answer: S.PilotAnswer; onDone: () => void; onDismiss: () => void
+}) {
+  const [working, setWorking] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const who = (userId: string) => (userId === me ? 'you' : S.firstName(members.find((m) => m.user_id === userId)?.name))
+  const changes = answer.actions.filter((a) => !a.tool.startsWith('read_'))
+  return (
+    <div className="l-tab-answer">
+      <p>{answer.reply}</p>
+      {changes.length > 0 && (
+        <div className="l-pilot-plan">
+          <span className="l-dim">Grok wants to</span>
+          <ul>{changes.map((a, i) => <li key={i}>{label(a, who)}</li>)}</ul>
+          {answer.operationId ? (
+            <div className="l-pilot-buttons">
+              <button className="l-btn l-small" type="button" disabled={working}
+                onClick={async () => { setWorking(true); setError(null); try { await S.approveGrok(id, answer.operationId!); onDone() } catch (e) { setError((e as Error).message) } setWorking(false) }}>
+                {working ? 'Making the changes…' : 'Approve'}
+              </button>
+              <button className="l-btn l-ghost l-small" type="button" disabled={working} onClick={onDismiss}>Not now</button>
             </div>
-          )}
+          ) : <p className="l-error">Grok's plan wasn't saved, so it can't run. Ask again.</p>}
         </div>
       )}
-      {working && <Busy text={working} />}
       {error && <p className="l-error">{error}</p>}
     </div>
   )

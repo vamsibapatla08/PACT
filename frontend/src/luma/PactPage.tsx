@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import * as S from './store'
 import { DetailsForm, useApp } from './App'
 import { Avatar, Busy, Cover, Grok, Icon, Modal, Switch, VerifiedBadge } from './ui'
+import { PilotAnswerView } from './PilotCard'
 
 type Sheet =
   | { kind: 'settings' } | { kind: 'addPeople' } | { kind: 'addItem' } | { kind: 'grok' }
@@ -22,6 +23,13 @@ export function PactPage({ id }: { id: string }) {
   const [polls, setPolls] = useState<S.Poll[]>([])
   const [renaming, setRenaming] = useState(false)
   const [tab, setTab] = useState<S.Tab | null>(null)
+  /** An @Grok question from the chat: what was asked, then Grok's answer (or why it failed). */
+  const [ask, setAsk] = useState<{ question: string; answer: S.PilotAnswer | null; error: string | null } | null>(null)
+  async function askGrokInChat(question: string) {
+    setAsk({ question, answer: null, error: null })
+    try { const answer = await S.askGrok(id, question); setAsk({ question, answer, error: null }) }
+    catch (e) { setAsk({ question, answer: null, error: (e as Error).message || "Grok couldn't answer. Try again." }) }
+  }
   const reloadSide = useCallback(() => {
     void S.loadPolls(id).then(setPolls)
     void S.loadTab(id).then(setTab).catch(() => undefined)
@@ -235,7 +243,21 @@ export function PactPage({ id }: { id: string }) {
           recs={(d?.recommendations ?? []).slice(0, -1)} onGrok={(rec) => setSheet({ kind: 'summary', rec })} />
         {d && step && !finished && <WaitingCard d={d} me={me} step={step} hasGrok={hasGrok} working={working} onAct={doStep} />}
         {grokJob && <GrokStatus job={grokJob} onDismiss={() => setGrokJob(null)} />}
-        <Composer id={id} />
+        {ask && d && (
+          <div className="l-grok-ask">
+            <div className="l-grok-ask-head">
+              <span className="l-waiting-grok"><Grok size={15} /></span>
+              <b>Grok</b>
+              <span className="l-dim">You asked: {ask.question}</span>
+              <button className="l-x" type="button" aria-label="Close" onClick={() => setAsk(null)}>×</button>
+            </div>
+            {ask.answer ? <PilotAnswerView id={id} me={me} members={d.members} answer={ask.answer}
+                onDone={() => { setAsk(null); reloadSide(); setTabVersion((v) => v + 1); void refreshPact(id) }} onDismiss={() => setAsk(null)} />
+              : ask.error ? <div className="l-grok-ask-error"><p className="l-error">{ask.error}</p><button className="l-btn l-ghost l-small" type="button" onClick={() => void askGrokInChat(ask.question)}>Try again</button></div>
+              : <div className="l-grok-ask-busy"><span>Grok is reading the pact</span><span className="l-dots"><i /><i /><i /></span></div>}
+          </div>
+        )}
+        <Composer id={id} onAskGrok={(q) => void askGrokInChat(q)} />
       </section>
       </div>
 
@@ -506,28 +528,47 @@ function useDictation(onText: (text: string) => void) {
   return { supported: Boolean(Speech), listening, failure, start, stop, clear: () => setFailure(null) }
 }
 
-function Composer({ id }: { id: string }) {
+const AT_GROK = /(^|\s)@grok\b[:,]?/i
+
+function Composer({ id, onAskGrok }: { id: string; onAskGrok: (question: string) => void }) {
   const [text, setText] = useState('')
   const [error, setError] = useState<string | null>(null)
   const voice = useDictation(setText)
+  const box = useRef<HTMLTextAreaElement>(null)
+  const forGrok = AT_GROK.test(text)
+  // Typing "@" (or "@gr…") offers @Grok, so nobody has to remember the name.
+  const suggest = !forGrok && /(^|\s)@[a-z]{0,4}$/i.test(text)
+  const callGrok = () => {
+    setText((t) => (AT_GROK.test(t) ? t : suggest ? t.replace(/@[a-z]{0,4}$/i, '@Grok ') : `@Grok ${t}`))
+    requestAnimationFrame(() => { const el = box.current; if (el) { el.focus(); el.setSelectionRange(el.value.length, el.value.length) } })
+  }
   async function submit() {
     const body = text.trim()
     if (!body) return
     voice.stop()
     setText('')
-    try { await S.send(id, body) } catch (e) { setError((e as Error).message); setText(body) }
+    try { await S.send(id, body) } catch (e) { setError((e as Error).message); setText(body); return }
+    // The group sees the question in the chat; Grok answers just above the message box.
+    if (AT_GROK.test(body)) onAskGrok(body.replace(AT_GROK, ' ').replace(/\s+/g, ' ').trim() || 'What should we do next?')
   }
   return (
     <>
       {(error || voice.failure) && <p className="l-error">{error ?? voice.failure}</p>}
-      <form className="l-composer" onSubmit={(e) => { e.preventDefault(); void submit() }}>
-        <textarea rows={1} value={text} placeholder={voice.listening ? 'Listening… speak now' : 'Message the group'} onChange={(e) => setText(e.target.value)}
+      {suggest && (
+        <button type="button" className="l-at-suggest" onClick={callGrok}>
+          <span className="l-waiting-grok"><Grok size={13} /></span><b>@Grok</b><span>Ask Grok to plan, split or start a vote</span>
+        </button>
+      )}
+      <form className={forGrok ? 'l-composer grok' : 'l-composer'} onSubmit={(e) => { e.preventDefault(); void submit() }}>
+        <button type="button" className={forGrok ? 'l-icon-btn l-grok-btn on' : 'l-icon-btn l-grok-btn'} onClick={callGrok}
+          aria-label="Ask Grok" title="Ask Grok (or type @Grok)"><Grok size={17} /></button>
+        <textarea ref={box} rows={1} value={text} placeholder={voice.listening ? 'Listening… speak now' : 'Message the group, or @Grok to ask Grok'} onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void submit() } }} />
         <button type="button" className={voice.listening ? 'l-icon-btn l-mic on' : 'l-icon-btn l-mic'} onClick={() => (voice.listening ? voice.stop() : void voice.start(text))}
           aria-label={voice.listening ? 'Stop talking' : 'Talk instead of typing'} title={voice.listening ? 'Stop' : 'Talk instead of typing'}>
           <Icon name={voice.listening ? 'wave' : 'mic'} />
         </button>
-        <button type="submit" className="l-send" disabled={!text.trim()} aria-label="Send"><Icon name="up" /></button>
+        <button type="submit" className="l-send" disabled={!text.trim()} aria-label={forGrok ? 'Send and ask Grok' : 'Send'} title={forGrok ? 'Send and ask Grok' : 'Send'}><Icon name="up" /></button>
       </form>
     </>
   )

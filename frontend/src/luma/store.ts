@@ -312,7 +312,8 @@ export let onGrokRetry: (() => void) | null = null
 export const setGrokRetryListener = (f: (() => void) | null) => { onGrokRetry = f }
 
 async function askPilotRaw(id: string, question: string, messages: Message[], name: (id: string) => string) {
-  const ask = () => invoke<Answer>('pactpilot', { pact_id: id, question: withChat(question, messages, name) })
+  // A summary is a quick read of the chat, so it asks for the faster model (when one is set up on the server).
+  const ask = () => invoke<Answer>('pactpilot', { pact_id: id, question: withChat(question, messages, name), quick: question === summaryQuestion })
   try { return await ask() }
   catch (e) {
     // Grok sometimes runs past the function's time limit. One more try usually lands.
