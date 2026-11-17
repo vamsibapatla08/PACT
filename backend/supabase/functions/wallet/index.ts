@@ -186,7 +186,11 @@ async function ready(row: WalletRow) {
 
 // The user's Circle wallet id and its address, from our wallets table.
 async function myWallet(userId: string): Promise<{ id: string; address: string } | null> {
-  const { data, error } = await admin.from('wallets').select('circle_wallet_id, address').eq('user_id', userId).maybeSingle()
+  const read = () => admin.from('wallets').select('circle_wallet_id, address').eq('user_id', userId).maybeSingle()
+  let { data, error } = await read()
+  if (error) throw error
+  // No saved row: they may still have their Arc wallet in Circle (see restoreWallet). Bring it back, then read again.
+  if (!data && await restoreWallet(userId)) ({ data, error } = await read())
   if (error) throw error
   return data ? { id: data.circle_wallet_id, address: data.address } : null
 }
@@ -262,7 +266,7 @@ async function memberTransfer(userId: string, userJwt: string, body: Record<stri
   if (!roster.some((m) => m.user_id === toUserId)) return reply(403, { error: 'They are not in this pact' })
   const wallet = await myWallet(userId)
   if (!wallet) return reply(409, { error: 'Set up your wallet first' })
-  const recipient = await savedWallet(toUserId)
+  const recipient = await walletOf(toUserId)
   if (!recipient) return reply(409, { error: 'They have not set up a wallet yet' })
 
   const { error: insertError } = await admin.from('pact_transfers').insert({
@@ -386,7 +390,7 @@ async function payShare(userId: string, userJwt: string, pactId: unknown) {
   const roster = await pactRoster(userJwt, pactId)
   if (!roster.some((m) => m.user_id === userId)) return reply(403, { error: 'You are not in this pact' })
   const hostId = roster.find((m) => m.role === 'host')?.user_id
-  const hostWallet = hostId ? await savedWallet(hostId) : null
+  const hostWallet = hostId ? await walletOf(hostId) : null
 
   const wallet = await myWallet(userId)
   if (!wallet) return reply(409, { error: 'Set up your wallet first' })
@@ -537,7 +541,18 @@ async function pactMemberWallets(userId: string, userJwt: string, pactId: unknow
   if (!roster.some((m) => m.user_id === userId)) return reply(403, { error: 'You are not in this pact' })
   const { data, error } = await admin.from('wallets').select('user_id, address').in('user_id', roster.map((m) => m.user_id))
   if (error) throw error
-  return reply(200, { members: data ?? [] })
+  // Anyone without a saved row may still have their Arc wallet in Circle: bring those back too.
+  const found = new Set((data ?? []).map((w) => w.user_id))
+  const restored = await Promise.all(roster.filter((m) => !found.has(m.user_id)).map(async (m) => {
+    const row = await restoreWallet(m.user_id).catch(() => null)
+    return row ? { user_id: m.user_id, address: row.address } : null
+  }))
+  return reply(200, { members: [...(data ?? []), ...restored.filter((r) => r !== null)] })
+}
+
+/** Someone's wallet: their saved row, or else their Arc wallet found again in Circle (see restoreWallet). */
+async function walletOf(userId: string): Promise<WalletRow | null> {
+  return (await savedWallet(userId)) ?? (await restoreWallet(userId))
 }
 
 async function savedWallet(userId: string) {
