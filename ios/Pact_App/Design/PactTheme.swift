@@ -29,30 +29,25 @@ extension LinearGradient {
 /// The ground every screen sits on: black at the top fading into a slow mesh of graphite, steel blue and a little
 /// violet lower down, so the glass above it has colour to bend.
 struct AmbientBackdrop: View {
+    /// Faint liquid gold and silver, slowly moving, the same as the website (LiquidGold.metal).
+    /// Drawn at a third of the screen's resolution and scaled up: it's soft, so nobody sees the pixels.
+    private let scale: CGFloat = 3
+
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1 / 20)) { timeline in
-            let t = Float(timeline.date.timeIntervalSinceReferenceDate)
-            let drift = SIMD2<Float>(sin(t / 7) * 0.08, cos(t / 9) * 0.06)
-            MeshGradient(width: 3, height: 3, points: [
-                [0, 0], [0.5, 0], [1, 0],
-                [0, 0.45], [0.5, 0.4] + drift, [1, 0.5],
-                [0, 1], [0.5, 1], [1, 1],
-            ], colors: [
-                Color(hex: 0x3A4560), Color(hex: 0x56607E), Color(hex: 0x675C88),
-                Color(hex: 0x182035), Color(hex: 0x2C2D52), Color(hex: 0x173845),
-                Color(hex: 0x07090F), Color(hex: 0x15112A), Color(hex: 0x04070A),
-            ])
+        GeometryReader { geo in
+            TimelineView(.animation(minimumInterval: 1 / 24)) { timeline in
+                let t = Float(timeline.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 3600))
+                let small = CGSize(width: max(1, geo.size.width / scale), height: max(1, geo.size.height / scale))
+                Rectangle()
+                    .frame(width: small.width, height: small.height)
+                    .colorEffect(ShaderLibrary.liquidGold(.float2(small), .float(t)))
+                    .scaleEffect(scale, anchor: .topLeading)
+                    .frame(width: geo.size.width, height: geo.size.height, alignment: .topLeading)
+            }
         }
-        // Black from the top, easing out about halfway down, so the colour only glows in the lower half.
-        .overlay(LinearGradient(stops: [
-            .init(color: .black.opacity(0.96), location: 0),
-            .init(color: .black.opacity(0.9), location: 0.22),
-            .init(color: .black.opacity(0.68), location: 0.38),
-            .init(color: .black.opacity(0.38), location: 0.52),
-            .init(color: .black.opacity(0.14), location: 0.66),
-            .init(color: .clear, location: 0.8),
-        ], startPoint: .top, endPoint: .bottom))
+        .background(Color.black)
         .ignoresSafeArea()
+        .allowsHitTesting(false)
     }
 }
 
@@ -195,8 +190,9 @@ extension View {
     }
 
     /// Text filled with the silver gradient.
+    /// Titles and labels in clean white, like the website. (The name stays so every screen picks it up.)
     func silver() -> some View {
-        foregroundStyle(LinearGradient.pactSilver)
+        foregroundStyle(.white)
     }
 }
 

@@ -1,11 +1,12 @@
 import SwiftUI
 import CoreImage.CIFilterBuiltins
 
-/// The Wallet tab: balance, Send and Receive, and my recent money in and out.
+/// The Wallet tab, the same as the website: the card, copy address and test USDC, then every USDC in and out.
 struct WalletView: View {
     @Environment(PactStore.self) private var store
-    @State private var sending = false
-    @State private var receiving = false
+    @State private var ledger: Ledger?
+    @State private var ledgerError: String?
+    @State private var copied = false
 
     var body: some View {
         NavigationStack {
@@ -13,70 +14,145 @@ struct WalletView: View {
                 // Nothing shows until the wallet has been checked, so "Create wallet" never flashes.
                 if store.walletLoaded {
                     if let wallet = store.wallet {
-                        balance(wallet)
-                        HStack(spacing: 12) {
-                            Button { sending = true } label: { Label("Send", systemImage: "arrow.up") }.pactAction()
-                            Button { receiving = true } label: { Label("Receive", systemImage: "arrow.down") }.pactGhost()
-                        }
+                        WalletCard(balance: wallet.usdcBalance, address: wallet.address, name: store.profile?.name)
+                        addressRow(wallet)
+                        Text("Activity").font(.title3.weight(.bold)).foregroundStyle(.white).padding(.top, 6)
                         activity
-                        Link(destination: URL(string: "https://faucet.circle.com")!) {
-                            Label("Get free test USDC", systemImage: "drop.fill")
-                        }
-                        .pactGhost()
                     } else {
                         create
                     }
                 }
             }
-            .refreshable { await store.loadWallet() }
-            .sheet(isPresented: $sending) { SendSheet() }
-            .sheet(isPresented: $receiving) { ReceiveSheet() }
+            .refreshable { await store.loadWallet(); await reloadLedger() }
+            .task(id: "\(store.wallet?.address ?? "")|\(store.pactSplit.count)|\(store.pacts.count)") { await reloadLedger() }
+            .navigationDestination(for: Pact.ID.self) { PactView(id: $0) }
         }
     }
 
-    private func balance(_ wallet: Wallet) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Label("Arc Testnet", systemImage: "wallet.bifold").font(.subheadline.weight(.semibold))
-            Text("\(wallet.usdcBalance ?? "0.00") USDC").font(.system(size: 38, weight: .heavy))
-        }
-        .foregroundStyle(.black)
-        .padding(20)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .liquidMetal()
+    private func reloadLedger() async {
+        guard store.wallet != nil else { return }
+        do { ledger = try await store.loadLedger(); ledgerError = nil }
+        catch { ledgerError = (error as? FunctionFailure)?.message ?? "The Arc explorer could not be reached. Your balance is still right." }
     }
 
-    private var activity: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text("Activity").font(.headline).foregroundStyle(.secondary)
-            if store.activity.isEmpty {
-                Text("Money you send and get from friends shows up here.")
-                    .font(.subheadline).foregroundStyle(.secondary)
+    private func addressRow(_ wallet: Wallet) -> some View {
+        HStack(spacing: 8) {
+            Spacer(minLength: 0)
+            Text(wallet.shortAddress).font(.caption.monospaced()).foregroundStyle(.white.opacity(0.55)).lineLimit(1).fixedSize()
+            Button(copied ? "Copied" : "Copy address") {
+                UIPasteboard.general.string = wallet.address
+                copied = true
+                Task { try? await Task.sleep(for: .seconds(1.5)); copied = false }
             }
-            ForEach(store.activity) { transfer in
-                let incoming = transfer.recipientId == store.myId
-                HStack(spacing: 12) {
-                    Image(systemName: incoming ? "arrow.down" : "arrow.up")
-                        .font(.footnote.weight(.bold))
-                        .foregroundStyle(.black)
-                        .frame(width: 34, height: 34)
-                        .background(LiquidMetal(shape: Circle()))
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(incoming ? "From \(store.displayName(transfer.senderId))" : "To \(store.displayName(transfer.recipientId))")
-                            .font(.body.weight(.semibold))
-                        if transfer.status != "confirmed" {
-                            Text(transfer.status == "failed" ? "Failed" : "Pending")
-                                .font(.caption).foregroundStyle(.secondary)
+            .font(.footnote.weight(.semibold)).foregroundStyle(.white)
+            .lineLimit(1).fixedSize()
+            .padding(.horizontal, 12).padding(.vertical, 7)
+            .glassEffect(.regular, in: .capsule)
+            Link("Get free test USDC", destination: URL(string: "https://faucet.circle.com")!)
+                .font(.footnote.weight(.semibold)).foregroundStyle(.white)
+                .lineLimit(1).fixedSize()
+                .padding(.horizontal, 12).padding(.vertical, 7)
+                .glassEffect(.regular, in: .capsule)
+            Spacer(minLength: 0)
+        }
+    }
+
+    @ViewBuilder private var activity: some View {
+        if let ledgerError, ledger == nil {
+            VStack(spacing: 10) {
+                Text(ledgerError).font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                Button("Try again") { Task { await reloadLedger() } }.font(.subheadline.weight(.semibold))
+            }
+            .frame(maxWidth: .infinity).pactCard()
+        } else if let ledger {
+            VStack(spacing: 0) {
+                if ledger.rows.isEmpty {
+                    Text("Money you send and get shows up here.").font(.subheadline).foregroundStyle(.secondary).padding(.vertical, 8)
+                }
+                ForEach(ledger.rows) { row in
+                    rowLink(row)
+                    Divider().overlay(.white.opacity(0.06))
+                }
+                if ledger.fees > 0 {
+                    HStack(spacing: 12) {
+                        icon("sparkles", tint: .white)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Network fees").font(.body.weight(.semibold))
+                            Text("Arc charges a tiny fee in USDC for each payment you send").font(.caption).foregroundStyle(.secondary)
                         }
+                        Spacer()
+                        Text("−\(ledger.fees.formatted(.number.precision(.fractionLength(4))))").font(.body.weight(.bold)).monospacedDigit()
+                    }
+                    .padding(.vertical, 10)
+                    Divider().overlay(.white.opacity(0.14))
+                }
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Balance").font(.title3.weight(.heavy))
+                        Text("Everything above, added up").font(.caption).foregroundStyle(.secondary)
                     }
                     Spacer()
-                    Text("\(incoming ? "+" : "−")\(transfer.amount.formatted(.number.precision(.fractionLength(2))))")
-                        .font(.body.weight(.bold)).monospacedDigit()
-                        .foregroundStyle(incoming ? PactColor.paid : .primary)
+                    Text("\((floor(ledger.total * 100) / 100).formatted(.number.precision(.fractionLength(2)))) USDC")
+                        .font(.title3.weight(.heavy)).monospacedDigit()
                 }
-                .opacity(transfer.status == "failed" ? 0.5 : 1)
+                .padding(.top, 12)
             }
+            .pactCard()
+        } else {
+            ProgressView().tint(PactColor.silver).frame(maxWidth: .infinity).padding(30).pactCard()
         }
-        .pactCard()
+    }
+
+    /// A pact payment opens that pact; everything else opens the transaction on the Arc explorer.
+    @ViewBuilder private func rowLink(_ row: LedgerRow) -> some View {
+        if let id = row.pactId, store.pacts.contains(where: { $0.id == id }) {
+            NavigationLink(value: id) { line(row) }.buttonStyle(.plain)
+        } else if let url = explorerTx(row.txHash) {
+            Link(destination: url) { line(row) }.buttonStyle(.plain)
+        } else {
+            line(row)
+        }
+    }
+
+    private func line(_ row: LedgerRow) -> some View {
+        let short = "\(row.address.prefix(6))…\(row.address.suffix(4))"
+        let pact = row.pactId.flatMap { id in store.pacts.first { $0.id == id } }
+        let title: String = switch row.kind {
+        case .person: "\(row.incoming ? "From" : "To") \(store.displayName(row.userId!))"
+        case .share: "Paid your share into \(pact?.name ?? "a pact")"
+        case .payout: "Paid out from \(pact?.name ?? "a pact")"
+        case .deposit: "Test USDC added"
+        case .address: "Sent to \(short)"
+        }
+        let when = row.at.formatted(.dateTime.month(.abbreviated).day().hour().minute())
+        let detail = row.kind == .deposit ? "\(when) · from \(short)" : pact != nil ? "\(when) · open the pact" : when
+        return HStack(spacing: 12) {
+            if row.kind == .person, let user = row.userId {
+                Avatar(name: store.displayName(user), url: store.avatarUrl(user), size: 40)
+            } else if let pact {
+                Image(systemName: (PactKind(rawValue: pact.pactType ?? "") ?? .trip).symbol)
+                    .font(.system(size: 16, weight: .semibold)).foregroundStyle(.black)
+                    .frame(width: 40, height: 40).background(Circle().fill(LinearGradient.pactSilver))
+            } else {
+                icon(row.incoming ? "arrow.up" : "arrow.down", tint: row.incoming ? PactColor.paid : .white)
+            }
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).font(.body.weight(.semibold)).lineLimit(2)
+                Text(detail).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+            }
+            Spacer()
+            Text("\(row.incoming ? "+" : "−")\(row.amount.formatted(.number.precision(.fractionLength(2))))")
+                .font(.body.weight(.bold)).monospacedDigit()
+                .foregroundStyle(row.incoming ? PactColor.paid : .white)
+        }
+        .padding(.vertical, 10)
+        .contentShape(.rect)
+    }
+
+    private func icon(_ symbol: String, tint: Color) -> some View {
+        Image(systemName: symbol).font(.system(size: 15, weight: .bold)).foregroundStyle(tint)
+            .frame(width: 40, height: 40)
+            .background(Circle().fill(tint == PactColor.paid ? PactColor.paid.opacity(0.22) : .white.opacity(0.1)))
     }
 
     private var create: some View {

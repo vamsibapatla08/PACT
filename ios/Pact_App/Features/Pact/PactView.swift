@@ -92,7 +92,6 @@ struct PactView: View {
                 case .booking(let booking): BookingDetail(id: id, booking: booking)
                 case .summary(let rec): GrokSummary(recommendation: rec)
                 case .addItem: AddItemSheet(id: id)
-                case .itinerary: ItinerarySheet(id: id)
                 }
             }
             .errorAlert()
@@ -280,7 +279,7 @@ struct PactView: View {
         }
     }
 
-    /// An action item: Book it, add an item, the itinerary, or Grok's summary.
+    /// An action item: Book it, add an item, or Grok's summary. The itinerary lives in Settings.
     private func use(_ action: ChatAction) {
         failure = nil
         switch action {
@@ -288,7 +287,6 @@ struct PactView: View {
             if store.items[id]?.isEmpty == false { run("Putting it up to approve…") { await store.bookItems(id) } }
             else { run("Grok is reading the chat…") { await store.askGrokToBook(id) } }
         case .items: sheet = .addItem
-        case .itinerary: sheet = .itinerary
         case .summary:
             if let rec = store.recommendations[id]?.first { sheet = .summary(rec) }
             else { run("Grok is summing up…") { await store.askPilot(id, question: summaryQuestion) } }
@@ -311,13 +309,12 @@ struct PactView: View {
 
 /// One sheet at a time: the pact's settings, or a PIN step.
 private enum PactSheet: Identifiable {
-    case settings, grok, addItem, itinerary, action(PactSplitAction), booking(Booking), person(Member), summary(Recommendation)
+    case settings, grok, addItem, action(PactSplitAction), booking(Booking), person(Member), summary(Recommendation)
     var id: String {
         switch self {
         case .settings: "settings"
         case .grok: "grok"
         case .addItem: "add-item"
-        case .itinerary: "itinerary"
         case .summary(let rec): "summary-\(rec.id)"
         case .person(let member): "person-\(member.userId)"
         case .action(let action): action.rawValue
@@ -410,9 +407,9 @@ private struct FloatingStep: View {
     }
 }
 
-/// The action items under the faces: Book it on its own, then the pact's items, the itinerary and Grok's summary.
+/// The action items under the faces: Book it on its own, then Add item and Grok's summary.
 enum ChatAction: String, CaseIterable, Identifiable {
-    case book, items, itinerary, summary
+    case book, items, summary
 
     var id: String { rawValue }
     var title: String {
@@ -426,7 +423,6 @@ enum ChatAction: String, CaseIterable, Identifiable {
         switch self {
         case .book: "sparkles"
         case .items: "plus.square.on.square"
-        case .itinerary: "list.bullet.rectangle"
         case .summary: "text.alignleft"
         }
     }
@@ -606,26 +602,6 @@ private struct AddPeopleSheet: View {
         .presentationBackground { AmbientBackdrop() }
         .presentationDetents([.medium, .large])
         .errorAlert()
-    }
-}
-
-/// Every item in date order, with what each person pays for all of it.
-private struct ItinerarySheet: View {
-    @Environment(PactStore.self) private var store
-    let id: Pact.ID
-
-    var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
-                SheetTitle(title: "Itinerary")
-                ItemList(id: id)
-            }
-            .padding(24)
-        }
-        .presentationBackground { AmbientBackdrop() }
-        .presentationDetents([.large])
-        .presentationDragIndicator(.visible)
-        .task { await store.loadItems(id) }
     }
 }
 
@@ -953,10 +929,16 @@ private struct PactSettingsSheet: View {
                 }
                 .pactCard()
 
-                Text("Trip info").font(.headline).foregroundStyle(.secondary)
+                Text("Overview").font(.headline).foregroundStyle(.secondary)
                 TripInfo(id: id)
 
-                Text("Items").font(.headline).foregroundStyle(.secondary)
+                HStack {
+                    Text("Itinerary").font(.headline).foregroundStyle(.secondary)
+                    Spacer()
+                    if let total = store.itemsTotal(id) {
+                        Text("\(dollars(total)) each").font(.subheadline.weight(.semibold)).foregroundStyle(.secondary)
+                    }
+                }
                 ItemList(id: id)
             }
             .padding(24)
@@ -965,7 +947,7 @@ private struct PactSettingsSheet: View {
         .presentationBackground { AmbientBackdrop() }
         .presentationDetents([.large])
         .presentationDragIndicator(.visible)
-        .task { await store.loadJoinRequests(id) }
+        .task { await store.loadJoinRequests(id); await store.loadItems(id) }
         .sheet(isPresented: $adding) { AddPeopleSheet(id: id) }
         .confirmationDialog("Remove \(firstName(removing?.name)) from this pact?", isPresented: Binding(get: { removing != nil }, set: { if !$0 { removing = nil } }), titleVisibility: .visible) {
             Button("Remove", role: .destructive) {

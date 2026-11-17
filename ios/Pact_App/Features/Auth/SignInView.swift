@@ -15,7 +15,7 @@ struct SignInView: View {
                 Image("Logo")
                     .resizable()
                     .scaledToFit()
-                    .frame(width: 112)
+                    .frame(width: 96)
                     .shadow(color: PactColor.silver.opacity(breathe ? 0.35 : 0.15), radius: breathe ? 34 : 22)
                     .scaleEffect(appeared ? 1 : 0.85)
                     .rise(appeared, after: 0)

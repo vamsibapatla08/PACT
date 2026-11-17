@@ -32,7 +32,7 @@ struct RootView: View {
     var body: some View {
         ZStack {
             if !store.authReady {
-                Image("Logo").resizable().scaledToFit().frame(width: 96)
+                Image("Logo").resizable().scaledToFit().frame(width: 84)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background(AmbientBackdrop())
                     .transition(.opacity)
@@ -89,20 +89,15 @@ struct MainTabs: View {
 }
 
 enum AppTab: String, CaseIterable, Identifiable {
-    case home, wallet, pacts, friends
+    case home, pacts, friends, wallet
 
     var id: Self { self }
-    var title: String {
-        switch self {
-        case .pacts: "Chats"
-        default: rawValue.capitalized
-        }
-    }
+    var title: String { rawValue.capitalized }
     var symbol: String {
         switch self {
         case .home: "house"
         case .wallet: "wallet.bifold"
-        case .pacts: "bubble.left.and.text.bubble.right"
+        case .pacts: "calendar"
         case .friends: "person.2"
         }
     }
