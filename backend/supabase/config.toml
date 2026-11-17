@@ -355,3 +355,7 @@ s3_secret_key = "env(S3_SECRET_KEY)"
 # QuickNode signs its calls instead of sending a Supabase login, and the function checks that signature itself.
 [functions.quicknode-webhook]
 verify_jwt = false
+
+# Grok and other MCP clients sign in with a personal Pact token, checked inside the function.
+[functions.pact-mcp]
+verify_jwt = false
