@@ -73,9 +73,20 @@ export function isPaymentBackendUnavailable(error: unknown): boolean {
   return value?.code === '42883' || value?.code === '42P01' || value?.code === 'PGRST202' || /function .*get_pact_payment_status|relation .*pact_(payments|shares)/i.test(value?.message || '')
 }
 
-async function invokeWallet<T>(action: 'status' | 'start' | 'confirm' | 'transfer' | 'transfer_status' | 'reset_pin' | 'pact_status' | 'challenge_status' | 'pact_member_wallets' | PactAction, params: Record<string, unknown> = {}): Promise<T> {
+async function invokeWallet<T>(action: 'status' | 'start' | 'confirm' | 'transfer' | 'transfer_status' | 'reset_pin' | 'pact_status' | 'challenge_status' | 'pact_member_wallets' | PactAction, params: Record<string, unknown> = {}, retried = false): Promise<T> {
   const { data, error } = await client().functions.invoke('wallet', { body: { action, ...params } })
-  if (error) throw new Error(await walletErrorMessage(error))
+  if (error) {
+    // A 401 means this browser's session was ended (often by signing out on another device). Try a fresh session
+    // once; if there isn't one, sign out here only, so the app shows the sign-in screen instead of "Sign in first".
+    const response = (error as { context?: unknown }).context
+    if (response instanceof Response && response.status === 401 && !retried) {
+      const { error: refreshError } = await client().auth.refreshSession()
+      if (!refreshError) return invokeWallet<T>(action, params, true)
+      await client().auth.signOut({ scope: 'local' })
+      throw new Error('You were signed out. Sign in again to keep going.')
+    }
+    throw new Error(await walletErrorMessage(error))
+  }
   if (!data || typeof data !== 'object') throw new Error('Wallet service returned an invalid response.')
   return data as T
 }

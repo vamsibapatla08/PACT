@@ -230,7 +230,7 @@ function TopBar({ tab }: { tab: string | null }) {
           {menu && (
             <div className="l-menu" onMouseLeave={() => setMenu(false)}>
               <div><b>{profile?.name ?? 'You'}</b><span>{profile?.email}</span></div>
-              <button type="button" onClick={() => void S.supabase.auth.signOut()}>Sign out</button>
+              <button type="button" onClick={() => void S.supabase.auth.signOut({ scope: 'local' })}>Sign out</button>
             </div>
           )}
         </div>

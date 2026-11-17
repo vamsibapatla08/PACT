@@ -88,10 +88,18 @@ export function friendly(error: unknown, fallback: string) {
 }
 
 /** Calls an Edge Function as me. A 4xx comes back as its readable `error`. */
-async function invoke<T>(fn: string, body: Record<string, unknown>): Promise<T> {
+async function invoke<T>(fn: string, body: Record<string, unknown>, retried = false): Promise<T> {
   const { data, error } = await supabase.functions.invoke(fn, { body })
   if (error) {
     const response = (error as { context?: unknown }).context
+    // A 401 means this browser's session was ended (often by signing out on another device). Try a fresh session
+    // once; if there isn't one, sign out here only, so the app shows the sign-in screen instead of an error.
+    if (response instanceof Response && response.status === 401 && !retried) {
+      const { error: refreshError } = await supabase.auth.refreshSession()
+      if (!refreshError) return invoke<T>(fn, body, true)
+      await supabase.auth.signOut({ scope: 'local' })
+      throw new Error('You were signed out. Sign in again to keep going.')
+    }
     if (response instanceof Response) {
       const reply = await response.clone().json().catch(() => null) as { error?: string } | null
       if (reply?.error) throw new Error(reply.error)

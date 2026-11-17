@@ -114,8 +114,9 @@ final class PactStore {
         }
     }
 
+    /// Signs out on this iPhone only. The default ends every session, which also signed people out of the web app.
     func signOut() async {
-        try? await client.auth.signOut()
+        try? await client.auth.signOut(scope: .local)
     }
 
     // MARK: Pacts
