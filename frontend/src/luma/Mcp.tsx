@@ -29,6 +29,10 @@ export const mcpTools: McpTool[] = [
     detail: 'Adds one thing the group is booking, with its kind, dates, a link and the price per person. Grok searches for real options first and adds the one you pick.',
     ask: 'Add the Airbnb on South Congress, $180 each.',
     result: ['Added stay "South Congress house, 2 nights"', '$180 each', 'Link saved for the group'] },
+  { name: 'start_vote', label: 'Put options to a vote', does: 'Hotels, flights or dinners as vote cards',
+    detail: 'Grok puts 2 to 8 real options in the pact chat as cards, each with its price per person and link. Everyone taps the one they want and sees the votes come in live. You can change your vote any time.',
+    ask: 'Find us a hotel in Austin under $300 each and let everyone vote.',
+    result: ['Started "Austin stay, Nov 19 to 22"', '4 options, from $195 to $253 each', 'Everyone votes on the cards in the chat'] },
   { name: 'post_message', label: 'Post in the chat', does: 'A message to the group, as you',
     detail: "Posts in the pact's group chat as you, like a recap of the plan or a nudge to approve. Grok asks you before it posts.",
     ask: 'Tell the group the plan is ready to approve.',
@@ -61,19 +65,21 @@ Tools on the Pact connector
 - list_pacts, get_pact: read my pacts, people, itinerary and stage
 - create_pact: start a pact (name, place, dates, budget each)
 - add_item: add a stay, flight, tickets, dinner or other, priced per person
-- post_message: post in a pact's group chat
+- start_vote: put 2-8 options (hotels, flights, dinners) to the group as vote cards
+- post_message: post a short note in a pact's group chat
 - propose_booking: put the itinerary up for everyone to approve
 - payment_status: see who has paid
 
 How to work
 1. Once I'm connected, start with list_pacts. If it's unclear which pact, ask. Read it with get_pact before changing anything.
-2. To plan, search the web for real options that fit the place, dates, group size and budget each. Show 2-3 with the price per person and a link.
-3. When I pick one, add it with add_item: the right kind, a short title, dates, price_each per person and the link.
-4. Keep the total per person within budget. Say so if it isn't.
-5. When the itinerary is done and I say go, call propose_booking, then post a short note in the chat with post_message.
-6. You can't pay or move money. Everyone approves and pays their own share with their PIN in the Pact app.
+2. To plan, search the web for real options that fit the place, dates, group size and budget each. Show them to me with the price per person and a link.
+3. When I say to share them, call start_vote with each option's name, price_each, link and one short note. Never paste a list of options with post_message: start_vote shows them as cards everyone can vote on.
+4. When the group has picked one, add it with add_item: the right kind, a short title, dates, price_each per person and the link.
+5. Keep the total per person within budget. Say so if it isn't.
+6. When the itinerary is done and I say go, call propose_booking, then post a short note in the chat with post_message.
+7. You can't pay or move money. Everyone approves and pays their own share with their PIN in the Pact app.
 
-Ask before create_pact, propose_booking or post_message. Keep replies short.`
+Ask before create_pact, start_vote, propose_booking or post_message. Keep replies short.`
 
 export function grokSnippet(token = 'pact_…') {
   return `curl https://api.x.ai/v1/responses \\

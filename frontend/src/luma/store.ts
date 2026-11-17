@@ -393,6 +393,13 @@ export function detailsOf(p: Pact): Details {
 
 const withScheme = (link: string) => (!link.trim() || /^https?:/i.test(link.trim()) ? link.trim() : `https://${link.trim()}`)
 
+/** The coordinator renames the pact. Returns the cleaned-up name. */
+export async function renamePact(id: string, name: string) {
+  const { data, error } = await supabase.rpc('rename_pact', { p_pact_id: id, p_name: name })
+  if (error) throw new Error(/coordinator|1 to 80/.test(error.message) ? error.message : "Couldn't rename the pact.")
+  return data as string
+}
+
 export async function saveDetails(id: string, d: Details) {
   const end = d.startsOn && d.endsOn && d.endsOn < d.startsOn ? d.startsOn : d.endsOn
   const { error } = await supabase.rpc('set_pact_details', {
@@ -441,6 +448,76 @@ export async function addItem(id: string, d: ItemDraft, source: 'manual' | 'grok
     link: withScheme(d.link) || null, price_each: d.price, source,
   })
   if (error) throw new Error(/row-level security/i.test(error.message) ? 'Items are locked once the split is set up.' : "Couldn't add that item.")
+}
+
+// ---- Vote cards: a few options (hotels, flights…) the group picks from. One vote each, changeable.
+
+export type PollOption = { key: string; name: string; price_each: number | null; link: string | null; notes: string | null; image?: string | null }
+export type Poll = {
+  poll_id: string; pact_id: string; title: string; kind: ItemKind; options: PollOption[]; status: 'open' | 'closed'
+  source: 'manual' | 'grok'; created_by: string; created_at: string
+  votes: Record<string, string> // user_id -> option key
+}
+
+export async function loadPolls(id: string): Promise<Poll[]> {
+  const { data: polls, error } = await supabase.from('pact_polls').select('*').eq('pact_id', id).order('created_at')
+  if (error || !polls?.length) return []
+  const { data: votes } = await supabase.from('pact_poll_votes').select('poll_id, user_id, option_key').in('poll_id', polls.map((p) => p.poll_id))
+  return polls.map((p) => ({
+    ...p,
+    options: (p.options as PollOption[]).map((o) => ({ ...o, price_each: o.price_each == null ? null : Number(o.price_each) })),
+    votes: Object.fromEntries((votes ?? []).filter((v) => v.poll_id === p.poll_id).map((v) => [v.user_id, v.option_key])),
+  })) as Poll[]
+}
+
+/** Start a vote from a list of options (for example one Grok posted as a chat message). */
+export async function startPoll(id: string, title: string, options: Omit<PollOption, 'key'>[], kind: ItemKind = 'other') {
+  const { data, error } = await supabase.rpc('create_pact_poll', { p_pact_id: id, p_title: title.slice(0, 120), p_options: options, p_kind: kind, p_source: 'manual' })
+  if (error) throw new Error(/PGRST202|schema cache|does not exist/i.test(error.message) ? "Votes aren't switched on yet. Run the database update first." : "Couldn't start the vote.")
+  return data as string
+}
+
+/** Reads a numbered list of options out of a chat message, like Grok's "1. Holiday Inn Express: ~$222 each … https://…
+ *  2. Hilton…". Returns null for an ordinary message. */
+export function parseOptions(text: string): { title: string; options: Omit<PollOption, 'key'>[] } | null {
+  const parts = text.split(/(?:^|\s)(\d{1,2})[.)]\s+(?=\S)/)
+  if (parts.length < 5) return null // a title plus at least two numbered options
+  const title = parts[0].replace(/\s+/g, ' ').replace(/\bvote!?\s*/i, '').replace(/:\s*\(/, ' (').trim().replace(/[:\-–—]\s*$/, '') || 'Options'
+  const options: Omit<PollOption, 'key'>[] = []
+  for (let i = 1; i + 1 < parts.length; i += 2) {
+    let body = parts[i + 1].trim()
+    const link = body.match(/https?:\/\/[^\s)]+/)?.[0]?.replace(/[.,;]+$/, '') ?? null
+    if (link) body = body.replace(link, ' ')
+    const colon = body.indexOf(':')
+    const name = (colon > 0 && colon < 90 ? body.slice(0, colon) : body.split(/[,.(–—-]/)[0]).trim()
+    const rest = colon > 0 && colon < 90 ? body.slice(colon + 1) : body.slice(name.length)
+    const each = rest.match(/~?\$\s?([\d,]+(?:\.\d+)?)\s*(?:\/\s*(?:person|pp)|each|per person|pp)/i) ?? rest.match(/~?\$\s?([\d,]+(?:\.\d+)?)/)
+    const notes = rest.replace(/\s+/g, ' ').replace(/^[\s,.;:–—-]+|[\s,.;:–—-]+$/g, '').slice(0, 160) || null
+    if (!name || name.length > 90) return null
+    options.push({ name, price_each: each ? Number(each[1].replace(/,/g, '')) : null, link, notes })
+  }
+  if (options.length < 2 || options.length > 8 || !options.some((o) => o.link || o.price_each != null)) return null
+  return { title: title.slice(0, 120), options }
+}
+
+/** Vote for an option; voting for the one I already picked takes my vote back. */
+export async function votePoll(pollId: string, key: string) {
+  const { error } = await supabase.rpc('vote_pact_poll', { p_poll_id: pollId, p_option_key: key })
+  if (error) throw new Error(/closed|not in this vote|Only people/.test(error.message) ? error.message : "Couldn't save your vote.")
+}
+
+export async function closePoll(pollId: string) {
+  const { error } = await supabase.rpc('close_pact_poll', { p_poll_id: pollId })
+  if (error) throw new Error(/Only whoever/.test(error.message) ? error.message : "Couldn't close the vote.")
+}
+
+/** The picked option goes onto the plan as an item, priced per person, with its link. */
+export async function addPollPickToPlan(pact: Pact, poll: Poll, option: PollOption) {
+  await addItem(pact.pact_id, {
+    kind: poll.kind, title: option.name, location: pact.location ?? '', startsOn: pact.starts_on, endsOn: pact.ends_on,
+    link: option.link ?? '', price: option.price_each,
+  }, poll.source === 'grok' ? 'grok' : 'manual')
+  await closePoll(poll.poll_id).catch(() => undefined)
 }
 
 export async function removeItem(itemId: string) {
@@ -530,10 +607,10 @@ export async function loadActivity(): Promise<Transfer[]> {
   return (data ?? []) as Transfer[]
 }
 
-// ---- The full wallet ledger, read from the Base Sepolia explorer: every USDC in and out.
+// ---- The full wallet ledger, read from the Arc explorer: every USDC in and out, and the network fees.
 
-const EXPLORER = 'https://base-sepolia.blockscout.com'
-const USDC_TOKEN = '0x036cbd53842c5426634e7929541ec2318f3dcf7e' // Circle USDC on Base Sepolia
+const EXPLORER = 'https://explorer.testnet.arc.io'
+const USDC_TOKEN = '0x3600000000000000000000000000000000000000'
 export const txLink = (hash: string) => `${EXPLORER}/tx/${hash}`
 
 export type LedgerRow = {
@@ -566,7 +643,7 @@ async function explorerAll<T>(path: string, maxPages = 10): Promise<T[]> {
     const query = new URLSearchParams(Object.entries(params).map(([k, v]) => [k, String(v)])).toString()
     const url = `${EXPLORER}/api/v2${path}${query ? `?${query}` : ''}`
     const res = await fetch(url).catch(() => null) ?? await new Promise((ok) => setTimeout(ok, 800)).then(() => fetch(url)).catch(() => null)
-    if (!res?.ok) throw new Error('The Base explorer could not be reached. Your balance is still right.')
+    if (!res?.ok) throw new Error('The Arc explorer could not be reached. Your balance is still right.')
     const body = await res.json() as ExplorerPage<T>
     all.push(...body.items)
     params = body.next_page_params
@@ -586,12 +663,9 @@ async function memberWallets(pactIds: string[]) {
   return byAddress
 }
 
-// A smart wallet wraps the PactSplit call inside its own, so look for a PactSplit selector anywhere in the input,
-// followed by a pact key (16 uuid bytes, then 16 zero bytes).
-const PACT_CALL = /(?:dd668b0a|67d42a8b|c4d252f5|71de2ffc|9f40efc6)([0-9a-f]{32})0{32}/
 function pactIdFromCall(input: string): string | null {
-  const arg = PACT_CALL.exec(input.toLowerCase())?.[1]
-  if (!arg) return null
+  const arg = input.replace(/^0x/, '').slice(8, 40).toLowerCase()
+  if (!/^[0-9a-f]{32}$/.test(arg)) return null
   return `${arg.slice(0, 8)}-${arg.slice(8, 12)}-${arg.slice(12, 16)}-${arg.slice(16, 20)}-${arg.slice(20)}`
 }
 
@@ -629,13 +703,13 @@ export async function loadLedger(address: string, pactIds: string[]): Promise<Le
     }
     r.pactId = pactIdFromCall(input)
   }))
-  // Gas is paid in ETH by Circle's Gas Station, so no USDC goes to fees.
-  const fees = 0
+  // Every transaction I send pays a small network fee in USDC.
+  const fees = txs.filter((t) => t.from.hash.toLowerCase() === me).reduce((sum, t) => sum + Number(t.fee.value) / 1e18, 0)
   const total = rows.reduce((sum, r) => sum + (r.incoming ? r.amount : -r.amount), 0) - fees
   return { rows, fees, total }
 }
 
-// ---- Verification: QuickNode watches PactSplit on Base and records each payment with its transaction.
+// ---- Verification: QuickNode watches PactSplit on Arc and records each payment with its transaction.
 // "verified" means QuickNode has confirmed every payment the chain shows (and the release, once released).
 // "onchain" means the chain shows it but QuickNode hasn't confirmed all of it yet.
 
@@ -702,10 +776,18 @@ export async function gotPaidBack(id: string, fromUser: string, amountCents: num
   if (error) throw new Error(said(error, "Couldn't record that."))
 }
 
-/** Pay someone back in USDC. A confirmed send counts on the tab by itself. */
+/** Pay someone back in USDC. It's marked as a payback first, so once it confirms it counts on the tab. */
 export async function payBack(id: string, toUser: string, amountCents: number) {
-  const t = await sendPactMoney(id, toUser, (amountCents / 100).toFixed(2), crypto.randomUUID(), () => undefined)
-  if (t.status !== 'confirmed') throw new Error('The payback has not confirmed yet. Check your wallet activity.')
+  const requestId = crypto.randomUUID()
+  const { error } = await supabase.rpc('mark_pact_payback', { p_pact_id: id, p_request_id: requestId })
+  if (error) throw new Error(said(error, "Couldn't start the payback."))
+  await sendTo(id, toUser, amountCents, requestId)
+}
+
+/** Send USDC to someone in a pact by who they are (the server finds their wallet). A plain send stays off the tab. */
+export async function sendTo(id: string, toUser: string, amountCents: number, requestId = crypto.randomUUID()) {
+  const t = await sendPactMoney(id, toUser, (amountCents / 100).toFixed(2), requestId, () => undefined)
+  if (t.status !== 'confirmed') throw new Error('The send has not confirmed yet. Check your wallet activity before sending again.')
 }
 
 export type PilotAction = { tool: string; args: Record<string, unknown> }

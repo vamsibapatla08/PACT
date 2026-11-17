@@ -1,14 +1,13 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import * as S from './store'
 import { DetailsForm, useApp } from './App'
 import { Avatar, Busy, Cover, Grok, Icon, Modal, Switch, VerifiedBadge } from './ui'
-import { TabCard } from './TabCard'
-import { PilotCard } from './PilotCard'
 
 type Sheet =
   | { kind: 'settings' } | { kind: 'addPeople' } | { kind: 'addItem' } | { kind: 'grok' }
   | { kind: 'summary'; rec: S.Recommendation } | { kind: 'booking'; booking: S.Booking }
   | { kind: 'action'; action: 'create_pact' | 'pay_share' | 'release' } | { kind: 'person'; member: S.Member }
+  | { kind: 'send'; to: string | null; cents?: number; payback?: boolean } | { kind: 'info' } | { kind: 'dates' } | { kind: 'budget' } | { kind: 'place' }
 
 export function PactPage({ id }: { id: string }) {
   const app = useApp()
@@ -20,7 +19,17 @@ export function PactPage({ id }: { id: string }) {
   const [working, setWorking] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [tabVersion, setTabVersion] = useState(0)
+  const [polls, setPolls] = useState<S.Poll[]>([])
+  const [renaming, setRenaming] = useState(false)
+  const [tab, setTab] = useState<S.Tab | null>(null)
+  const reloadSide = useCallback(() => {
+    void S.loadPolls(id).then(setPolls)
+    void S.loadTab(id).then(setTab).catch(() => undefined)
+  }, [id])
+  // Votes and balances refresh with the pact, every 6 seconds, and right after I act.
+  useEffect(() => { reloadSide(); const t = setInterval(reloadSide, 6000); return () => clearInterval(t) }, [reloadSide, tabVersion])
   const chatRef = useRef<HTMLElement>(null)
+  const findingsRef = useRef<HTMLDivElement>(null)
   /** What Grok is doing right now, shown at the bottom of the chat: thinking, slow, or failed with a retry. */
   const [grokJob, setGrokJob] = useState<{ label: string; slow: boolean; error: string | null; retry: () => void } | null>(null)
 
@@ -61,6 +70,11 @@ export function PactPage({ id }: { id: string }) {
   }, [id, refreshPact])
 
   const step = d ? S.step(d, me, Boolean(wallet)) : null
+  const messageFindings = messages
+    .map((m) => ({ m, found: S.parseOptions(m.body) }))
+    .filter((f): f is { m: S.Message; found: NonNullable<ReturnType<typeof S.parseOptions>> } => f.found !== null)
+    .filter((f) => !polls.some((p) => p.created_at >= f.m.created_at && p.options.length === f.found.options.length && p.options[0]?.name === f.found.options[0]?.name))
+    .reverse()
 
   // Once everyone approves, the coordinator's page saves the split on its own.
   const settingUp = useRef(false)
@@ -96,56 +110,76 @@ export function PactPage({ id }: { id: string }) {
   }
 
   return (
-    <main className="l-page l-wide">
-      <div className="l-event-page">
-        <aside className="l-side">
+    <main className="l-page l-pact-full">
+      <div className="l-pact-grid">
+        {/* Left: the people, and sending money to any of them. */}
+        <aside className="l-pact-people">
           <Cover kind={details.kind} name={pact.name} sub={pact.location} big />
-          {host && (
-            <div className="l-coord">
-              <button type="button" className="l-coord-who" onClick={() => setSheet({ kind: 'person', member: host })}>
-                <Avatar name={host.name} url={host.avatar_url} size={44} />
-                <b>{host.user_id === me ? 'You' : host.name ?? 'Someone'}</b>
+          {host && (<div className="l-pact-coord-wrap">
+            <div className="l-pact-coord">
+              <button type="button" className="l-people-who" onClick={() => setSheet({ kind: 'person', member: host })}>
+                <Avatar name={host.name} url={host.avatar_url} size={46} />
+                <span>
+                  <b className="big">{host.user_id === me ? 'You' : host.name ?? 'Someone'}</b>
+                  <small className="host"><Icon name="crown" size={12} />Coordinator</small>
+                </span>
               </button>
-              <span className="l-coord-role"><Icon name="crown" size={13} />Coordinator</span>
-              <button className="l-icon-btn" type="button" onClick={() => setSheet({ kind: 'settings' })} aria-label="Pact settings" title="Settings"><Icon name="gear" /></button>
+              {host.user_id !== me && <NetBalance who={host} me={me} tab={tab} onSettle={(cents) => setSheet({ kind: 'send', to: host.user_id, cents, payback: true })} />}
             </div>
-          )}
-          <div>
-            <div className="l-section-title">Going</div>
-            {d?.members.filter((m) => m.role !== 'host').map((m) => (
-              <div key={m.user_id} className="l-person">
-                <button type="button" className="l-person-open" onClick={() => setSheet({ kind: 'person', member: m })}>
-                  <Avatar name={m.name} url={m.avatar_url} size={30} /><b>{m.user_id === me ? 'You' : m.name ?? 'Someone'}</b>
+          </div>)}
+          {/* Everyone else: photo, name (cut with … if long), role under it, then their buttons. Nothing sits beside the name. */}
+          <div className="l-people">
+            {d?.members.filter((m) => m.role !== 'host').map((m) => (<div key={m.user_id} className="l-people-item">
+              <div className="l-people-row">
+                <button type="button" className="l-people-who" onClick={() => setSheet({ kind: 'person', member: m })}>
+                  <Avatar name={m.name} url={m.avatar_url} size={36} />
+                  <span><b>{m.user_id === me ? 'You' : m.name ?? 'Someone'}</b><small>Member</small></span>
                 </button>
-                {iCoordinate && m.user_id !== me && !d.plan
-                  ? <button className="l-remove" type="button" disabled={Boolean(working)} onClick={() => { if (confirm(`Remove ${S.firstName(m.name)} from this pact?`)) void run('Removing…', () => S.removeMember(id, m.user_id)) }}>Remove</button>
-                  : <small>Member</small>}
+                {m.user_id !== me && <NetBalance who={m} me={me} tab={tab} onSettle={(cents) => setSheet({ kind: 'send', to: m.user_id, cents, payback: true })} />}
+              </div>
+            </div>))}
+            {d?.joinRequests.map((r) => (
+              <div key={r.user_id} className="l-people-row pending">
+                <span className="l-people-who"><Avatar name={r.name} url={r.avatar_url} size={36} /><span><b>{r.name ?? 'Someone'}</b><small>Pending</small></span></span>
               </div>
             ))}
-            {d?.joinRequests.map((r) => (
-              <div key={r.user_id} className="l-person pending"><Avatar name={r.name} url={r.avatar_url} size={26} /><b>{r.name ?? 'Someone'}</b><small>Pending</small></div>
-            ))}
-            <button type="button" className="l-person" onClick={() => setSheet({ kind: 'grok' })}>
-              <span className="l-av" style={{ width: 26, height: 26, background: '#000' }}><Grok size={15} /></span><b>Grok</b><small>Planner</small>
-            </button>
+            <div className="l-people-row">
+              <button type="button" className="l-people-who" onClick={() => setSheet({ kind: 'grok' })}>
+                <span className="l-av" style={{ width: 36, height: 36, background: '#000' }}><Grok size={18} /></span>
+                <span><b>Grok</b><small>Planner</small></span>
+              </button>
+            </div>
           </div>
-          <div className="l-side-actions">
-            <button className="l-btn" type="button" onClick={() => setSheet({ kind: 'addPeople' })}><Icon name="plus" size={17} />Add people</button>
-            <button className="l-btn l-ghost" type="button" onClick={() => go('/pacts')}><Icon name="pacts" size={17} />All pacts</button>
+          <div className="l-pact-buttons">
+            <button className="l-send-btn" type="button" onClick={() => setSheet({ kind: 'send', to: null })}><ArrowNE size={17} />Send money</button>
+            <button className="l-btn l-ghost l-wide-btn" type="button" onClick={() => setSheet({ kind: 'addPeople' })}><Icon name="plus" size={17} />Add people</button>
           </div>
-          <p className="l-side-note">Anyone in the pact can add people. Only the coordinator can remove them{d?.plan ? ', and not once the split is set up' : ''}.</p>
+          <p className="l-side-note">Anyone can add people. Only the coordinator can remove them{d?.plan ? ', and not once the split is set up' : ''}.</p>
         </aside>
 
-        <section>
+        {/* Middle: the trip itself, its plan, timeline and tab. */}
+        <section className="l-pact-main">
           {proof && proof.level !== 'none' && <div><VerifiedBadge level={proof.level} compact /></div>}
-          <h1 className="l-title">{pact.name}</h1>
-          <DateFact pact={pact} />
-          <div className="l-fact">
-            <div className="l-fact-icon"><Icon name="pin" /></div>
-            <div><b>{pact.location || 'Where to be decided'}</b><span>{details.budget != null ? `Budget ${S.dollars(details.budget)} each` : 'No budget set'}</span></div>
+          {/* The name gets its own line, as long as it likes. Under it, one row: the place on the left, then the dates,
+              budget, info, settings and edit on the right. */}
+          <div className="l-titlebar">
+            <PactTitle id={id} name={pact.name} editing={renaming} onEditing={setRenaming} canEdit={iCoordinate} onSaved={() => void app.refresh()} />
+            <div className="l-meta-row">
+              <TitleChip icon="pin" label={pact.location || 'Add place'} empty={!pact.location}
+                canEdit={iCoordinate} hint="Where" onClick={() => setSheet({ kind: 'place' })} />
+              <div className="l-meta-right">
+                <TitleChip icon="calendar" label={S.dateRange(pact.starts_on, pact.ends_on) ?? 'Add dates'} empty={!pact.starts_on}
+                  canEdit={iCoordinate} hint="Dates" onClick={() => setSheet({ kind: 'dates' })} />
+                <TitleChip icon="wallet" label={details.budget != null ? `${S.dollars(details.budget)} each` : 'Add budget'} empty={details.budget == null}
+                  canEdit={iCoordinate} hint="Budget per person" onClick={() => setSheet({ kind: 'budget' })} />
+                <button className="l-round" type="button" onClick={() => setSheet({ kind: 'info' })} aria-label="Info" title="Info"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" aria-hidden><circle cx="12" cy="12" r="9" /><path d="M12 11v6" /><circle cx="12" cy="7.6" r="0.6" fill="currentColor" /></svg></button>
+                <button className="l-round" type="button" onClick={() => setSheet({ kind: 'settings' })} aria-label="Settings" title="Settings"><Icon name="gear" size={18} /></button>
+                {iCoordinate && <button className="l-round" type="button" onClick={() => setRenaming(true)} aria-label="Rename the pact" title="Rename"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M4 20h4L19 9l-4-4L4 16z" /><path d="M14 6l4 4" /></svg></button>}
+              </div>
+            </div>
           </div>
 
-          {step && <Progress step={step} />}
+          {step && <div className="l-pact-steps"><Progress step={step} /></div>}
           {finished && d && proof ? <BookedCard step={step!} d={d} proof={proof} me={me} name={name} />
             : step && <StepCard step={step} hasGrok={hasGrok} working={working} onAct={doStep}
             onDecline={step.kind === 'approve' ? () => void run('Saying not yet…', () => S.vote(step.decision, false)) : undefined}
@@ -162,37 +196,48 @@ export function PactPage({ id }: { id: string }) {
 
           </>}
 
-          {(details.about || pact.link || d?.items.length) ? (
-            <div className="l-about">
-              <div className="l-section-title">About</div>
-              {details.about && <p>{details.about}</p>}
-              {pact.link && <div className="l-kv"><span>Link</span><a href={pact.link} target="_blank" rel="noreferrer">{pact.link.replace(/^https?:\/\//, '')}</a></div>}
-              {d && d.items.length > 0 && <Items items={d.items} />}
+          {/* Findings: every set of options (Grok's hotels, flights…) as visual cards to vote on and approve. */}
+          {d && (polls.length > 0 || messageFindings.length > 0) && (
+            <div className="l-findings" ref={findingsRef}>
+              <div className="l-section-title">Findings</div>
+              {[...polls].sort((x, y) => Number(y.status === 'open') - Number(x.status === 'open') || y.created_at.localeCompare(x.created_at)).map((poll) => (
+                <PollCard key={poll.poll_id} poll={poll} me={me} members={d.members} pact={pact} iCoordinate={iCoordinate}
+                  onVoted={reloadSide} onAddedToPlan={() => { reloadSide(); void refreshPact(id) }} />
+              ))}
+              {messageFindings.map((f) => <MessageOptions key={f.m.message_id} id={id} found={f.found} onStarted={reloadSide} />)}
             </div>
-          ) : null}
+          )}
 
-          {d && <PilotCard id={id} me={me} members={d.members} onDone={() => { setTabVersion((v) => v + 1); void refreshPact(id) }} />}
-          {d && <TabCard id={id} me={me} members={d.members} version={tabVersion} />}
+          {d && d.items.length > 0 && (
+            <div className="l-about">
+              <div className="l-section-title">Plan</div>
+              <Items items={d.items} />
+            </div>
+          )}
 
+
+          {/* Narrow screens: the chat sits below, so offer a jump to it. */}
+          <div className="l-chat-jump-wrap">
+            <button className="l-chat-jump" type="button" onClick={() => chatRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })}>
+              <Icon name="text" />Chat · {messages.length}<Icon name="down" />
+            </button>
+          </div>
         </section>
-      </div>
 
-      {/* Scroll down into the chat: one wide, simple conversation with Grok's write-ups in it. */}
-      <div className="l-chat-jump-wrap">
-        <button className="l-chat-jump" type="button" onClick={() => chatRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })}>
-          <Icon name="text" />Chat · {messages.length}<Icon name="down" />
-        </button>
-      </div>
-      <section className="l-chat-wide" ref={chatRef}>
+      {/* Right: the chat, always beside the plan on a wide screen. */}
+      <section className="l-chat-wide l-pact-chat" ref={chatRef}>
         <h2 className="l-chat-head">Chat</h2>
         {d && d.recommendations.length > 0 && (
           <GrokBlock rec={d.recommendations[d.recommendations.length - 1]} big onOpen={(rec) => setSheet({ kind: 'summary', rec })} />
         )}
-        <Chat messages={messages} me={me} name={name} members={d?.members ?? []}
+        <Chat messages={messages} me={me} name={name} members={d?.members ?? []} polls={polls} pact={pact} iCoordinate={iCoordinate}
+          onVoted={reloadSide} onAddedToPlan={() => { reloadSide(); void refreshPact(id) }}
+          onSeeFindings={() => findingsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
           recs={(d?.recommendations ?? []).slice(0, -1)} onGrok={(rec) => setSheet({ kind: 'summary', rec })} />
         {grokJob && <GrokStatus job={grokJob} onDismiss={() => setGrokJob(null)} />}
         <Composer id={id} />
       </section>
+      </div>
 
       {sheet?.kind === 'settings' && d && <Settings pact={pact} d={d} onClose={() => setSheet(null)} onAddPeople={() => setSheet({ kind: 'addPeople' })} onAddItem={() => setSheet({ kind: 'addItem' })} />}
       {sheet?.kind === 'addPeople' && d && <AddPeople id={id} d={d} onClose={() => setSheet(null)} />}
@@ -200,24 +245,14 @@ export function PactPage({ id }: { id: string }) {
       {sheet?.kind === 'summary' && <Summary rec={sheet.rec} booking={b && b.rec.recommendation_id === sheet.rec.recommendation_id ? b : null} onBooking={(bk) => setSheet({ kind: 'booking', booking: bk })} onClose={() => setSheet(null)} />}
       {sheet?.kind === 'booking' && d && <BookingDetail b={sheet.booking} d={d} onClose={() => setSheet(null)} />}
       {sheet?.kind === 'grok' && <GrokInfo onClose={() => setSheet(null)} />}
-      {sheet?.kind === 'person' && <Person member={sheet.member} onClose={() => setSheet(null)} />}
+      {sheet?.kind === 'person' && <Person member={sheet.member} onSend={() => setSheet({ kind: 'send', to: sheet.member.user_id })} onClose={() => setSheet(null)} />}
+      {sheet?.kind === 'dates' && <DatesSheet pact={pact} onClose={() => setSheet(null)} onSaved={() => { setSheet(null); void app.refresh() }} />}
+      {sheet?.kind === 'place' && <PlaceSheet pact={pact} onClose={() => setSheet(null)} onSaved={() => { setSheet(null); void app.refresh() }} />}
+      {sheet?.kind === 'budget' && <BudgetSheet pact={pact} onClose={() => setSheet(null)} onSaved={() => { setSheet(null); void app.refresh() }} />}
+      {sheet?.kind === 'send' && d && <SendMoney id={id} d={d} initial={sheet.to} cents={sheet.cents} payback={sheet.payback} onClose={() => setSheet(null)} onSent={() => setTabVersion((v) => v + 1)} />}
+      {sheet?.kind === 'info' && <InfoSheet pact={pact} canEdit={iCoordinate} onSettings={() => setSheet({ kind: 'settings' })} onClose={() => setSheet(null)} />}
       {sheet?.kind === 'action' && d && <ActionSheet id={id} action={sheet.action} d={d} iCoordinate={iCoordinate} onClose={() => setSheet(null)} />}
     </main>
-  )
-}
-
-function DateFact({ pact }: { pact: S.Pact }) {
-  if (!pact.starts_on) return <div className="l-fact"><div className="l-fact-icon"><Icon name="calendar" /></div><div><b>Dates to be decided</b><span>The coordinator can add them in Settings.</span></div></div>
-  const start = S.day(pact.starts_on)
-  const end = pact.ends_on && pact.ends_on !== pact.starts_on ? S.day(pact.ends_on) : null
-  return (
-    <div className="l-fact">
-      <div className="l-fact-icon"><small>{start.toLocaleDateString('en-US', { month: 'short' })}</small><b>{start.getDate()}</b></div>
-      <div>
-        <b>{start.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}</b>
-        <span>{end ? `to ${end.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}` : 'One day'}</span>
-      </div>
-    </div>
   )
 }
 
@@ -291,16 +326,16 @@ function BookedCard({ step, d, proof, me, name }: { step: S.Step; d: S.PactData;
               <>
                 {m ? <Avatar name={m.name} url={m.avatar_url} size={28} /> : <span className="l-ledger-icon"><Icon name="pacts" /></span>}
                 <b>{c.userId === me ? 'You paid' : c.label}{c.userId && share ? ` ${S.dollars(share)}` : ''}</b>
-                {c.quickNode ? <span className="ok"><Icon name="shield" />Verified by QuickNode</span> : <span className="wait"><Icon name="chain" />On Base · QuickNode pending</span>}
+                {c.quickNode ? <span className="ok"><Icon name="shield" />Verified by QuickNode</span> : <span className="wait"><Icon name="chain" />On Arc · QuickNode pending</span>}
               </>
             )
             return c.txHash
-              ? <a key={i} className="l-check-row" href={S.txLink(c.txHash)} target="_blank" rel="noreferrer" title="See it on the Base explorer">{row}</a>
+              ? <a key={i} className="l-check-row" href={S.txLink(c.txHash)} target="_blank" rel="noreferrer" title="See it on the Arc explorer">{row}</a>
               : <div key={i} className="l-check-row">{row}</div>
           })}
         </div>
       )}
-      {proof.level === 'onchain' && <p style={{ fontSize: 13 }}>The Base chain shows every payment. Pact Verified appears once QuickNode has confirmed each one.</p>}
+      {proof.level === 'onchain' && <p style={{ fontSize: 13 }}>The Arc chain shows every payment. Pact Verified appears once QuickNode has confirmed each one.</p>}
     </div>
   )
 }
@@ -351,7 +386,10 @@ function Items({ items }: { items: S.Item[] }) {
   )
 }
 
-function Chat({ messages, recs, onGrok, me, name, members }: { messages: S.Message[]; recs: S.Recommendation[]; onGrok: (rec: S.Recommendation) => void; me: string; name: (id: string) => string; members: S.Member[] }) {
+function Chat({ messages, recs, onGrok, me, name, members, polls, onSeeFindings }: {
+  messages: S.Message[]; recs: S.Recommendation[]; onGrok: (rec: S.Recommendation) => void; me: string; name: (id: string) => string; members: S.Member[]
+  polls: S.Poll[]; pact: S.Pact; iCoordinate: boolean; onVoted: () => void; onAddedToPlan: () => void; onSeeFindings: () => void
+}) {
   const end = useRef<HTMLDivElement>(null)
   const seen = useRef<number | null>(null)
   // Opening a pact starts at the top. Only a new message scrolls down.
@@ -359,10 +397,11 @@ function Chat({ messages, recs, onGrok, me, name, members }: { messages: S.Messa
     if (seen.current !== null && messages.length > seen.current) end.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
     if (messages.length) seen.current = messages.length
   }, [messages.length])
-  type Entry = { kind: 'message'; at: string; m: S.Message } | { kind: 'grok'; at: string; rec: S.Recommendation }
+  type Entry = { kind: 'message'; at: string; m: S.Message } | { kind: 'grok'; at: string; rec: S.Recommendation } | { kind: 'poll'; at: string; poll: S.Poll }
   const entries: Entry[] = [
     ...messages.map((m) => ({ kind: 'message' as const, at: m.created_at, m })),
     ...recs.map((rec) => ({ kind: 'grok' as const, at: rec.created_at, rec })),
+    ...polls.map((poll) => ({ kind: 'poll' as const, at: poll.created_at, poll })),
   ].sort((x, y) => x.at.localeCompare(y.at))
   if (!entries.length) return <p className="l-chat-empty">Say hi to the group. Talk through what to book, and Grok will write it up when you're ready.</p>
   return (
@@ -373,14 +412,17 @@ function Chat({ messages, recs, onGrok, me, name, members }: { messages: S.Messa
         const newDay = !prev || new Date(prev.at).toDateString() !== new Date(e.at).toDateString()
         const divider = newDay && <div className="l-chat-day" key={`d${i}`}><span>{day}</span></div>
         if (e.kind === 'grok') return [divider, <GrokBlock key={e.rec.recommendation_id} rec={e.rec} onOpen={onGrok} />]
+        if (e.kind === 'poll') return [divider, <FoundSummary key={e.poll.poll_id} found={e.poll} votes={Object.keys(e.poll.votes).length} onOpen={onSeeFindings} />]
         const m = e.m
+        const found = S.parseOptions(m.body)
+        if (found) return [divider, <FoundSummary key={m.message_id} found={found} onOpen={onSeeFindings} />]
         const mine = m.sender_id === me
         const first = newDay || prev?.kind !== 'message' || prev.m.sender_id !== m.sender_id
         const who = members.find((x) => x.user_id === m.sender_id)
         return [divider, (
           <div key={m.message_id} className={mine ? 'l-msg me' : 'l-msg'}>
             {!mine && (first ? <Avatar name={who?.name} url={who?.avatar_url} size={44} /> : <span style={{ width: 44, flex: "none" }} />)}
-            <div className="l-bubble">{!mine && first && <small>{S.firstName(name(m.sender_id))}</small>}{m.body}</div>
+            <div className="l-bubble">{!mine && first && <small>{S.firstName(name(m.sender_id))}</small>}<Linkified text={m.body} /></div>
           </div>
         )]
       })}
@@ -659,9 +701,8 @@ function GrokBlock({ rec, big, onOpen }: { rec: S.Recommendation; big?: boolean;
     <button type="button" className={big ? 'l-grok-block big' : 'l-grok-block'} onClick={() => onOpen(rec)}>
       <span className="l-av l-grok-av" style={{ width: big ? 48 : 40, height: big ? 48 : 40 }}><Grok size={big ? 26 : 22} /></span>
       <span className="l-grok-block-main">
-        <b>{big ? 'Grok set up this pact' : 'Grok'} <small>· {when}</small></b>
-        <span className="text">{rec.summary}</span>
-        {pick && <span className="l-grok-block-pick">{pick.title}{pick.price_per_person != null ? ` · ${S.dollars(pick.price_per_person)} each` : ''}</span>}
+        <b>{big ? 'Grok set up this pact' : pick ? `Grok: ${pick.title}` : 'Grok wrote a plan'}</b>
+        <small>{when}</small>
       </span>
       <span className="l-grok-one-open">Open</span>
     </button>
@@ -717,7 +758,7 @@ function GrokInfo({ onClose }: { onClose: () => void }) {
   )
 }
 
-function Person({ member, onClose }: { member: S.Member; onClose: () => void }) {
+function Person({ member, onSend, onClose }: { member: S.Member; onSend: () => void; onClose: () => void }) {
   const { me, friends, pacts, data, go } = useApp()
   const mine = member.user_id === me
   const shared = (pacts ?? []).filter((p) => mine || data[p.pact_id]?.members.some((m) => m.user_id === member.user_id))
@@ -728,6 +769,7 @@ function Person({ member, onClose }: { member: S.Member; onClose: () => void }) 
         <Avatar name={member.name} url={member.avatar_url} size={76} />
         <b style={{ fontSize: 22 }}>{mine ? 'You' : member.name ?? 'Someone'}</b>
         <span className="l-dim" style={{ fontWeight: 600 }}>{member.role === 'host' ? 'Coordinator' : 'Member'}{!mine && ` · ${friend ? 'Friends' : 'In this pact with you'}`}</span>
+        {!mine && <button className="l-btn" type="button" style={{ marginTop: 6 }} onClick={onSend}><Icon name="up" size={16} />Send money</button>}
       </div>
       <h2 className="l-h2" style={{ marginTop: 22 }}>{mine ? 'Your pacts' : 'Pacts you share'}</h2>
       {shared.map((p) => (
@@ -770,10 +812,420 @@ function ActionSheet({ id, action, d, iCoordinate, onClose }: { id: string; acti
       {error && <p className="l-error">{error}</p>}
       <div style={{ marginTop: 18 }}>
         {state === 'done' ? <button className="l-btn l-wide-btn" type="button" onClick={onClose}>Done</button>
-          : state === 'busy' ? <Busy text="Confirm with your PIN, then Base confirms it…" />
+          : state === 'busy' ? <Busy text="Confirm with your PIN, then Arc confirms it…" />
           : <button className="l-btn l-wide-btn" type="button" disabled={action !== 'pay_share' && !iCoordinate}
               onClick={async () => { setState('busy'); setError(null); try { await S.pactAction(action, id); await refreshPact(id); setWallet(await S.loadWallet()); setState('done') } catch (e) { setError((e as Error).message); setState('idle') } }}>{copy.button}</button>}
       </div>
+    </Modal>
+  )
+}
+
+/** Send USDC to someone in the pact by who they are, not their address. Confirmed with my PIN, and a note goes in the
+ *  chat. From Settle it's a payback (it counts on the tab); from Send money it's a plain send. */
+function SendMoney({ id, d, initial, cents: preset, payback, onClose, onSent }: {
+  id: string; d: S.PactData; initial: string | null; cents?: number; payback?: boolean; onClose: () => void; onSent: () => void
+}) {
+  const { me, wallet, go, setWallet } = useApp()
+  const people = d.members.filter((m) => m.user_id !== me)
+  const [to, setTo] = useState<string | null>(initial ?? (people.length === 1 ? people[0].user_id : null))
+  const [amount, setAmount] = useState(preset ? (preset / 100).toFixed(2) : '')
+  const [note, setNote] = useState('')
+  const [state, setState] = useState<'idle' | 'busy' | 'done'>('idle')
+  const [error, setError] = useState<string | null>(null)
+  const who = people.find((m) => m.user_id === to)
+  const typed = S.toCents(amount)
+  const cents = Number.isFinite(typed) && typed > 0 ? typed : 0
+  const balance = wallet?.usdcBalance != null ? Number(wallet.usdcBalance.replace(/,/g, '')) : null
+  const tooMuch = balance != null && cents / 100 > balance
+
+  async function send() {
+    if (!who) return
+    setState('busy'); setError(null)
+    try {
+      await (payback ? S.payBack(id, who.user_id, cents) : S.sendTo(id, who.user_id, cents))
+      const what = note.trim() ? ` for ${note.trim()}` : payback ? ' to settle up' : ''
+      await S.send(id, `Sent ${S.cents(cents)} to ${S.firstName(who.name)}${what}.`).catch(() => undefined)
+      setWallet(await S.loadWallet())
+      onSent()
+      setState('done')
+    } catch (e) { setError((e as Error).message || "That didn't go through."); setState('idle') }
+  }
+
+  return (
+    <Modal title={state === 'done' ? 'Sent' : payback ? 'Settle up' : 'Send money'} onClose={onClose}>
+      {!wallet ? (
+        <div className="l-compact l-small-form">
+          <p className="l-dim" style={{ margin: 0 }}>Make your wallet first. Then you can send money to anyone in this pact.</p>
+          <button className="l-btn l-wide-btn" type="button" onClick={() => { onClose(); go('/wallet') }}>Go to wallet</button>
+        </div>
+      ) : state === 'done' && who ? (
+        <div className="l-compact l-small-form l-send-done">
+          <Avatar name={who.name} url={who.avatar_url} size={56} />
+          <b>{S.cents(cents)} to {S.firstName(who.name)}</b>
+          <span className="l-dim">{payback ? "It's in their Pact wallet, and the tab is settled." : "It's in their Pact wallet."}</span>
+          <button className="l-btn l-wide-btn" type="button" onClick={onClose}>Done</button>
+        </div>
+      ) : (
+        <form className="l-compact l-small-form" onSubmit={(e) => { e.preventDefault(); if (who && cents > 0 && !tooMuch) void send() }}>
+          <span className="l-field-label">To</span>
+          <div className="l-quick l-people-pick" role="radiogroup" aria-label="Send to">
+            {people.map((m) => (
+              <button key={m.user_id} type="button" role="radio" aria-checked={to === m.user_id} className={to === m.user_id ? 'on' : ''} disabled={state === 'busy'} onClick={() => setTo(m.user_id)}>
+                <Avatar name={m.name} url={m.avatar_url} size={24} /><span>{S.firstName(m.name)}</span>
+              </button>
+            ))}
+            {!people.length && <span className="l-dim">Add people to this pact first.</span>}
+          </div>
+          <span className="l-field-label">Amount</span>
+          <label className="l-money-field"><span>$</span>
+            <input inputMode="decimal" autoFocus placeholder="0.00" value={amount} disabled={state === 'busy'} aria-label="Amount in dollars"
+              onChange={(e) => setAmount(e.target.value.replace(/[^0-9.]/g, ''))} /><small>USDC</small></label>
+          <span className={tooMuch ? 'l-error l-field-hint' : 'l-dim l-field-hint'}>{balance == null ? 'From your Pact wallet' : tooMuch ? `You have ${S.dollars(balance)} in your wallet` : `${S.dollars(balance)} available`}</span>
+          <label className="l-money-field"><Icon name="text" size={16} />
+            <input placeholder="What's it for? (optional)" value={note} maxLength={80} disabled={state === 'busy'} onChange={(e) => setNote(e.target.value)} /></label>
+          {error && <p className="l-error">{error}</p>}
+          {state === 'busy' ? <Busy text="Confirm with your PIN, then it sends…" />
+            : <button className="l-btn l-wide-btn" type="submit" disabled={!who || cents <= 0 || tooMuch}>
+                {who && cents > 0 ? `Send ${S.cents(cents)} to ${S.firstName(who.name)}` : 'Send'}
+              </button>}
+        </form>
+      )}
+    </Modal>
+  )
+}
+
+/** On the right of someone in the people list: the net between us on the tab. $0.00 until money moves; green when
+ *  they owe me, red when I owe them (tap it to settle). */
+function NetBalance({ who, me, tab, onSettle }: { who: S.Member; me: string; tab: S.Tab | null; onSettle: (cents: number) => void }) {
+  const iOwe = tab ? tab.settle_up.filter((p) => p.from === me && p.to === who.user_id).reduce((n, p) => n + p.amount_cents, 0) : 0
+  const theyOwe = tab ? tab.settle_up.filter((p) => p.from === who.user_id && p.to === me).reduce((n, p) => n + p.amount_cents, 0) : 0
+  const net = theyOwe - iOwe
+  if (net < 0) return <button className="l-net owe" type="button" onClick={() => onSettle(-net)} title={`You owe ${S.firstName(who.name)} ${S.cents(net)}. Tap to settle.`}>−{S.cents(net)}</button>
+  return <span className={net > 0 ? 'l-net owed' : 'l-net'} title={net > 0 ? `${S.firstName(who.name)} owes you ${S.cents(net)}` : 'Nothing owed either way'}>{net > 0 ? '+' : ''}{S.cents(net)}</span>
+}
+
+/** About this pact, its link, and a way into Settings. */
+function InfoSheet({ pact, canEdit, onSettings, onClose }: { pact: S.Pact; canEdit: boolean; onSettings: () => void; onClose: () => void }) {
+  const details = S.detailsOf(pact)
+  return (
+    <Modal title="Info" onClose={onClose}>
+      <div className="l-compact l-small-form">
+        <span className="l-field-label">About</span>
+        <p style={{ margin: 0 }}>{details.about || <span className="l-dim">Nothing written yet.</span>}</p>
+        {pact.link && <><span className="l-field-label">Link</span><a className="l-link-line" href={pact.link} target="_blank" rel="noreferrer">{siteOf(pact.link)}</a></>}
+        {canEdit && <button className="l-btn l-ghost l-wide-btn" type="button" onClick={onSettings}><Icon name="gear" size={16} />Edit in Settings</button>}
+      </div>
+    </Modal>
+  )
+}
+
+const siteOf = (url: string) => { try { return new URL(url).hostname.replace(/^www\./, '') } catch { return url } }
+
+/** Plain text with links shown as their site name ("hilton.com ↗") instead of a long raw URL. */
+function Linkified({ text }: { text: string }) {
+  const parts = text.split(/(https?:\/\/[^\s)]+)/g)
+  return <>{parts.map((part, i) => /^https?:\/\//.test(part)
+    ? <a key={i} className="l-inline-link" href={part} target="_blank" rel="noreferrer">{siteOf(part)} ↗</a>
+    : <span key={i}>{part}</span>)}</>
+}
+
+/** The picture for an option: its own image if it has one, otherwise the site's logo on a soft tile. */
+function OptionImage({ option }: { option: S.PollOption }) {
+  const [broken, setBroken] = useState(false)
+  const site = option.link ? siteOf(option.link) : null
+  const src = option.image && /^https:\/\//.test(option.image) ? option.image : site ? `https://www.google.com/s2/favicons?domain=${encodeURIComponent(site)}&sz=128` : null
+  return (
+    <div className={option.image && !broken ? 'l-opt-img photo' : 'l-opt-img'}>
+      {src && !broken ? <img src={src} alt="" loading="lazy" referrerPolicy="no-referrer" onError={() => setBroken(true)} /> : <span>{option.name.slice(0, 1).toUpperCase()}</span>}
+      {site && <small>{site}</small>}
+    </div>
+  )
+}
+
+/** A grid of options as cards: picture, name, price each, a short note and the link. Voting and approving are passed in. */
+function OptionGrid({ options, title, compact, renderFoot }: {
+  options: S.PollOption[]; title?: string; compact?: boolean; renderFoot?: (o: S.PollOption) => ReactNode
+}) {
+  return (
+    <div className={compact ? 'l-opt-grid compact' : 'l-opt-grid'}>
+      {title && <b className="l-opt-title">{title}</b>}
+      <div className="l-opt-cards">
+        {options.map((o) => (
+          <div key={o.key} className="l-opt-card">
+            <OptionImage option={o} />
+            <div className="l-opt-body">
+              <b className="l-opt-name">{o.name}</b>
+              {o.price_each != null && <div className="l-opt-price">{S.dollars(o.price_each)}<small> each</small></div>}
+              {o.notes && !compact && <p className="l-opt-notes">{o.notes}</p>}
+              {o.link && <a className="l-inline-link" href={o.link} target="_blank" rel="noreferrer">{siteOf(o.link)} ↗</a>}
+            </div>
+            {renderFoot?.(o)}
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+/** A vote: the options as cards, tap Vote on one (tap again to take it back), live counts and faces, and Approve for
+ *  the coordinator on the one that's ahead. */
+function PollCard({ poll, me, members, pact, iCoordinate, onVoted, onAddedToPlan }: {
+  poll: S.Poll; me: string; members: S.Member[]; pact: S.Pact; iCoordinate: boolean; onVoted: () => void; onAddedToPlan: () => void
+}) {
+  const [busy, setBusy] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [mineNow, setMineNow] = useState<string | null | undefined>(undefined) // my tap shows straight away
+  const votes = { ...poll.votes }
+  if (mineNow !== undefined) { if (mineNow) votes[me] = mineNow; else delete votes[me] }
+  const total = Object.keys(votes).length
+  const count = (key: string) => Object.values(votes).filter((v) => v === key).length
+  const top = Math.max(0, ...poll.options.map((o) => count(o.key)))
+  const open = poll.status === 'open'
+  async function vote(key: string) {
+    setBusy(key); setError(null); setMineNow(votes[me] === key ? null : key)
+    try { await S.votePoll(poll.poll_id, key); onVoted() } catch (e) { setError((e as Error).message); setMineNow(undefined) }
+    setBusy(null)
+  }
+  async function approve(option: S.PollOption) {
+    setBusy(option.key); setError(null)
+    try { await S.addPollPickToPlan(pact, poll, option); onAddedToPlan() } catch (e) { setError((e as Error).message) }
+    setBusy(null)
+  }
+  return (
+    <div className="l-poll">
+      <div className="l-poll-head">
+        {poll.source === 'grok' && <span className="l-av" style={{ width: 28, height: 28, background: '#000' }}><Grok size={15} /></span>}
+        <div><b>{poll.title}</b><span>{open ? `${total} of ${members.length} voted` : 'Decided'}</span></div>
+      </div>
+      <OptionGrid options={poll.options} renderFoot={(o) => {
+        const n = count(o.key)
+        const chosen = votes[me] === o.key
+        const voters = members.filter((m) => votes[m.user_id] === o.key)
+        const leading = n > 0 && n === top
+        return (
+          <div className={['l-opt-foot', chosen ? 'chosen' : '', leading ? 'leading' : ''].join(' ')}>
+            <span className="l-opt-bar" style={{ width: total ? `${(n / total) * 100}%` : 0 }} aria-hidden />
+            <span className="l-poll-faces">{voters.slice(0, 4).map((m) => <Avatar key={m.user_id} name={m.name} url={m.avatar_url} size={22} />)}</span>
+            <span className="l-opt-count">{n} {n === 1 ? 'vote' : 'votes'}</span>
+            {open && <VoteCheck on={chosen} disabled={Boolean(busy)} label={o.name} onClick={() => void vote(o.key)} />}
+            {iCoordinate && open && leading && <button className="l-settle" type="button" disabled={Boolean(busy)} onClick={() => void approve(o)}>Approve</button>}
+          </div>
+        )
+      }} />
+      {error && <p className="l-error">{error}</p>}
+    </div>
+  )
+}
+
+/** Options Grok (or anyone) posted as a chat message, as cards. Tick one to vote: the first tick turns the list into a vote. */
+function MessageOptions({ id, found, onStarted }: { id: string; found: NonNullable<ReturnType<typeof S.parseOptions>>; onStarted: () => void }) {
+  const [busy, setBusy] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const kind = S.guessKind(`${found.title} ${found.options.map((o) => o.name).join(' ')}`)
+  async function tick(key: string) {
+    setBusy(key); setError(null)
+    try { const pollId = await S.startPoll(id, found.title, found.options, kind); await S.votePoll(pollId, key); onStarted() } catch (e) { setError((e as Error).message) }
+    setBusy(null)
+  }
+  return (
+    <div className="l-poll">
+      <div className="l-poll-head">
+        <span className="l-av" style={{ width: 28, height: 28, background: '#000' }}><Grok size={15} /></span>
+        <div><b>{found.title}</b><span>{found.options.length} options · tick the one you want</span></div>
+      </div>
+      <OptionGrid options={found.options.map((o, k) => ({ ...o, key: String(k + 1) }))} renderFoot={(o) => (
+        <div className="l-opt-foot">
+          <span className="l-opt-count">No votes yet</span>
+          <VoteCheck on={busy === o.key} disabled={Boolean(busy)} label={o.name} onClick={() => void tick(o.key)} />
+        </div>
+      )} />
+      {error && <p className="l-error">{error}</p>}
+    </div>
+  )
+}
+
+/** The round tick you tap to vote for an option. Filled silver once it's your pick. */
+function VoteCheck({ on, disabled, label, onClick }: { on: boolean; disabled?: boolean; label: string; onClick: () => void }) {
+  return (
+    <button className={on ? 'l-vote-check on' : 'l-vote-check'} type="button" disabled={disabled} aria-pressed={on}
+      aria-label={on ? `Take back your vote for ${label}` : `Vote for ${label}`} title={on ? 'Your vote · tap to take it back' : 'Vote for this'} onClick={onClick}>
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.6} strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M5 12.5l4.5 4.5L19 7.5" /></svg>
+    </button>
+  )
+}
+
+/** In the chat: one line saying what Grok found, and a button to see and vote on it in Findings. */
+function FoundSummary({ found, votes, onOpen }: { found: { title: string; options: { price_each: number | null }[] }; votes?: number; onOpen: () => void }) {
+  const prices = found.options.map((o) => o.price_each).filter((p): p is number => p != null)
+  const range = !prices.length ? null : Math.min(...prices) === Math.max(...prices) ? `${S.dollars(prices[0])} each` : `${S.dollars(Math.min(...prices))}–${S.dollars(Math.max(...prices))} each`
+  return (
+    <div className="l-found">
+      <span className="l-av" style={{ width: 36, height: 36, background: '#000', flex: 'none' }}><Grok size={19} /></span>
+      <div className="l-found-text">
+        <b>{found.title}</b>
+        <span>{found.options.length} options{range ? ` · ${range}` : ''}{votes ? ` · ${votes} voted` : ''}</span>
+      </div>
+      <button className="l-btn l-small" type="button" onClick={onOpen}>Check it out</button>
+    </div>
+  )
+}
+
+/** The ↗ arrow used for sending money. */
+function ArrowNE({ size = 16 }: { size?: number }) {
+  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.4} strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M7 17L17 7M8 7h9v9" /></svg>
+}
+
+/** The pact's name. The coordinator taps it, or Edit on the right, and types right there: Enter saves, Esc or tapping away cancels. */
+function PactTitle({ id, name, canEdit, editing, onEditing, onSaved }: {
+  id: string; name: string; canEdit: boolean; editing: boolean; onEditing: (on: boolean) => void; onSaved: () => void
+}) {
+  const [text, setText] = useState(name)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  useEffect(() => { if (!editing) setText(name) }, [name, editing])
+  async function save() {
+    const next = text.trim()
+    if (!next || next === name) { onEditing(false); setError(null); return }
+    setBusy(true); setError(null)
+    try { await S.renamePact(id, next); onSaved(); onEditing(false) } catch (e) { setError((e as Error).message) }
+    setBusy(false)
+  }
+  return (
+    <div className="l-title-row">
+      {editing
+        ? <input className="l-title l-title-inline" autoFocus value={text} maxLength={80} disabled={busy} aria-label="Pact name"
+            onChange={(e) => setText(e.target.value)} onBlur={() => void save()}
+            onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); void save() } if (e.key === 'Escape') { setText(name); onEditing(false); setError(null) } }} />
+        : <h1 className={canEdit ? 'l-title can-edit' : 'l-title'} onClick={canEdit ? () => onEditing(true) : undefined} title={canEdit ? 'Rename' : undefined}>{name}</h1>}
+      {error && <p className="l-error l-title-error">{error}</p>}
+    </div>
+  )
+}
+
+/** A pill beside the title: the dates or the budget. The coordinator taps it to change it; everyone else just reads it. */
+function TitleChip({ icon, label, empty, canEdit, hint, onClick }: { icon: string; label: string; empty: boolean; canEdit: boolean; hint: string; onClick: () => void }) {
+  if (!canEdit && empty) return null
+  const body = <><Icon name={icon} size={16} /><span>{label}</span></>
+  return canEdit
+    ? <button className={empty ? 'l-chip empty' : 'l-chip'} type="button" onClick={onClick} title={hint}>{body}</button>
+    : <span className="l-chip" title={hint}>{body}</span>
+}
+
+const iso = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+const fromIso = (s: string) => { const [y, m, d] = s.split('-').map(Number); return new Date(y, m - 1, d) }
+
+/** Pick the trip's dates on a month calendar: tap the first day, then the last. One tap and Save makes it a single day. */
+function DatesSheet({ pact, onClose, onSaved }: { pact: S.Pact; onClose: () => void; onSaved: () => void }) {
+  const [start, setStart] = useState<string | null>(pact.starts_on)
+  const [end, setEnd] = useState<string | null>(pact.ends_on ?? pact.starts_on)
+  const first = start ? fromIso(start) : new Date()
+  const [month, setMonth] = useState(new Date(first.getFullYear(), first.getMonth(), 1))
+  const [hover, setHover] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const today = iso(new Date())
+  const lead = (month.getDay() + 6) % 7 // weeks start on Monday
+  const days = new Date(month.getFullYear(), month.getMonth() + 1, 0).getDate()
+  const cells: (string | null)[] = [...Array(lead).fill(null), ...Array.from({ length: days }, (_, i) => iso(new Date(month.getFullYear(), month.getMonth(), i + 1)))]
+  const picking = Boolean(start && !end)
+  const rangeEnd = picking && hover && start && hover >= start ? hover : end
+  function pick(day: string) {
+    if (!start || end || day < start) { setStart(day); setEnd(null) }
+    else setEnd(day)
+  }
+  async function save(next: { startsOn: string | null; endsOn: string | null }) {
+    setBusy(true); setError(null)
+    try { await S.saveDetails(pact.pact_id, { ...S.detailsOf(pact), ...next }); onSaved() } catch (e) { setError((e as Error).message); setBusy(false) }
+  }
+  const label = start ? S.dateRange(start, end ?? start) : null
+  return (
+    <Modal title="When is it?" onClose={onClose}>
+      <div className="l-cal l-compact">
+        <div className="l-cal-head">
+          <button className="l-icon-btn" type="button" aria-label="Previous month" onClick={() => setMonth(new Date(month.getFullYear(), month.getMonth() - 1, 1))}><Icon name="back" /></button>
+          <b>{month.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}</b>
+          <button className="l-icon-btn l-cal-next" type="button" aria-label="Next month" onClick={() => setMonth(new Date(month.getFullYear(), month.getMonth() + 1, 1))}><Icon name="back" /></button>
+        </div>
+        <div className="l-cal-grid" onMouseLeave={() => setHover(null)}>
+          {['Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa', 'Su'].map((w) => <span key={w} className="l-cal-week">{w}</span>)}
+          {cells.map((day, i) => {
+            if (!day) return <span key={`e${i}`} />
+            const inRange = start && rangeEnd && day > start && day < rangeEnd
+            const edge = day === start || day === (rangeEnd ?? start)
+            return (
+              <button key={day} type="button" className={['l-cal-day', inRange ? 'in' : '', edge ? 'edge' : '', day === today ? 'today' : '', day < today ? 'past' : ''].join(' ')}
+                onClick={() => pick(day)} onMouseEnter={() => setHover(day)} aria-pressed={Boolean(edge)} aria-label={fromIso(day).toDateString()}>
+                {fromIso(day).getDate()}
+              </button>
+            )
+          })}
+        </div>
+        <p className="l-cal-pick">{!start ? 'Tap the first day.' : picking ? `${label} · now tap the last day, or Save for one day` : label}</p>
+        {error && <p className="l-error">{error}</p>}
+        <div className="l-cal-actions">
+          {pact.starts_on && <button className="l-btn l-ghost" type="button" disabled={busy} onClick={() => void save({ startsOn: null, endsOn: null })}>Clear dates</button>}
+          <button className="l-btn" type="button" disabled={busy || !start} onClick={() => void save({ startsOn: start, endsOn: end ?? start })}>{busy ? 'Saving…' : 'Save'}</button>
+        </div>
+      </div>
+    </Modal>
+  )
+}
+
+const BUDGETS = [100, 200, 300, 400, 500, 750, 1000, 1500, 2000, 3000]
+
+/** Set the budget per person: tap a quick amount (scroll for more) or type one. */
+function BudgetSheet({ pact, onClose, onSaved }: { pact: S.Pact; onClose: () => void; onSaved: () => void }) {
+  const current = S.detailsOf(pact).budget
+  const [amount, setAmount] = useState(current != null ? String(current) : '')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const value = amount.trim() === '' ? null : Number(amount)
+  const valid = value != null && Number.isFinite(value) && value > 0 && value <= 1_000_000
+  async function save(budget: number | null) {
+    setBusy(true); setError(null)
+    try { await S.saveDetails(pact.pact_id, { ...S.detailsOf(pact), budget }); onSaved() } catch (e) { setError((e as Error).message); setBusy(false) }
+  }
+  return (
+    <Modal title="Budget per person" onClose={onClose}>
+      <form className="l-compact l-small-form" onSubmit={(e) => { e.preventDefault(); if (valid) void save(Math.round(value! * 100) / 100) }}>
+        <div className="l-quick" role="list" aria-label="Quick amounts">
+          {BUDGETS.map((n) => (
+            <button key={n} type="button" role="listitem" className={value === n ? 'on' : ''} disabled={busy} onClick={() => setAmount(String(n))}>{S.dollars(n)}</button>
+          ))}
+        </div>
+        <label className="l-money-field"><span>$</span>
+          <input inputMode="decimal" autoFocus placeholder="Or type an amount" value={amount} disabled={busy} aria-label="Budget per person in dollars"
+            onChange={(e) => setAmount(e.target.value.replace(/[^0-9.]/g, ''))} /><small>each</small></label>
+        {error && <p className="l-error">{error}</p>}
+        <div className="l-cal-actions">
+          {current != null && <button className="l-btn l-ghost" type="button" disabled={busy} onClick={() => void save(null)}>No budget</button>}
+          <button className="l-btn" type="submit" disabled={busy || !valid}>{busy ? 'Saving…' : 'Save'}</button>
+        </div>
+      </form>
+    </Modal>
+  )
+}
+
+/** Where the trip is: one line, like "Austin, Texas". */
+function PlaceSheet({ pact, onClose, onSaved }: { pact: S.Pact; onClose: () => void; onSaved: () => void }) {
+  const [place, setPlace] = useState(pact.location ?? '')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  async function save(location: string) {
+    setBusy(true); setError(null)
+    try { await S.saveDetails(pact.pact_id, { ...S.detailsOf(pact), location: location.trim() }); onSaved() } catch (e) { setError((e as Error).message); setBusy(false) }
+  }
+  return (
+    <Modal title="Where is it?" onClose={onClose}>
+      <form className="l-compact l-small-form" onSubmit={(e) => { e.preventDefault(); void save(place) }}>
+        <label className="l-money-field"><Icon name="pin" size={18} />
+          <input autoFocus placeholder="Austin, Texas" value={place} maxLength={120} disabled={busy} aria-label="Where the trip is" onChange={(e) => setPlace(e.target.value)} /></label>
+        {error && <p className="l-error">{error}</p>}
+        <div className="l-cal-actions">
+          {pact.location && <button className="l-btn l-ghost" type="button" disabled={busy} onClick={() => void save('')}>Clear</button>}
+          <button className="l-btn" type="submit" disabled={busy || !place.trim() || place.trim() === (pact.location ?? '')}>{busy ? 'Saving…' : 'Save'}</button>
+        </div>
+      </form>
     </Modal>
   )
 }

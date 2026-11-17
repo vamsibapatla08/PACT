@@ -117,6 +117,35 @@ const tools = [
     },
   },
   {
+    name: 'start_vote',
+    title: 'Put options to a vote',
+    description: "Show the group 2 to 8 options (hotels, flights, dinners…) as vote cards in the pact chat. Each person taps the one they want and sees live counts. Use this for ANY list of options instead of post_message.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        pact_id: { type: 'string' },
+        title: { type: 'string', description: 'e.g. "Austin stay, Nov 19 to 22"' },
+        kind: { type: 'string', enum: KINDS },
+        options: {
+          type: 'array', minItems: 2, maxItems: 8,
+          items: {
+            type: 'object',
+            properties: {
+              name: { type: 'string', description: 'e.g. "Holiday Inn Express Downtown"' },
+              price_each: { type: 'number', description: 'USD per person, if known' },
+              link: { type: 'string', description: 'Booking link (https)' },
+              notes: { type: 'string', description: 'One short line: distance, beds, check-in rules' },
+            },
+            required: ['name'],
+            additionalProperties: false,
+          },
+        },
+      },
+      required: ['pact_id', 'title', 'options'],
+      additionalProperties: false,
+    },
+  },
+  {
     name: 'post_message',
     title: 'Post in the pact chat',
     description: "Post a message to the pact's group chat as me.",
@@ -238,6 +267,25 @@ async function call(name: string, args: Json, me: Me): Promise<{ text: string; d
       need(!error, /row-level security/i.test(error?.message ?? '') ? 'Items are locked once the split is set up.' : "Couldn't add that item.")
       return { text: `Added ${args.kind} "${title}"${typeof args.price_each === 'number' ? ` at ${money(args.price_each)} each` : ''}.` }
     }
+    case 'start_vote': {
+      const id = text(args.pact_id, 40)
+      await memberOf(db, id)
+      const title = text(args.title, 120)
+      need(title, 'Give the vote a title.')
+      const raw = Array.isArray(args.options) ? args.options as Json[] : []
+      need(raw.length >= 2 && raw.length <= 8, 'A vote needs 2 to 8 options.')
+      const options = raw.map((o) => ({
+        name: text(o?.name, 120),
+        price_each: typeof o?.price_each === 'number' && o.price_each >= 0 ? o.price_each : null,
+        link: /^https?:\/\//i.test(text(o?.link, 500)) ? text(o?.link, 500) : null,
+        notes: text(o?.notes, 240) || null,
+      }))
+      need(options.every((o) => o.name), 'Every option needs a name.')
+      const kind = KINDS.includes(String(args.kind)) ? String(args.kind) : 'other'
+      const { error } = await db.rpc('create_pact_poll', { p_pact_id: id, p_title: title, p_options: options, p_kind: kind, p_source: 'grok' })
+      need(!error, "Couldn't start the vote.")
+      return { text: `Started "${title}" with ${options.length} options. Everyone votes on the cards in the pact chat.` }
+    }
     case 'post_message': {
       const id = text(args.pact_id, 40)
       await memberOf(db, id)
@@ -310,7 +358,7 @@ async function handle(msg: Json, me: Me) {
           protocolVersion: typeof (msg.params as Json)?.protocolVersion === 'string' ? (msg.params as Json).protocolVersion : PROTOCOL,
           capabilities: { tools: { listChanged: false } },
           serverInfo: { name: 'pact', title: 'Pact', version: '1.0.0' },
-          instructions: `You're helping ${me.name} plan group trips in Pact. Read pacts with list_pacts and get_pact, build the itinerary with add_item, and put it up for approval with propose_booking. You can't pay or move money: everyone pays their own share with their PIN in the Pact app.`,
+          instructions: `You're helping ${me.name} plan group trips in Pact. Read pacts with list_pacts and get_pact. When you find options (hotels, flights, dinners), put them to a vote with start_vote so they show as vote cards; never paste a list of options with post_message. Build the itinerary with add_item, and put it up for approval with propose_booking. You can't pay or move money: everyone pays their own share with their PIN in the Pact app.`,
         },
       }
     case 'ping':

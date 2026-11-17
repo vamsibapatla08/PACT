@@ -868,3 +868,342 @@ button.l-ledger-row { width: 100%; border: 0; background: none; text-align: left
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.6), 0 2px 8px rgba(0, 0, 0, 0.45); transition: transform 0.15s ease; }
 .l-finishes button:hover { transform: scale(1.12); }
 .l-finishes button.on { outline: 2px solid rgba(255, 255, 255, 0.9); outline-offset: 3px; }
+
+/* ---- The pact page, full width: people on the left, the trip in the middle, the chat on the right. ---- */
+.l-pact-full { width: 100%; max-width: 1680px; padding-left: 28px; padding-right: 28px; box-sizing: border-box; }
+.l-pact-grid { display: grid; grid-template-columns: 270px minmax(0, 1fr) minmax(360px, 420px); gap: 32px; align-items: start; }
+.l-pact-people { position: sticky; top: 24px; }
+.l-pact-main { min-width: 0; }
+.l-pact-hero { display: flex; align-items: center; gap: 18px; margin-bottom: 6px; }
+.l-pact-hero .l-cover { width: 96px; border-radius: 16px; }
+.l-pact-hero .l-title { margin: 4px 0 0; }
+/* The chat is its own column the height of the screen: messages scroll inside it, the composer stays at the bottom. */
+.l-pact-chat.l-chat-wide { position: sticky; top: 24px; max-width: none; margin: 0; padding: 18px 18px 14px; height: calc(100vh - 140px); min-height: 460px;
+  display: flex; flex-direction: column; border-radius: 22px; box-sizing: border-box;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.02)); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 18px 44px rgba(0, 0, 0, 0.35); }
+.l-pact-chat .l-chat-head { margin: 0 0 4px; }
+.l-pact-chat .l-chat, .l-pact-chat .l-chat-empty { flex: 1; overflow-y: auto; min-height: 0; margin-top: 8px; padding-right: 4px; align-content: start; }
+.l-pact-chat .l-bubble { max-width: 86%; font-size: 15.5px; }
+.l-pact-chat .l-composer { position: static; margin-top: 12px; }
+.l-pact-main .l-chat-jump-wrap { display: none; }
+
+/* Send money */
+.l-send-btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; width: 100%; height: 46px; border: 0; border-radius: 999px; cursor: pointer;
+  font-size: 16px; font-weight: 700; color: #0b0b0d; background: var(--silver); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9), 0 8px 22px rgba(0, 0, 0, 0.4); }
+.l-send-btn:hover { filter: brightness(1.05); }
+.l-pay-person { flex: none; width: 30px; height: 30px; margin-left: auto; border: 0; border-radius: 999px; cursor: pointer; font-weight: 800; font-size: 14px;
+  color: var(--text); background: rgba(255, 255, 255, 0.09); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1); transition: background 0.15s ease, color 0.15s ease; }
+.l-pay-person:hover { background: var(--silver); color: #0b0b0d; }
+.l-person .l-pay-person + small, .l-person .l-pay-person + .l-remove { margin-left: 8px; }
+.l-send { display: grid; gap: 14px; }
+.l-send-people { display: flex; gap: 10px; overflow-x: auto; padding: 2px 2px 6px; }
+.l-send-people button { flex: none; display: grid; justify-items: center; gap: 6px; width: 76px; padding: 10px 4px; border: 0; border-radius: 16px; background: none; color: var(--dim); cursor: pointer; font-weight: 600; }
+.l-send-people button.on { background: rgba(255, 255, 255, 0.1); color: var(--text); box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.75); }
+.l-send-people button span { font-size: 13.5px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.l-send-amount { display: flex; align-items: center; justify-content: center; gap: 4px; font-size: 54px; font-weight: 800; letter-spacing: -0.03em; }
+.l-send-amount span { color: var(--dim); }
+.l-send-amount input { width: 6ch; min-width: 2ch; border: 0; outline: 0; background: none; color: var(--text); font: inherit; text-align: left; padding: 0; }
+.l-send-balance { text-align: center; font-size: 14px; margin-top: -8px; }
+.l-send-done { justify-items: center; text-align: center; }
+.l-send-done b { font-size: 22px; }
+
+/* Narrower screens: chat drops below the trip, then everything stacks. */
+@media (max-width: 1240px) {
+  .l-pact-grid { grid-template-columns: 250px minmax(0, 1fr); }
+  .l-pact-chat.l-chat-wide { grid-column: 1 / -1; position: static; height: 640px; }
+  .l-pact-main .l-chat-jump-wrap { display: flex; }
+}
+@media (max-width: 860px) {
+  .l-pact-full { padding-left: 16px; padding-right: 16px; }
+  .l-pact-grid { grid-template-columns: 1fr; gap: 22px; }
+  .l-pact-people { position: static; }
+  .l-pact-chat.l-chat-wide { height: 70vh; padding: 14px 12px 12px; }
+  .l-pact-hero .l-cover { width: 72px; }
+}
+
+/* Pact page, round 2: nothing may spill into the next column. Every column and row can shrink, long text is cut with …,
+   and buttons never sit beside text that could grow. */
+.l-pact-grid { grid-template-columns: 280px minmax(0, 1fr) minmax(340px, 400px); gap: 36px; }
+.l-pact-grid > * { min-width: 0; }
+.l-pact-people { display: grid; gap: 14px; align-content: start; position: sticky; top: 24px; }
+.l-people-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding-bottom: 8px; border-bottom: 1px solid var(--line);
+  color: var(--dim); font-size: 14px; font-weight: 600; }
+.l-people-head .l-icon-btn { width: 34px; height: 34px; }
+.l-people { display: grid; gap: 2px; }
+.l-people-row { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 6px 0; }
+.l-people-row.pending { opacity: 0.55; }
+.l-people-who { flex: 1; min-width: 0; display: flex; align-items: center; gap: 11px; padding: 0; border: 0; background: none; color: inherit; text-align: left; cursor: pointer; }
+.l-people-who > span:last-child { display: grid; gap: 2px; min-width: 0; }
+.l-people-who b { font-size: 15.5px; font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.l-people-who small { display: inline-flex; align-items: center; gap: 4px; color: var(--dim); font-size: 12.5px; font-weight: 600; white-space: nowrap; }
+.l-people-who small.host { color: #ecdcae; }
+.l-people-who small svg { width: 12px; height: 12px; }
+.l-people-remove { flex: none; width: 30px; height: 30px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 999px; cursor: pointer;
+  color: var(--dim); background: rgba(255, 255, 255, 0.05); }
+.l-people-remove:hover { color: var(--bad); background: rgba(255, 90, 90, 0.12); }
+.l-pay-person { margin-left: 0; width: 32px; height: 32px; }
+.l-pact-people .l-wide-btn { justify-content: center; }
+.l-pact-people .l-side-note { margin: 0; }
+/* Middle column: the cover and title side by side, the title allowed to wrap. */
+.l-pact-hero { min-width: 0; }
+.l-pact-hero > div { min-width: 0; }
+.l-pact-hero .l-title { overflow-wrap: anywhere; }
+.l-pact-main .l-fact > div, .l-pact-main .l-row-main { min-width: 0; }
+/* Chat column: bubbles and long words wrap inside it. */
+.l-pact-chat .l-bubble { overflow-wrap: anywhere; }
+@media (max-width: 1240px) { .l-pact-grid { grid-template-columns: 260px minmax(0, 1fr); } }
+@media (max-width: 860px) { .l-pact-grid { grid-template-columns: minmax(0, 1fr); } .l-pact-people { position: static; } }
+
+/* Pact page, round 3: trip card on top left, coordinator, the people, then Send money and Add people. */
+.l-pact-people .l-cover.big { width: 100%; }
+.l-pact-coord { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 4px 0 12px; border-bottom: 1px solid var(--line); }
+.l-people-who b.big { font-size: 18px; font-weight: 750; letter-spacing: -0.01em; }
+.l-pact-coord .l-icon-btn { flex: none; width: 36px; height: 36px; }
+.l-pact-buttons { display: grid; gap: 10px; }
+.l-pay-person { display: grid; place-items: center; padding: 0; }
+.l-pay-person svg { display: block; }
+.l-send-btn svg { flex: none; }
+/* Title, with a pencil for the coordinator. */
+.l-title-row { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.l-title-row .l-title { margin: 6px 0 4px; min-width: 0; overflow-wrap: anywhere; }
+.l-title-pencil { flex: none; width: 36px; height: 36px; opacity: 0.6; }
+.l-title-row:hover .l-title-pencil, .l-title-pencil:focus-visible { opacity: 1; }
+.l-title-edit { display: grid; gap: 10px; margin: 6px 0 8px; }
+.l-title-input { width: 100%; box-sizing: border-box; padding: 6px 12px; border: 0; border-radius: 14px; outline: 0; color: var(--text); font: inherit; font-size: inherit;
+  background: rgba(255, 255, 255, 0.07); box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.35); }
+.l-title-edit-actions { display: flex; gap: 8px; }
+/* Room above and below Plan, Approve, Pay, Booked. */
+.l-pact-steps { padding: 26px 0 22px; }
+/* Ask Grok: its own little chat card at the bottom, centred. */
+.l-pact-ask { display: flex; justify-content: center; margin: 34px 0 10px; }
+.l-pact-ask .l-pilot { width: 100%; max-width: 640px; margin: 0; padding: 20px 22px; border-radius: 22px; box-sizing: border-box;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0.025)); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.09), 0 16px 40px rgba(0, 0, 0, 0.35); }
+.l-pact-ask .l-section-title { text-align: center; border-bottom: 0; padding-bottom: 4px; font-size: 16px; color: var(--text); }
+.l-pact-ask .l-tab-ask { margin-top: 8px; }
+.l-pact-ask .l-tab-ask .l-input { border-radius: 999px; padding: 12px 16px; }
+/* Send money fills the screen. */
+.l-full-sheet { position: fixed; inset: 0; z-index: 60; display: flex; flex-direction: column; background: rgba(8, 8, 10, 0.94);
+  backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px); }
+.l-full-sheet-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 22px 28px; }
+.l-full-sheet-head h2 { margin: 0; font-size: 26px; letter-spacing: -0.015em; }
+.l-full-sheet-body { flex: 1; overflow-y: auto; display: flex; justify-content: center; align-items: flex-start; padding: 2vh 24px 40px; }
+.l-full-sheet-body > .l-send { width: 100%; max-width: 560px; gap: 22px; }
+.l-full-sheet .l-send-people { justify-content: center; flex-wrap: wrap; overflow: visible; gap: 14px; }
+.l-full-sheet .l-send-people button { width: 96px; padding: 14px 6px; }
+.l-full-sheet .l-send-amount { font-size: clamp(56px, 11vw, 96px); }
+.l-full-sheet .l-send-balance { font-size: 15px; }
+.l-full-sheet .l-wide-btn { height: 56px; font-size: 17px; border-radius: 999px; }
+@media (max-width: 640px) {
+  .l-full-sheet-head { padding: 16px 16px; }
+  .l-full-sheet-body { padding: 8px 16px 24px; }
+  .l-full-sheet .l-send-people button { width: 80px; }
+}
+
+/* Title line: the name, then the dates and budget pills on the right, all centred on one line. */
+.l-titlebar { display: flex; align-items: center; justify-content: space-between; gap: 14px 18px; flex-wrap: wrap; margin: 8px 0 14px; min-width: 0; }
+.l-titlebar .l-title-row { flex: 1 1 280px; min-width: 0; position: relative; }
+.l-title-row .l-title { margin: 0; }
+.l-title.can-edit { cursor: text; border-radius: 12px; }
+.l-title.can-edit:hover { background: rgba(255, 255, 255, 0.04); }
+/* Renaming happens in the title itself: same font, same size, no extra box. */
+.l-title-inline { display: block; width: 100%; min-width: 0; margin: 0; padding: 0; border: 0; outline: 0; background: none; color: var(--text);
+  font: inherit; caret-color: var(--text); border-bottom: 2px solid rgba(255, 255, 255, 0.35); }
+.l-title-error { position: absolute; left: 0; top: 100%; margin: 4px 0 0; font-size: 13px; }
+.l-titlebar-chips { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.l-chip { display: inline-flex; align-items: center; gap: 8px; height: 40px; padding: 0 16px; border: 0; border-radius: 999px; white-space: nowrap;
+  font-size: 15px; font-weight: 650; color: var(--text); background: linear-gradient(180deg, rgba(255, 255, 255, 0.12), rgba(255, 255, 255, 0.05));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12); }
+button.l-chip { cursor: pointer; }
+button.l-chip:hover { filter: brightness(1.15); }
+.l-chip.empty { color: var(--dim); box-shadow: inset 0 0 0 1.5px rgba(255, 255, 255, 0.18); background: none; }
+.l-chip svg { width: 16px; height: 16px; }
+
+/* Month calendar */
+.l-cal { display: grid; gap: 14px; }
+.l-cal-head { display: flex; align-items: center; justify-content: space-between; }
+.l-cal-head b { font-size: 18px; }
+.l-cal-next svg { transform: scaleX(-1); }
+.l-cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px 0; }
+.l-cal-week { text-align: center; font-size: 12px; font-weight: 700; color: var(--faint); padding-bottom: 6px; }
+.l-cal-day { height: 44px; border: 0; background: none; color: var(--text); font-size: 15px; font-weight: 600; cursor: pointer; border-radius: 0; }
+.l-cal-day:hover { background: rgba(255, 255, 255, 0.08); border-radius: 12px; }
+.l-cal-day.past { color: var(--faint); }
+.l-cal-day.today { text-decoration: underline; text-underline-offset: 4px; }
+.l-cal-day.in { background: rgba(255, 255, 255, 0.1); border-radius: 0; }
+.l-cal-day.edge { background: var(--silver); color: #0b0b0d; border-radius: 12px; font-weight: 800; }
+.l-cal-pick { margin: 0; text-align: center; color: var(--dim); font-weight: 600; min-height: 1.4em; }
+.l-cal-actions { display: flex; justify-content: flex-end; gap: 10px; }
+@media (max-width: 640px) { .l-titlebar-chips { width: 100%; } .l-cal-day { height: 40px; } }
+
+/* Renaming keeps the title's exact size: only the font family is borrowed, never the size. */
+.l-title-inline { font: unset; font-family: inherit; font-size: 52px; line-height: 1.08; font-weight: 700; letter-spacing: -0.03em; }
+@media (max-width: 860px) { .l-title-inline { font-size: 38px; } }
+
+/* Small pop-ups (dates, budget, place, send money): one compact square, not a big sheet. */
+.l-modal:has(.l-compact) { width: min(400px, 100%); padding: 20px; }
+.l-small-form { display: grid; gap: 14px; }
+.l-quick { display: flex; gap: 8px; overflow-x: auto; padding: 2px 2px 6px; scroll-snap-type: x proximity; scrollbar-width: thin; }
+.l-quick button { flex: none; scroll-snap-align: start; height: 38px; padding: 0 14px; border: 0; border-radius: 999px; cursor: pointer; font-weight: 700; font-size: 14.5px;
+  color: var(--text); background: rgba(255, 255, 255, 0.08); }
+.l-quick button.on { background: var(--silver); color: #0b0b0d; }
+.l-money-field { display: flex; align-items: center; gap: 8px; height: 50px; padding: 0 14px; border-radius: 14px; background: rgba(255, 255, 255, 0.07);
+  box-shadow: inset 0 0 0 1.5px rgba(255, 255, 255, 0.12); color: var(--dim); font-weight: 700; }
+.l-money-field:focus-within { box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.5); }
+.l-money-field input { flex: 1; min-width: 0; border: 0; outline: 0; background: none; color: var(--text); font: inherit; font-size: 17px; font-weight: 650; }
+.l-money-field small { font-weight: 600; }
+/* Send money inside the small pop-up: a calmer amount size. */
+.l-send.l-compact { gap: 14px; }
+.l-send.l-compact .l-send-amount { font-size: 44px; }
+.l-send.l-compact .l-send-people button { width: 72px; }
+
+/* Round 4. Info and Settings sit on their own line, right-aligned, under the dates, budget and place pills. */
+.l-titlebar-chips { justify-content: flex-end; }
+.l-titlebar-tools { flex-basis: 100%; display: flex; justify-content: flex-end; gap: 8px; }
+.l-tool { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 12px; border: 0; border-radius: 999px; cursor: pointer;
+  font-size: 13.5px; font-weight: 650; color: var(--dim); background: rgba(255, 255, 255, 0.05); }
+.l-tool:hover { color: var(--text); background: rgba(255, 255, 255, 0.1); }
+.l-tool svg { width: 15px; height: 15px; }
+.l-pact-coord { border-bottom: 0; padding-bottom: 4px; }
+.l-pact-coord-wrap { padding-bottom: 12px; border-bottom: 1px solid var(--line); display: grid; gap: 4px; }
+
+/* What's owed between you and each person, with Settle when you owe them. */
+.l-people-item { display: grid; }
+.l-balance-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: -2px 0 6px 47px; font-size: 13px; font-weight: 700; }
+.l-balance-row .owe { color: #ff8a80; }
+.l-balance-row .owed { color: var(--go); }
+.l-settle { flex: none; height: 28px; padding: 0 12px; border: 0; border-radius: 999px; cursor: pointer; font-size: 12.5px; font-weight: 750;
+  color: #0b0b0d; background: var(--silver); }
+.l-settle:disabled { opacity: 0.5; cursor: default; }
+
+/* Send money, in the same small pop-up as the budget. */
+.l-field-label { font-size: 12.5px; font-weight: 700; color: var(--dim); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: -6px; }
+.l-field-hint { font-size: 13px; margin: -6px 0 0 4px; }
+.l-people-pick button { display: inline-flex; align-items: center; gap: 7px; padding: 0 12px 0 5px; }
+.l-people-pick button .l-av { flex: none; }
+.l-send-done { justify-items: center; text-align: center; }
+.l-send-done b { font-size: 20px; }
+.l-link-line { color: var(--text); font-weight: 650; }
+
+/* Links in chat show as their site name, never a long raw URL. */
+.l-inline-link { color: inherit; font-weight: 700; text-decoration: underline; text-underline-offset: 3px; text-decoration-color: rgba(255, 255, 255, 0.35); white-space: nowrap; }
+.l-msg.me .l-inline-link { text-decoration-color: rgba(0, 0, 0, 0.35); }
+
+/* Vote cards in the chat. */
+.l-poll { display: grid; gap: 12px; padding: 16px; border-radius: 20px; background: linear-gradient(180deg, rgba(255, 255, 255, 0.09), rgba(255, 255, 255, 0.035));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1), 0 10px 30px rgba(0, 0, 0, 0.3); }
+.l-poll-head { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.l-poll-head > div { display: grid; gap: 2px; min-width: 0; }
+.l-poll-head b { font-size: 16px; }
+.l-poll-head span { color: var(--dim); font-size: 13px; font-weight: 600; }
+.l-poll-options { display: grid; gap: 8px; }
+.l-poll-option { display: grid; gap: 6px; padding: 4px; border-radius: 16px; background: rgba(255, 255, 255, 0.04); }
+.l-poll-option.chosen { box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.8); }
+.l-poll-main { position: relative; overflow: hidden; display: flex; align-items: center; gap: 10px; width: 100%; padding: 10px 12px; border: 0; border-radius: 12px;
+  background: none; color: var(--text); text-align: left; cursor: pointer; }
+.l-poll-main:disabled { cursor: default; }
+.l-poll-bar { position: absolute; inset: 0 auto 0 0; background: rgba(255, 255, 255, 0.09); transition: width 0.35s ease; pointer-events: none; }
+.l-poll-option.leading .l-poll-bar { background: rgba(233, 216, 166, 0.16); }
+.l-poll-text { position: relative; flex: 1; min-width: 0; display: grid; gap: 2px; }
+.l-poll-text b { font-size: 15px; overflow-wrap: anywhere; }
+.l-poll-text small { color: var(--dim); font-size: 12.5px; line-height: 1.35; }
+.l-poll-side { position: relative; flex: none; display: grid; justify-items: end; gap: 2px; }
+.l-poll-side b { font-size: 15px; white-space: nowrap; }
+.l-poll-side b small { color: var(--dim); font-weight: 600; font-size: 12px; }
+.l-poll-side > small { color: var(--dim); font-size: 12px; font-weight: 600; }
+.l-poll-foot { display: flex; align-items: center; gap: 10px; min-height: 20px; padding: 0 10px 4px; font-size: 13px; }
+.l-poll-foot:empty { display: none; }
+.l-poll-faces { display: flex; }
+.l-poll-faces .l-av { margin-right: -6px; box-shadow: 0 0 0 2px #17181c; }
+.l-poll-foot .l-settle { margin-left: auto; }
+
+/* Round 5. The title line: name and place on the left; dates, budget, Info, Settings and Edit on the right, centred on one line. */
+.l-titlebar { align-items: center; }
+.l-titlebar-name { flex: 1 1 280px; min-width: 0; display: grid; gap: 6px; }
+.l-titlebar-name .l-title-row { flex: none; }
+.l-place-line { display: flex; align-items: center; gap: 7px; min-width: 0; color: var(--dim); font-size: 16px; font-weight: 600; }
+.l-place-line svg { flex: none; }
+.l-place-line span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
+.l-place-line span.empty { color: var(--dim); }
+.l-mini-edit { flex: none; width: 28px; height: 28px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 999px; cursor: pointer;
+  color: var(--dim); background: rgba(255, 255, 255, 0.06); }
+.l-mini-edit:hover { color: var(--text); background: rgba(255, 255, 255, 0.12); }
+.l-titlebar-chips { flex: 0 1 auto; align-items: center; justify-content: flex-end; }
+.l-titlebar-chips .l-tool { height: 40px; padding: 0 14px; font-size: 14px; }
+.l-titlebar-chips .l-tool svg { width: 15px; height: 15px; }
+/* Each person's net with you, on the right of their row. */
+.l-net { flex: none; min-width: 64px; text-align: right; font-size: 14px; font-weight: 750; font-variant-numeric: tabular-nums; color: var(--dim); }
+.l-net.owed { color: var(--go); }
+button.l-net { border: 0; background: none; padding: 4px 0; cursor: pointer; }
+.l-net.owe { color: #ff8a80; text-decoration: underline; text-underline-offset: 3px; text-decoration-color: rgba(255, 138, 128, 0.45); }
+/* Open votes in the middle of the trip. */
+.l-pact-votes { display: grid; gap: 12px; margin: 8px 0 22px; }
+
+/* Round 6. Title on its own line; one row under it: place on the left, everything else on the right, all the same height. */
+.l-titlebar { display: grid; gap: 14px; margin: 8px 0 16px; }
+.l-titlebar .l-title-row { min-width: 0; }
+.l-meta-row { display: flex; align-items: center; justify-content: space-between; gap: 12px 24px; flex-wrap: wrap; min-width: 0; }
+.l-meta-row > .l-chip { min-width: 0; max-width: 100%; }
+.l-meta-row > .l-chip span { overflow: hidden; text-overflow: ellipsis; }
+.l-meta-right { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; margin-left: auto; }
+.l-meta-row .l-chip { height: 40px; }
+.l-round { flex: none; width: 40px; height: 40px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 999px; cursor: pointer;
+  color: var(--dim); background: linear-gradient(180deg, rgba(255, 255, 255, 0.12), rgba(255, 255, 255, 0.05)); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12); }
+.l-round:hover { color: var(--text); filter: brightness(1.15); }
+.l-round svg { width: 18px; height: 18px; }
+@media (max-width: 640px) { .l-meta-right { justify-content: flex-start; margin-left: 0; } }
+
+/* Findings: options as visual cards. */
+.l-findings { display: grid; gap: 14px; margin: 8px 0 22px; }
+.l-findings .l-poll { padding: 18px; }
+.l-poll-head .l-poll-start { margin-left: auto; flex: none; }
+.l-opt-grid { display: grid; gap: 10px; }
+.l-opt-title { font-size: 15px; }
+.l-opt-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 12px; }
+.l-opt-grid.compact .l-opt-cards { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
+.l-opt-card { position: relative; display: flex; flex-direction: column; min-width: 0; overflow: hidden; border-radius: 16px;
+  background: rgba(255, 255, 255, 0.05); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.07); }
+.l-opt-img { position: relative; display: grid; place-items: center; aspect-ratio: 16 / 9; overflow: hidden;
+  background: radial-gradient(120% 120% at 20% 0%, rgba(255, 255, 255, 0.22), rgba(255, 255, 255, 0.04) 60%), linear-gradient(135deg, #2a2c33, #16171b); }
+.l-opt-img img { width: 52px; height: 52px; border-radius: 12px; object-fit: contain; background: #fff; padding: 6px; box-shadow: 0 8px 22px rgba(0, 0, 0, 0.4); }
+.l-opt-img.photo img { width: 100%; height: 100%; border-radius: 0; padding: 0; object-fit: cover; background: none; box-shadow: none; }
+.l-opt-img > span { font-size: 30px; font-weight: 800; color: rgba(255, 255, 255, 0.7); }
+.l-opt-img small { position: absolute; left: 8px; bottom: 7px; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 700; color: rgba(255, 255, 255, 0.85);
+  background: rgba(0, 0, 0, 0.45); backdrop-filter: blur(6px); }
+.l-opt-grid.compact .l-opt-img { aspect-ratio: 2 / 1; }
+.l-opt-grid.compact .l-opt-img img { width: 36px; height: 36px; padding: 4px; border-radius: 9px; }
+.l-opt-body { display: grid; gap: 4px; padding: 10px 12px 12px; min-width: 0; }
+.l-opt-name { font-size: 15px; line-height: 1.25; overflow-wrap: anywhere; }
+.l-opt-price { font-size: 22px; font-weight: 800; letter-spacing: -0.01em; }
+.l-opt-price small { font-size: 13px; font-weight: 600; color: var(--dim); }
+.l-opt-grid.compact .l-opt-price { font-size: 17px; }
+.l-opt-notes { margin: 0; color: var(--dim); font-size: 13px; line-height: 1.4; }
+.l-opt-body .l-inline-link { justify-self: start; font-size: 13px; }
+.l-opt-foot { position: relative; display: flex; align-items: center; gap: 8px; margin-top: auto; padding: 10px 12px; border-top: 1px solid rgba(255, 255, 255, 0.07); overflow: hidden; }
+.l-opt-bar { position: absolute; inset: 0 auto 0 0; background: rgba(255, 255, 255, 0.06); transition: width 0.35s ease; pointer-events: none; }
+.l-opt-foot.leading .l-opt-bar { background: rgba(233, 216, 166, 0.14); }
+.l-opt-foot > *:not(.l-opt-bar) { position: relative; }
+.l-opt-count { font-size: 12.5px; font-weight: 700; color: var(--dim); }
+.l-opt-vote { margin-left: auto; height: 30px; padding: 0 14px; border: 0; border-radius: 999px; cursor: pointer; font-size: 13px; font-weight: 750;
+  color: var(--text); background: rgba(255, 255, 255, 0.12); }
+.l-opt-vote.on { color: #0b0b0d; background: var(--silver); }
+.l-opt-foot.chosen { box-shadow: inset 0 2px 0 rgba(255, 255, 255, 0.6); }
+.l-chat-options { max-width: 100%; padding: 12px; border-radius: 18px; background: rgba(255, 255, 255, 0.05); }
+
+/* Grok's blocks in the chat: just a simple header line. */
+.l-grok-block-main { display: grid; gap: 2px; min-width: 0; }
+.l-grok-block-main b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.l-grok-block-main small { color: var(--dim); font-size: 12.5px; font-weight: 600; }
+/* A list of options in the chat: one summary line, with Check it out. */
+.l-found { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: 18px; min-width: 0;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.09), rgba(255, 255, 255, 0.04)); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08); }
+.l-found-text { flex: 1; min-width: 0; display: grid; gap: 2px; }
+.l-found-text b { font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.l-found-text span { color: var(--dim); font-size: 13px; font-weight: 600; }
+.l-found .l-btn { flex: none; }
+/* The vote tick. */
+.l-vote-check { margin-left: auto; flex: none; width: 34px; height: 34px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 999px; cursor: pointer;
+  color: rgba(255, 255, 255, 0.55); background: none; box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.28); transition: transform 0.12s ease, background 0.15s ease; }
+.l-vote-check:hover { color: var(--text); box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.6); }
+.l-vote-check:active { transform: scale(0.92); }
+.l-vote-check.on { color: #0b0b0d; background: var(--silver); box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35); }
+.l-opt-foot .l-vote-check + .l-settle { margin-left: 0; }

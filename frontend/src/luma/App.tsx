@@ -457,7 +457,7 @@ function WalletPage() {
         } />
       ) : (
         <div className="l-card l-balance">
-          <span className="l-dim" style={{ fontWeight: 600 }}>Base Sepolia</span>
+          <span className="l-dim" style={{ fontWeight: 600 }}>Arc Testnet</span>
           <p style={{ margin: '6px 0 12px', fontSize: 16 }}>Make a wallet so you can send and get test USDC. Circle keeps it safe with your own PIN.</p>
           <div>{busy ? <Busy text="Set your PIN…" /> : <button className="l-btn" type="button" onClick={async () => { setBusy(true); setError(null); try { setWallet(await S.makeWallet()) } catch (e) { setError((e as Error).message) } setBusy(false) }}>Make my wallet</button>}</div>
           {error && <p className="l-error">{error}</p>}
@@ -467,9 +467,16 @@ function WalletPage() {
       {!wallet ? <div className="l-card l-empty"><span>Make your wallet to see money coming in and going out.</span></div>
         : ledgerError && !ledger ? <div className="l-card l-empty"><span>{ledgerError}</span><div><button className="l-btn l-ghost l-small" type="button" onClick={() => setAttempt((n) => n + 1)}>Try again</button></div></div>
         : !ledger ? <div className="l-card l-empty"><span className="l-spin" style={{ margin: '0 auto' }} /></div>
-        : !ledger.rows.length ? <div className="l-card l-empty"><span>Nothing yet on Base Sepolia. Your wallet here is new, so money you send and get from now on shows up here. Older Arc payments aren't listed.</span></div> : (
+        : !ledger.rows.length ? <div className="l-card l-empty"><span>Money you send and get shows up here.</span></div> : (
         <div className="l-card l-list">
           {ledger.rows.map((r) => <LedgerLine key={r.id} row={r} taggedTo={tagged.get(r.txHash.toLowerCase()) ?? null} onSplit={() => setSplitting(r)} />)}
+          {ledger.fees > 0 && (
+            <div className="l-row">
+              <span className="l-ledger-icon"><Icon name="other" /></span>
+              <div className="l-row-main"><b>Network fees</b><span>Arc charges a tiny fee in USDC for each payment you send</span></div>
+              <b className="l-amt">−{ledger.fees.toFixed(4)}</b>
+            </div>
+          )}
           <div className="l-row l-ledger-total">
             <div className="l-row-main"><b>Balance</b><span>Everything above, added up</span></div>
             <b className="l-amt">{(Math.floor(ledger.total * 100) / 100).toFixed(2)} USDC</b>
@@ -534,10 +541,10 @@ function LedgerLine({ row, taggedTo, onSplit }: { row: S.LedgerRow; taggedTo: st
       </div>
     )
   }
-  // A pact payment opens that pact; everything else opens the transaction on the Base explorer.
+  // A pact payment opens that pact; everything else opens the transaction on the Arc explorer.
   return pact
     ? <button type="button" className="l-row l-ledger-row" onClick={() => go(`/pacts/${pact.pact_id}`)} title={`Open ${pact.name}`}>{body}</button>
-    : <a className="l-row l-ledger-row" href={S.txLink(row.txHash)} target="_blank" rel="noreferrer" title="See it on the Base explorer">{body}</a>
+    : <a className="l-row l-ledger-row" href={S.txLink(row.txHash)} target="_blank" rel="noreferrer" title="See it on the Arc explorer">{body}</a>
 }
 
 // ---- New pact
