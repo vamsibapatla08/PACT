@@ -208,6 +208,7 @@ export function PactWorkspacePage({ user, profile, pactId, onNavigate, onSignOut
       {error ? <StatusPanel title="Pact unavailable." message={error} actionLabel="Return to dashboard" onAction={() => onNavigate('/dashboard')} /> : null}
       {pact ? <>
         <div className="workspace-heading"><div><p className="section-kicker">PACT / WORKSPACE</p><h1>{pact.name}</h1><p>Shared planning starts here.</p></div><span className="status-chip"><i /> Active</span></div>
+        <section className="workspace-flow-shell"><PactFlowPanel milestones={flow.milestones} recommendations={flow.recommendations} decisions={flow.decisions} loading={flowLoading} error={flowError} onSubmitRecommendation={handleSubmitRecommendation} /></section>
         <div className="workspace-quick-controls">
           <WorkspaceDisclosure label="PACT / PEOPLE" title="People & Invites" summary={`${pact.members.length} member${pact.members.length === 1 ? '' : 's'} · secure sharing`} compact>
             <PeopleInvitesPanel pact={pact} user={user} profile={profile} inviteCode={inviteCode} inviteError={inviteError} inviteLoading={inviteLoading} copied={copied} onInvite={() => { void handleInvite() }} />
@@ -238,7 +239,6 @@ export function PactWorkspacePage({ user, profile, pactId, onNavigate, onSignOut
             </div>
           </div>
         </div>
-        <section className="workspace-flow-shell"><PactFlowPanel milestones={flow.milestones} recommendations={flow.recommendations} decisions={flow.decisions} loading={flowLoading} error={flowError} onSubmitRecommendation={handleSubmitRecommendation} /></section>
       </> : null}
     </motion.section>
   </AppShell>
