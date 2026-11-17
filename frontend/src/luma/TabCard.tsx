@@ -1,18 +1,17 @@
 import { useCallback, useEffect, useState } from 'react'
 import * as S from './store'
-import { Busy, Grok, Icon, Modal } from './ui'
+import { Busy, Icon, Modal } from './ui'
 
 /** The pact's live tab: who's up, who's down, the fewest paybacks to square up, and every expense. */
-export function TabCard({ id, me, members }: { id: string; me: string; members: S.Member[] }) {
+export function TabCard({ id, me, members, version }: { id: string; me: string; members: S.Member[]; version: number }) {
   const [tab, setTab] = useState<S.Tab | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [working, setWorking] = useState<string | null>(null)
   const [adding, setAdding] = useState(false)
-  const [question, setQuestion] = useState('')
-  const [answer, setAnswer] = useState<S.TabAnswer | null>(null)
 
   const reload = useCallback(() => S.loadTab(id).then(setTab).catch((e: Error) => setError(e.message)), [id])
-  useEffect(() => { void reload(); const t = setInterval(() => void reload(), 8000); return () => clearInterval(t) }, [reload])
+  // version changes when Grok edits the tab, so the change shows at once instead of on the next poll.
+  useEffect(() => { void reload(); const t = setInterval(() => void reload(), 8000); return () => clearInterval(t) }, [reload, version])
 
   const run = async (label: string, work: () => Promise<unknown>) => {
     setWorking(label); setError(null)
@@ -66,31 +65,11 @@ export function TabCard({ id, me, members }: { id: string; me: string; members: 
       )}
       {tab && !tab.expenses.length && <p className="l-dim">Nothing on the tab yet. When someone pays for the group, add it here and it splits itself.</p>}
 
-      <form className="l-tab-ask" onSubmit={(e) => { e.preventDefault(); if (question.trim()) void run('Grok is reading the tab…', async () => { setAnswer(await S.askGrokAboutTab(id, question)); setQuestion('') }) }}>
-        <span className="l-av" style={{ width: 26, height: 26, background: '#000' }}><Grok size={15} /></span>
-        <input className="l-input" value={question} onChange={(e) => setQuestion(e.target.value)} placeholder="Ask Grok: “Can I crash at the hotel too?” or “I got coffee for everyone, $18”" maxLength={600} />
-      </form>
-      {answer && (
-        <div className="l-tab-answer">
-          <p>{answer.reply}</p>
-          {answer.actions.map((a, i) => (
-            <button key={i} className="l-btn l-small" type="button" disabled={Boolean(working)} onClick={() => void run('Updating the tab…', async () => { await S.runTabAction(id, a); setAnswer(null) })}>{actionLabel(a, who)}</button>
-          ))}
-        </div>
-      )}
       {working && <Busy text={working} />}
       {error && <p className="l-error">{error}</p>}
       {adding && <AddExpense id={id} me={me} members={members} onClose={() => setAdding(false)} onDone={() => { setAdding(false); void reload() }} />}
     </div>
   )
-}
-
-function actionLabel(a: S.TabAction, who: (id: string) => string) {
-  const args = a.args
-  if (a.tool === 'join_expense') return args.booking ? 'Add me to the booking' : 'Add me to it'
-  if (a.tool === 'add_expense') return `Add ${String(args.title ?? 'it')} · ${S.cents(Number(args.total_cents) || 0)}`
-  if (a.tool === 'resplit_expense') return Array.isArray(args.split_with) ? `Split it with ${args.split_with.map((u) => who(String(u))).join(', ')}` : 'Re-split it'
-  return 'Put the booking on the tab'
 }
 
 /** "I paid for something": what, how much, who paid and who it's for. Even split, cents handled by the database. */

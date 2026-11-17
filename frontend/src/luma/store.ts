@@ -665,8 +665,6 @@ export type TabExpense = {
 }
 export type TabPayback = { from: string; to: string; amount_cents: number }
 export type Tab = { currency: string; members: TabMember[]; expenses: TabExpense[]; settle_up: TabPayback[] }
-export type TabAction = { tool: string; args: Record<string, unknown> }
-export type TabAnswer = { reply: string; actions: TabAction[] }
 
 export const cents = (c: number) => `$${(Math.abs(c) / 100).toFixed(2)}`
 export const toCents = (text: string) => Math.round(Number(text.replace(/[^0-9.]/g, '')) * 100)
@@ -707,17 +705,29 @@ export async function payBack(id: string, toUser: string, amountCents: number) {
   if (t.status !== 'confirmed') throw new Error('The payback has not confirmed yet. Check your wallet activity.')
 }
 
-const tabTools = ['add_expense', 'join_expense', 'resplit_expense', 'import_plan_to_tab']
+export type PilotAction = { tool: string; args: Record<string, unknown> }
+/** Grok's reply, and the changes it wants to make. operationId is the saved plan the asker approves. */
+export type PilotAnswer = { reply: string; actions: PilotAction[]; operationId: string | null }
 
-/** Ask Grok about money. It reads the tab and may propose changes, which only run when you tap them. */
-export async function askGrokAboutTab(id: string, question: string): Promise<TabAnswer> {
-  const a = await invoke<{ reply?: string; summary?: string; actions?: TabAction[] }>('pactpilot', { pact_id: id, question: question.slice(0, 2000) })
-  return { reply: a.reply ?? a.summary ?? '', actions: (a.actions ?? []).filter((x) => tabTools.includes(x.tool)) }
+/** Ask Grok anything about the pact. It reads the tab and the plan, and proposes changes that only run once you approve. */
+export async function askGrok(id: string, question: string): Promise<PilotAnswer> {
+  const a = await invoke<{ reply?: string; summary?: string; actions?: PilotAction[]; operation_id?: string | null }>('pactpilot', { pact_id: id, question: question.slice(0, 2000), idempotency_key: crypto.randomUUID() })
+  return { reply: a.reply ?? a.summary ?? '', actions: a.actions ?? [], operationId: a.operation_id ?? null }
 }
 
-export async function runTabAction(id: string, action: TabAction) {
-  try { await invoke('pactpilot', { pact_id: id, tool: action.tool, args: action.args }) }
-  catch (e) { throw new Error(said(e, "Grok's change didn't go through.")) }
+/** Run the plan the asker approved, one change at a time, and record how it went. It runs once: a second tap fails in the database. */
+export async function approveGrok(id: string, operationId: string) {
+  const { data: plan, error } = await supabase.rpc('begin_pact_ai_operation', { p_operation_id: operationId })
+  if (error) throw new Error(said(error, 'That plan was already approved or has expired. Ask Grok again.'))
+  const actions = ((plan as { actions?: PilotAction[] } | null)?.actions ?? [])
+  const results: unknown[] = []
+  try {
+    for (const a of actions) results.push(await invoke('pactpilot', { pact_id: id, tool: a.tool, args: a.args }))
+  } catch (e) {
+    await supabase.rpc('finish_pact_ai_operation', { p_operation_id: operationId, p_status: 'failed', p_result: { results, error: (e as Error).message } })
+    throw new Error(said(e, "Grok's change didn't go through."))
+  }
+  await supabase.rpc('finish_pact_ai_operation', { p_operation_id: operationId, p_status: 'completed', p_result: { results } })
 }
 
 /** Wallet payments already on a tab, by transaction hash, so the wallet can show which pact each went to. */

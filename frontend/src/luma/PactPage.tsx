@@ -3,6 +3,7 @@ import * as S from './store'
 import { DetailsForm, useApp } from './App'
 import { Avatar, Busy, Cover, Grok, Icon, Modal, Switch, VerifiedBadge } from './ui'
 import { TabCard } from './TabCard'
+import { PilotCard } from './PilotCard'
 
 type Sheet =
   | { kind: 'settings' } | { kind: 'addPeople' } | { kind: 'addItem' } | { kind: 'grok' }
@@ -18,6 +19,7 @@ export function PactPage({ id }: { id: string }) {
   const [sheet, setSheet] = useState<Sheet | null>(null)
   const [working, setWorking] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [tabVersion, setTabVersion] = useState(0)
   const chatRef = useRef<HTMLElement>(null)
   /** What Grok is doing right now, shown at the bottom of the chat: thinking, slow, or failed with a retry. */
   const [grokJob, setGrokJob] = useState<{ label: string; slow: boolean; error: string | null; retry: () => void } | null>(null)
@@ -169,7 +171,8 @@ export function PactPage({ id }: { id: string }) {
             </div>
           ) : null}
 
-          {d && <TabCard id={id} me={me} members={d.members} />}
+          {d && <PilotCard id={id} me={me} members={d.members} onDone={() => { setTabVersion((v) => v + 1); void refreshPact(id) }} />}
+          {d && <TabCard id={id} me={me} members={d.members} version={tabVersion} />}
 
         </section>
       </div>

@@ -787,3 +787,6 @@ button.l-ledger-row { width: 100%; border: 0; background: none; text-align: left
 .x-phone.real.back { right: auto; left: -70px; top: 40px; transform: rotate(-6deg) scale(0.9); opacity: 0.9; filter: brightness(0.75); }
 @media (max-width: 1000px) { .x-phones { width: 330px; } }
 @media (max-width: 640px) { .x-phones { width: 290px; height: 610px; } .x-phone.real.back { display: none; } .x-phone.real { right: 0; } }
+.l-pilot-plan { flex-basis: 100%; display: flex; flex-direction: column; gap: 8px; }
+.l-pilot-plan ul { margin: 0; padding-left: 18px; }
+.l-pilot-buttons { display: flex; gap: 8px; }
