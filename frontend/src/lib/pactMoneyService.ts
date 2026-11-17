@@ -217,11 +217,16 @@ export class PactVerificationError extends Error {
   }
 }
 
-export async function verifyPactEvent(pactId: string, eventType: 'paid' | 'released' | 'cancelled' | 'refunded', txHash: string): Promise<VerifiedPactEvent> {
+// Returns null when verify-pact-event is not deployed, so the on-chain receipt stands on its own.
+export async function verifyPactEvent(pactId: string, eventType: 'paid' | 'released' | 'cancelled' | 'refunded', txHash: string): Promise<VerifiedPactEvent | null> {
   const { data, error } = await client().functions.invoke('verify-pact-event', {
     body: { source: 'direct_rpc', pactId, eventType, txHash },
   })
-  if (error) throw new Error(await walletErrorMessage(error))
+  if (error) {
+    const response = (error as { context?: unknown }).context
+    if (response instanceof Response && response.status === 404) return null
+    throw new Error(await walletErrorMessage(error))
+  }
   if (!data || data.accepted !== true || data.pactId !== pactId || data.txHash !== txHash) throw new Error('The Arc event was not verified.')
   return data as VerifiedPactEvent
 }
@@ -237,10 +242,12 @@ export async function runPactAction(action: PactAction, pactId: string): Promise
     if (progress?.status === 'confirmed') {
       const eventType = action === 'pay_share' ? 'paid' : action === 'release' ? 'released' : action === 'cancel' ? 'cancelled' : action === 'claim_refund' ? 'refunded' : null
       if (eventType && progress.txHash) {
+        // Arc already confirmed it, so the money moved. A verify error is only ever "still checking", never a failure,
+        // or people pay again.
         try { await verifyPactEvent(pactId, eventType, progress.txHash) }
         catch (reason) {
-          const message = reason instanceof Error ? reason.message : 'PACT verification failed.'
-          throw new PactVerificationError(`Arc transaction confirmed, but PACT verification is ${/confirm|await|pending/i.test(message) ? 'pending' : 'failed'}: ${message}`, pactId, eventType, progress.txHash, /confirm|await|pending/i.test(message))
+          const message = reason instanceof Error ? reason.message : 'PACT verification is not done yet.'
+          throw new PactVerificationError(`Done on Arc, so the money moved. Pact is still checking it: ${message}`, pactId, eventType, progress.txHash, true)
         }
       }
       if (eventType && !progress.txHash) throw new Error('Arc transaction confirmed, but no transaction hash was returned for PACT verification.')

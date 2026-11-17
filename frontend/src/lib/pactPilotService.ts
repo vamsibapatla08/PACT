@@ -1,8 +1,8 @@
 import { supabase } from './supabase'
-import type { PactPilotContext, PactPilotCost, PactPilotEstimate, PactPilotMessage, PactPilotOption, PactPilotTask } from '../types/pactPilot'
+import type { PactPilotAgreement, PactPilotContext, PactPilotCost, PactPilotFitIssue, PactPilotEstimate, PactPilotMessage, PactPilotOption, PactPilotTask } from '../types/pactPilot'
 
 export type PactPilotProposedAction = { tool: PactPilotToolName; args: Record<string, unknown>; requires_confirmation: true }
-type PactPilotResponse = { summary: string; options: PactPilotOption[]; tasks?: PactPilotTask[]; costs?: PactPilotCost[]; estimate?: PactPilotEstimate; next_steps?: string[]; actions?: PactPilotProposedAction[]; operation_id?: string }
+type PactPilotResponse = { summary: string; agreement?: PactPilotAgreement; fit_issues?: PactPilotFitIssue[]; options: PactPilotOption[]; tasks?: PactPilotTask[]; costs?: PactPilotCost[]; estimate?: PactPilotEstimate; next_steps?: string[]; actions?: PactPilotProposedAction[]; operation_id?: string }
 export type PactPilotAskRequest = { context: PactPilotContext; prompt: string }
 
 function client() {
@@ -36,9 +36,11 @@ export async function askPactPilot({ context, prompt }: PactPilotAskRequest): Pr
   const tasks = Array.isArray(response.tasks) ? response.tasks.filter((task) => typeof task?.title === 'string') : undefined
   const costs = Array.isArray(response.costs) ? response.costs.filter((cost) => typeof cost?.item === 'string' && typeof cost.estimated_amount === 'number' && (cost.option_title == null || typeof cost.option_title === 'string') && (cost.is_shared == null || typeof cost.is_shared === 'boolean')) : undefined
   const estimate = response.estimate && (typeof response.estimate.total === 'number' || response.estimate.total === null) ? response.estimate : undefined
+  const agreement = response.agreement && typeof response.agreement.agreed === 'boolean' ? response.agreement : undefined
+  const fit_issues = Array.isArray(response.fit_issues) ? response.fit_issues.filter((issue) => typeof issue?.problem === 'string' && typeof issue.suggestion === 'string') : undefined
   const next_steps = Array.isArray(response.next_steps) ? response.next_steps.filter((step) => typeof step === 'string') : undefined
   const actions = Array.isArray(response.actions) ? response.actions.filter((action): action is PactPilotProposedAction => Boolean(action) && typeof action.tool === 'string' && action.args !== null && typeof action.args === 'object' && action.requires_confirmation === true) : []
-  return { id: `pilot-${Date.now()}`, role: 'assistant', body: '', summary: response.summary, options, tasks, costs, estimate, next_steps, actions, operation_id: typeof response.operation_id === 'string' ? response.operation_id : undefined, created_at: new Date().toISOString() }
+  return { id: `pilot-${Date.now()}`, role: 'assistant', body: '', summary: response.summary, agreement, fit_issues, options, tasks, costs, estimate, next_steps, actions, operation_id: typeof response.operation_id === 'string' ? response.operation_id : undefined, created_at: new Date().toISOString() }
 }
 
 export async function runPactPilotTool(context: PactPilotContext, tool: PactPilotToolName, args: Record<string, unknown>): Promise<PactPilotToolResult> {

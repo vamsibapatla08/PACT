@@ -55,11 +55,35 @@ export function PactWorkspacePage({ user, profile, pactId, onNavigate, onSignOut
     let active = true
     setPaymentRows(null)
     setPaymentStatusError(null)
-    getPactPaymentStatus(pact.id).then((rows) => { if (active) setPaymentRows(rows) }).catch((reason) => {
-      if (active && !isPaymentBackendUnavailable(reason)) setPaymentStatusError(reason instanceof Error ? reason.message : 'Payment status could not be loaded.')
-    })
-    const refresh = window.setInterval(() => { getPactPaymentStatus(pact.id).then((rows) => { if (active) { setPaymentRows(rows); setPaymentStatusError(null) } }).catch((reason) => { if (active && !isPaymentBackendUnavailable(reason)) setPaymentStatusError(reason instanceof Error ? reason.message : 'Payment status could not be loaded.') }) }, 10000)
-    return () => { active = false; window.clearInterval(refresh) }
+
+const refresh = async () => {
+  try {
+    const rows = await getPactPaymentStatus(pact.id)
+    if (!active) return
+
+    setPaymentRows(rows)
+    setPaymentStatusError(null)
+  } catch (reason) {
+    if (active && !isPaymentBackendUnavailable(reason)) {
+      setPaymentStatusError(
+        reason instanceof Error ? reason.message : 'Payment status could not be loaded.',
+      )
+    }
+    return
+  }
+
+  // Load progress after payment status has had a chance to sync it.
+  await loadPactFlow(pact.id).then((value) => {
+    if (active) setFlow(value)
+  }).catch(() => {})
+}
+
+void refresh()
+const timer = window.setInterval(() => { void refresh() }, 10000)
+return () => {
+  active = false
+  window.clearInterval(timer)
+}
   }, [pact?.id])
 
   useEffect(() => {
@@ -155,24 +179,33 @@ export function PactWorkspacePage({ user, profile, pactId, onNavigate, onSignOut
   // The date picker gives local time with no zone, so it becomes a UTC instant here, before the server reads it.
   async function handleCreateFundingPlan(input: { shareUsdc: string; deadline: string; payeeAddress: string }) {
     const created = await createPactFundingPlan({ pactId, ...input, deadline: new Date(input.deadline).toISOString() })
-    const latest = await getLatestBookingStatus(pactId)
-    const currentSplit = latest.splits[0]
-    if (latest.booking && currentSplit?.status === 'approved') await associateBookingPayment(pactId, latest.booking.booking_id, currentSplit.split_id, created.paymentId)
+    // The plan is already saved, so a booking error must not make the host create it twice.
+    try {
+      const latest = await getLatestBookingStatus(pactId)
+      const currentSplit = latest.splits[0]
+      if (latest.booking && currentSplit?.status === 'approved') await associateBookingPayment(pactId, latest.booking.booking_id, currentSplit.split_id, created.paymentId)
+    } catch (reason) {
+      console.warn('Funding plan saved, but it could not be linked to a booking', reason)
+    }
     setPaymentRows(await getPactPaymentStatus(pactId))
+    setFlow(await loadPactFlow(pactId))
   }
 
   async function handlePactAction(action: PactAction) {
-    try {
-      const txHash = await runPactAction(action, pactId)
-      setPaymentRows(await getPactPaymentStatus(pactId))
-      getPactMoneyWalletStatus().then((wallet) => { if (wallet) setMoneyWallet(wallet) }).catch(() => {})
-      return txHash
-    } catch (reason) {
-      // Refresh even when Arc rejects or is still pending, so verified backend
-      // state replaces any stale row after a failed or delayed action.
-      await getPactPaymentStatus(pactId).then(setPaymentRows).catch(() => {})
-      throw reason
-    }
+   try {
+  const txHash = await runPactAction(action, pactId)
+  setPaymentRows(await getPactPaymentStatus(pactId))
+  void loadPactFlow(pactId).then(setFlow).catch(() => {})
+  void getPactMoneyWalletStatus().then((wallet) => {
+    if (wallet) setMoneyWallet(wallet)
+  }).catch(() => {})
+  return txHash
+} catch (reason) {
+  // Reload payment status and progress before surfacing the original error.
+  await getPactPaymentStatus(pactId).then(setPaymentRows).catch(() => {})
+  void loadPactFlow(pactId).then(setFlow).catch(() => {})
+  throw reason
+}
   }
 
   async function handleRetryVerification(eventType: PactVerificationError['eventType'], txHash: string) {
