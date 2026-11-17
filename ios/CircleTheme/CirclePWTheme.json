@@ -1,0 +1,67 @@
+{
+    "font": {
+        "ultraLight": "", "thin": "", "light": "", "regular": "", "medium": "",
+        "semibold": "", "bold": "", "heavy": "", "black": ""
+    },
+    "color": {
+        "background": "#0E0F11",
+        "divider": "#2A2D33",
+        "success": "#7ED9A0",
+        "error": "#FF6B6B",
+        "error_background": "#2A1517",
+
+        "text_main": "#F4F5F7",
+        "text_main2": "#F4F5F7",
+        "text_auxiliary": "#C8CCD2",
+        "text_auxiliary2": "#8E939B",
+        "text_summary": "#C8CCD2",
+        "text_summary_highlight": "#F4F5F7",
+        "text_placeholder": "#6B7078",
+        "text_action": "#C8CCD2",
+        "text_action_pressed": "#B3C8CCD2",
+        "text_prompt": "#F4F5F7",
+        "text_prompt2": "#8E939B",
+        "text_exchange": "#8E939B",
+        "text_interactive": "#C8CCD2",
+        "text_sign_url": "#8E939B",
+
+        "pin_dot_base": "#15171A",
+        "pin_dot_base_border": "#8E939B",
+        "pin_dot_activated": "#C8CCD2",
+        "pin_dot_focused": "#F4F5F7",
+        "pin_digit_activated": "#F4F5F7",
+
+        "input_border": "#2A2D33",
+        "input_border_focused": "#C8CCD2",
+        "input_background_disabled": "#15171A",
+
+        "main_bt_text": "#000000",
+        "main_bt_text_pressed": "#99000000",
+        "main_bt_text_disabled": "#6B7078",
+        "main_bt_background": "#C8CCD2",
+        "main_bt_background_pressed": "#F4F5F7",
+        "main_bt_background_disabled": "#22252A",
+
+        "second_bt_text": "#C8CCD2",
+        "second_bt_border": "#C8CCD2",
+        "second_bt_background": "#0E0F11",
+        "second_bt_background_pressed": "#1C1F23",
+
+        "plain_bt_text": "#C8CCD2",
+        "plain_bt_background": "#0E0F11",
+        "plain_bt_background_pressed": "#1C1F23",
+
+        "recover_pin_hint_title": "#F4F5F7",
+        "recover_pin_hint_title_bg": "#1C1F23",
+        "recover_pin_hint": "#C8CCD2",
+
+        "security_confirm_main_bg": "#1C1F23",
+
+        "tip_text": "#F4F5F7",
+        "tip_background": "#2A2D33",
+
+        "interactive_background": "#15171A",
+
+        "title_gradients": ["#F4F5F7", "#8E939B"]
+    }
+}

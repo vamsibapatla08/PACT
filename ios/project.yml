@@ -1,0 +1,48 @@
+name: Pact_App
+options:
+  bundleIdPrefix: com.rorygeddes
+  deploymentTarget:
+    iOS: "26.0"
+  createIntermediateGroups: true
+  # Re-links Circle's SDK every time the project is regenerated.
+  postGenCommand: pod install
+packages:
+  Supabase:
+    url: https://github.com/supabase/supabase-swift
+    from: 2.0.0
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: "0.1"
+    CURRENT_PROJECT_VERSION: "1"
+targets:
+  Pact_App:
+    type: application
+    platform: iOS
+    sources:
+      - path: Pact_App
+    dependencies:
+      - package: Supabase
+    info:
+      path: Pact_App/Info.plist
+      properties:
+        CFBundleURLTypes:
+          - CFBundleURLName: com.rorygeddes.pact
+            CFBundleURLSchemes: [pact]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.rorygeddes.pact
+        PRODUCT_NAME: Pact
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_CFBundleDisplayName: Pact
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        INFOPLIST_KEY_UIUserInterfaceStyle: Dark
+        INFOPLIST_KEY_UISupportedInterfaceOrientations: UIInterfaceOrientationPortrait
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        TARGETED_DEVICE_FAMILY: "1"
+        CODE_SIGN_STYLE: Automatic
+        INFOPLIST_KEY_ITSAppUsesNonExemptEncryption: NO
+        INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.travel
+        SWIFT_DEFAULT_ACTOR_ISOLATION: MainActor
+        SWIFT_APPROACHABLE_CONCURRENCY: YES
