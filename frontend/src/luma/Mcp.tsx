@@ -17,11 +17,11 @@ export type McpTool = { name: string; label: string; does: string; read?: boolea
 
 export const mcpTools: McpTool[] = [
   { name: 'list_pacts', label: 'List pacts', does: 'Every pact, its stage and what you owe', read: true,
-    detail: 'Grok sees every pact you are in: the dates, the place, how many people, where it is (planning, approving, paying or booked) and what you still owe.',
+    detail: 'Grok Bot sees every pact you are in: the dates, the place, how many people, where it is (planning, approving, paying or booked) and what you still owe.',
     ask: 'What trips do I have coming up?',
-    result: ['Austin ACL weekend, Oct 2 to 5, 4 people, approving', 'Texas Trip, Austin, planning', 'You owe $0.10 in Austin John'] },
+    result: ['Texas Trip, Austin, Nov 19 to 22, 3 people, 1 of 3 paid', 'Austin ACL weekend, Oct 2 to 4, 4 people, approving', 'You owe nothing: you paid your $231'] },
   { name: 'get_pact', label: 'Read a pact', does: 'People, itinerary, prices, latest plan', read: true,
-    detail: 'One pact in full: who is in it and who coordinates, everything on the itinerary with its price each, the latest plan Grok wrote, and who has paid.',
+    detail: 'One pact in full: who is in it and who coordinates, everything on the itinerary with its price each, the latest plan Pact Pilot wrote, and who has paid.',
     ask: "What's the plan for ACL?",
     result: ['People: You (coordinator), Vamsi, Nihar, Dimple', 'Stay: South Congress house, 2 nights, $180 each', 'Tickets: ACL 3-day pass, $150 each', 'Each person pays $330'] },
   { name: 'create_pact', label: 'Create a pact', does: 'Name, place, dates and budget',
@@ -29,15 +29,15 @@ export const mcpTools: McpTool[] = [
     ask: 'Start a pact for Miami spring break, March 14 to 18, $500 each.',
     result: ['Created "Miami spring break"', "You're the coordinator", 'Invite friends from the Pact app'] },
   { name: 'add_item', label: 'Add to the itinerary', does: 'A stay, flight, tickets or dinner, priced each',
-    detail: 'Adds one thing the group is booking, with its kind, dates, a link and the price per person. Grok searches for real options first and adds the one you pick.',
+    detail: 'Adds one thing the group is booking, with its kind, dates, a link and the price per person. Grok Bot searches for real options first and adds the one you pick.',
     ask: 'Add the Airbnb on South Congress, $180 each.',
     result: ['Added stay "South Congress house, 2 nights"', '$180 each', 'Link saved for the group'] },
   { name: 'start_vote', label: 'Put options to a vote', does: 'Hotels, flights or dinners as vote cards',
-    detail: 'Grok puts 2 to 8 real options in the pact chat as cards, each with its price per person and link. Everyone taps the one they want and sees the votes come in live. You can change your vote any time.',
+    detail: 'Grok Bot puts 2 to 8 real options in the pact chat as cards, each with its price per person and link. Everyone taps the one they want and sees the votes come in live. You can change your vote any time.',
     ask: 'Find us a hotel in Austin under $300 each and let everyone vote.',
     result: ['Started "Austin stay, Nov 19 to 22"', '4 options, from $195 to $253 each', 'Everyone votes on the cards in the chat'] },
   { name: 'post_message', label: 'Post in the chat', does: 'A message to the group, as you',
-    detail: "Posts in the pact's group chat as you, like a recap of the plan or a nudge to approve. Grok asks you before it posts.",
+    detail: "Posts in the pact's group chat as you, like a recap of the plan or a nudge to approve. Grok Bot asks you before it posts.",
     ask: 'Tell the group the plan is ready to approve.',
     result: ['Posted to the ACL chat:', '"Plan is up: house + 3-day passes, $330 each. Approve in Pact when you can."'] },
   { name: 'propose_booking', label: 'Put it up for approval', does: 'Everyone approves before anyone pays',
@@ -45,21 +45,21 @@ export const mcpTools: McpTool[] = [
     ask: "Looks good, put it up for approval.",
     result: ['"Book Austin ACL weekend?" is open', '$330 each, everyone has to approve', 'Nobody pays until they all do'] },
   { name: 'payment_status', label: "Who's paid", does: 'Each share, paid or owed on Arc', read: true,
-    detail: "Each person's share and whether it's paid, straight from the payments on Arc. Grok can see it but can never pay or move money.",
+    detail: "Each person's share and whether it's paid, straight from the payments on Arc. Grok Bot can see it but can never pay or move money.",
     ask: "Who still hasn't paid for ACL?",
     result: ['Split: $330 each, open', 'You: paid · Vamsi: paid', 'Nihar: owed · Dimple: owed'] },
   { name: 'whats_waiting', label: "What's waiting", does: 'Who each pact is waiting on, and if it is you', read: true,
-    detail: 'Grok checks every pact for who still has to approve the plan, who still has to pay, or whether the coordinator has to set up the split or release the money. It tells you when it is waiting on you.',
+    detail: 'Grok Bot checks every pact for who still has to approve the plan, who still has to pay, or whether the coordinator has to set up the split or release the money. It tells you when it is waiting on you.',
     ask: "What's waiting on me?",
-    result: ['Texas Trip: waiting on Nihar to approve the plan', 'Austin John: waiting on you to release the money', 'Waiting on you: Austin John'] },
+    result: ['Texas Trip: waiting on Nihar and Vamsi to pay $231', 'Austin ACL weekend: waiting on you to approve', 'Waiting on you: Austin ACL weekend'] },
   { name: 'approve_plan', label: 'Approve the plan', does: 'Approves for you, after asking. No money moves',
-    detail: "Grok approves the plan that's up for a vote, as you, once you say yes. Approving moves no money: paying your share is its own step with your PIN in the Pact app.",
-    ask: 'Approve the Texas Trip plan for me.',
-    result: ['Approved Texas Trip', 'Now waiting on Nihar to approve the plan', 'No money moved'] },
+    detail: "Grok Bot approves the plan that's up for a vote, as you, once you say yes. Approving moves no money: paying your share is its own step with your PIN in the Pact app.",
+    ask: 'Approve the ACL plan for me.',
+    result: ['Approved Austin ACL weekend', 'Now waiting on Sam to approve', 'No money moved'] },
   { name: 'remind', label: 'Remind the group', does: 'A nudge in the chat, naming who it is waiting on',
-    detail: "Grok posts a short reminder in the pact's chat, as you, naming who it's waiting on and what for. It asks you first.",
-    ask: 'Nudge Nihar to approve.',
-    result: ['Posted in Texas Trip:', '"Reminder: waiting on Nihar to approve the plan."'] },
+    detail: "Grok Bot posts a short reminder in the pact's chat, as you, naming who it's waiting on and what for. It asks you first.",
+    ask: 'Nudge Nihar and Vamsi to pay.',
+    result: ['Posted in Texas Trip:', '"Reminder: waiting on Nihar and Vamsi to pay their $231 share."'] },
 ]
 
 /** The link for Grok's connector dialog, which only takes a URL: the token rides along as ?key=. */
@@ -149,7 +149,7 @@ export function ToolGrid() {
         <div className="m-explore-chat">
           <div className="m-bubble me">{tool.ask}</div>
           <div className="m-bubble grok">
-            <span className="m-bubble-who"><Grok size={14} />Grok · {tool.name}</span>
+            <span className="m-bubble-who"><img src="/grok-bot.png" alt="" width={14} height={14} style={{ borderRadius: 4 }} />Grok Bot · {tool.name}</span>
             {tool.result.map((line) => <span key={line}>{line}</span>)}
           </div>
         </div>

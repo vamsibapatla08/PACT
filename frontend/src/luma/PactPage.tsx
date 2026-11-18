@@ -48,7 +48,9 @@ export function PactPage({ id }: { id: string }) {
   const dockedHeight = useRef(0)
   const animating = useRef(false)
   const HEAVY = { duration: 620, easing: 'cubic-bezier(0.7, 0, 0.2, 1)' }
-  const box = (r: DOMRect) => ({ top: `${r.top}px`, left: `${r.left}px`, width: `${r.width}px`, height: `${r.height}px`, bottom: 'auto', transform: 'none' })
+  // On desktop the app is zoomed to 80%; measured boxes come back zoomed, so turn them back into the page's own pixels.
+  const zoom = () => Number(getComputedStyle(document.documentElement).zoom) || 1
+  const box = (r: DOMRect) => { const z = zoom(); return { top: `${r.top / z}px`, left: `${r.left / z}px`, width: `${r.width / z}px`, height: `${r.height / z}px`, bottom: 'auto', transform: 'none' } }
   const reduced = () => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
   function toggleFull() {
     const el = chatRef.current
@@ -57,7 +59,7 @@ export function PactPage({ id }: { id: string }) {
     animating.current = true
     const from = el.getBoundingClientRect()
     if (!fullChat) {
-      dockedHeight.current = from.height
+      dockedHeight.current = from.height / zoom()
       setFullChat(true)
       requestAnimationFrame(() => {
         const to = el.getBoundingClientRect()

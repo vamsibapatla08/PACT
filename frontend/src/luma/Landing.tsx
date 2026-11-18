@@ -128,22 +128,30 @@ export function Landing() {
 
       {/* 4. Pact Pilot: the AI planner, right in the chat. */}
       <section id="pilot" className="x-section">
-        <div className="x-grok-head"><span className="m-grok-tile big"><Grok size={34} /></span><div><h2>Meet Pact Pilot, your trip planner in the chat.</h2><p>Type @Pilot and ask. It searches, puts the options to a vote, and keeps track of who still needs to approve or pay. It can never move your money.</p></div></div>
+        <div className="x-grok-head"><span className="m-grok-tile big"><Grok size={34} /></span><div><h2>Meet Pact Pilot, your trip planner next to the chat.</h2><p>Flip the chat to Pact Pilot, or type @Pilot, and ask out loud or in text. Only you see the conversation, and it's saved for next time. It sums up where the trip stands, tells you what's next, and puts the options it finds to a group vote. It can never move your money.</p></div></div>
         <div className="l-card x-pilot-demo">
-          <div className="x-msg me"><span>@Pilot find a place in Austin under $300 each</span></div>
+          <div className="x-pilot-switch"><span>Pact Chat</span><span className="on"><Grok size={12} />Pact Pilot</span></div>
+          <div className="x-msg me"><span>Sum up the chat</span></div>
           <div className="x-pilot-reply">
             <span className="m-grok-tile"><Grok size={16} /></span>
             <div>
               <b>Pact Pilot</b>
-              <span className="l-dim">Three places that fit your dates and budget. Tap one to vote.</span>
-              <div className="x-votes">
-                <div className="x-vote on"><b>South Congress house</b><span>$142 each</span><i><Faces who={['maya', 'jordan']} size={18} />2 votes</i></div>
-                <div className="x-vote"><b>Hotel Indigo</b><span>$195 each</span><i>1 vote</i></div>
-                <div className="x-vote"><b>Firehouse Hostel</b><span>$88 each</span><i>0 votes</i></div>
+              <div className="l-pilot-stats">
+                <div><span>Where</span><b>Austin</b></div>
+                <div><span>When</span><b>Oct 2 – 4</b></div>
+                <div><span>Budget</span><b>$350 each</b></div>
+                <div><span>Going</span><b>4 people</b></div>
+              </div>
+              <div className="l-reply">
+                <p>The group picked the <b className="l-metric">South Congress house</b> and ACL passes, <b className="l-metric">$307 each</b>.</p>
+                <p>Everyone approved the plan, and <b className="l-metric">3 of 4</b> have paid.</p>
               </div>
             </div>
           </div>
-          <div className="x-pilot-wait"><span className="m-grok-tile"><Grok size={13} /></span><span>Waiting on <b>Sam</b> to approve the plan.</span><Face who="sam" size={22} /></div>
+          <div className="l-pilot-next">
+            <span className="l-pilot-next-title">Next up</span>
+            <div className="l-pilot-next-row"><span>Sam needs to pay $307</span><span className="l-btn l-small">Nudge Sam</span></div>
+          </div>
         </div>
         <a className="x-to-bot" href="#grokbot"><img src="/grok-bot.png" alt="" />Use Pact Pilot from the Grok Bot app →</a>
       </section>
@@ -170,9 +178,9 @@ export function Landing() {
         <div className="x-trust">
           <div className="x-trust-card"><BankCard info={{ balance: '1,228.00', address: '0x7a3fC2e91B0d44A58e6F1c93D27b8E05aF41c6D2', name: 'John Smith' }} /></div>
           <div className="x-trust-points">
-            <div><Icon name="checkCircle" size={20} /><span><b>Held until everyone pays.</b> Shares sit in the pact, not in one person’s account, until the whole group is in.</span></div>
+            <div><Icon name="checkCircle" size={20} /><span><b>Held until everyone pays.</b> Shares sit in the pact’s escrow on Arc, not in anyone’s account, until the whole group is in. If the trip is called off, everyone takes their share back.</span></div>
             <div><Icon name="seal" size={20} /><span><b>Pact Verified.</b> Every payment is checked on-chain by QuickNode, so nobody has to take anyone’s word for it.</span></div>
-            <div><Icon name="wallet" size={20} /><span><b>Only you can pay.</b> Your wallet is yours, protected by your own PIN. Pact Pilot can plan, but it can never move money.</span></div>
+            <div><Icon name="wallet" size={20} /><span><b>Only you can pay.</b> Your wallet is yours, protected by your own PIN. Pact Pilot and Grok Bot can plan, but they can never move money.</span></div>
           </div>
         </div>
       </section>
@@ -190,11 +198,32 @@ export function Landing() {
       </section>
 
       {/* 7. The real app. */}
+      {/* How the money moves: wallet, escrow on Arc, QuickNode checks, release. */}
+      <section id="flow" className="x-section x-flow">
+        <h2>How the money moves</h2>
+        <p className="x-flow-lead">Real USDC on Arc. Nobody holds the group's money, not even us.</p>
+        <div className="x-flow-track">
+          <span className="x-flow-coin" aria-hidden="true">$</span>
+          {FLOW.map((f, k) => (
+            <div key={f.title} className="x-flow-step">
+              <span className="x-flow-n">{k + 1}</span>
+              <span className="x-flow-icon"><Icon name={f.icon} size={26} /></span>
+              <b>{f.title}</b>
+              <span className="x-flow-text">{f.text}</span>
+              <span className="x-flow-tag">{f.tag}</span>
+            </div>
+          ))}
+        </div>
+        <div className="x-flow-foot">
+          <div><Icon name="back" size={18} /><span><b>Trip called off?</b> Each person claims their own share back from the pact.</span></div>
+          <div><Icon name="sparkles" size={18} /><span><b>Pact Pilot plans with Grok.</b> It can read who has paid, but it can never move money.</span></div>
+        </div>
+      </section>
+
       <section id="app" className="x-section">
         <h2>Every pact on one timeline</h2>
         <div className="x-app">
           <div className="x-browser">
-            <div className="x-browser-bar"><i /><i /><i /><span>pact.app/pacts</span></div>
             <div className="x-browser-body">
               <MockDay day="Oct 2" weekday="Friday">
                 <MockPact when="Oct 2 – 4" name="Austin ACL weekend" by="you · with Maya, Jordan & Sam" where="South Congress, Austin" chip={['Owe $307', 'warn']} faces={['rory', 'maya', 'jordan', 'sam']} kind="trip" />
@@ -212,7 +241,6 @@ export function Landing() {
             <div className="x-phone real"><img src="/ios/home.jpg" alt="Pact on iPhone: Home with the wallet card and your pacts" /></div>
           </div>
         </div>
-        <p className="x-note">Web and iPhone, on the same live data.</p>
       </section>
 
       {/* 8. The ask. */}
@@ -222,7 +250,6 @@ export function Landing() {
           <GoogleButton big />
           {testflight && <a className="x-testflight" href={testflight} target="_blank" rel="noreferrer">Get the iPhone app</a>}
         </div>
-        <p className="x-built">Built on Arc with Circle wallets and USDC, verified by QuickNode, planned by Grok.</p>
       </section>
 
       <footer className="x-foot"><img src="/pact-mark.png" alt="" /><span>Pact · made by the Pact team · UBC Hackathon 2026</span></footer>
@@ -237,8 +264,15 @@ const TEAM = [
   { name: 'Nihar Ganesh', url: '/team/nihar.png', built: 'Nihar · built the Pact app you are looking at' },
   { name: 'Vamsi Bapatla', url: '/team/vamsi.png', built: 'Vamsi · built the Supabase backend' },
 ]
-const TRIP = { name: 'Texas Trip', place: 'Austin Texas', dates: 'Nov 19 – Nov 22', budget: '$300 each', each: '$233.50', total: '$700.50' }
+const TRIP = { name: 'Texas Trip', place: 'Austin Texas', dates: 'Nov 19 – Nov 22', budget: '$300 each', each: '$231', total: '$693' }
 const STAGES = ['Plan', 'Approve', 'Pay', 'Booked']
+const FLOW = [
+  { icon: 'wallet', title: 'Your wallet', text: 'A Circle wallet made for you when you sign in. Only your PIN can spend from it.', tag: 'Circle' },
+  { icon: 'up', title: 'Pay your share', text: 'You send your share in USDC, a digital dollar. $231 is $231.', tag: 'USDC' },
+  { icon: 'shield', title: 'Held in the pact', text: 'It waits in the PactSplit contract on Arc until the whole group has paid.', tag: 'Arc' },
+  { icon: 'seal', title: 'Checked on-chain', text: 'QuickNode watches the contract and confirms every payment. That is Pact Verified.', tag: 'QuickNode' },
+  { icon: 'checkCircle', title: 'Released to book', text: 'Once everyone is in, the coordinator gets the total in one go and books.', tag: 'Arc' },
+]
 
 function TeamFaces({ size = 32, only }: { size?: number; only?: number[] }) {
   return (
@@ -285,7 +319,6 @@ function LoopingPact() {
             <h3>Keep planning</h3>
             <div className="x-real-items">
               <div><Icon name="stay" size={15} /><b>Hilton Garden Inn Capitol District</b><span>$231</span></div>
-              <div><Icon name="other" size={15} /><b>CapMetro Route 20, airport and back</b><span>$2.50</span></div>
               <div className="x-real-total"><b>Each person pays</b><span>{TRIP.each}</span></div>
             </div>
             <div className="l-status-actions"><span className="l-btn"><Icon name="sparkles" size={15} />Send for approval</span></div>
@@ -295,7 +328,7 @@ function LoopingPact() {
           <div className="l-card l-status">
             <TeamFaces />
             <h3>Approve the plan</h3>
-            <p>Pact Pilot wrote up what the group agreed: the Hilton and the bus, {TRIP.each} each. Everyone approves before anyone pays.</p>
+            <p>Pact Pilot wrote up what the group voted for: the Hilton, {TRIP.each} each. Everyone approves before anyone pays.</p>
             <div className="x-real-wait"><Grok size={13} /><span>Waiting on <b>Nihar</b> to approve the plan.</span><TeamFaces size={22} only={[1]} /></div>
             <div className="l-status-actions"><span className="l-btn">Approve</span><span className="l-btn l-ghost">Not yet</span></div>
           </div>
@@ -303,11 +336,19 @@ function LoopingPact() {
         {i === 2 && (
           <div className="l-card l-status">
             <TeamFaces />
-            <h3>Approve your share</h3>
-            <p>Pay your share into the pact. It goes to Rory once everyone has paid.</p>
-            <div className="l-progress"><i style={{ width: '66.6%' }} /></div>
-            <p style={{ fontSize: 13 }}>2 of 3 paid · {TRIP.each} each · you’re in</p>
-            <div className="l-status-actions"><span className="l-btn">Approve {TRIP.each}</span></div>
+            <h3>Collecting</h3>
+            <p>Each share waits in the pact until everyone has paid. Then it all goes to Rory to book.</p>
+            <div className="l-progress"><i style={{ width: '33.3%' }} /></div>
+            <p style={{ fontSize: 13 }}>1 of 3 paid · {TRIP.each} each</p>
+            <div className="x-real-owes">
+              {TEAM.map((t, k) => (
+                <div key={t.name} title={t.built}>
+                  <Avatar name={t.name} url={t.url} size={22} />
+                  <span>{t.name.split(' ')[0]}</span>
+                  {k === 0 ? <b className="l-net owed">$0.00</b> : <b className="l-net owe">−{TRIP.each}.00</b>}
+                </div>
+              ))}
+            </div>
           </div>
         )}
         {i === 3 && (

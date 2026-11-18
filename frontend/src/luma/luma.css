@@ -18,12 +18,12 @@
 
 * { box-sizing: border-box; }
 html, body { margin: 0; background: var(--bg); color: var(--text); -webkit-font-smoothing: antialiased; }
-body { min-height: 100vh; }
+body { min-height: calc(100vh / var(--z, 1)); }
 button, input, textarea, select { font: inherit; color: inherit; }
 button { cursor: pointer; }
 a { color: inherit; }
 
-.l-app { min-height: 100vh; position: relative; }
+.l-app { min-height: calc(100vh / var(--z, 1)); position: relative; }
 /* The iOS AmbientBackdrop: a cool glow that fades to black halfway down. */
 .l-app::before {
   content: ''; position: fixed; inset: 0 0 auto 0; height: 70vh; pointer-events: none; z-index: 0;
@@ -212,7 +212,7 @@ button.l-card:hover { background: var(--card-hover); }
 
 /* Modals */
 .l-scrim { position: fixed; inset: 0; z-index: 50; background: rgba(0, 0, 0, 0.6); backdrop-filter: blur(6px); display: grid; place-items: center; padding: 20px; animation: l-fade 0.15s ease; }
-.l-modal { width: min(520px, 100%); max-height: calc(100vh - 40px); overflow: auto; background: #17181c; border-radius: 20px; padding: 24px; box-shadow: 0 40px 100px rgba(0, 0, 0, 0.6); animation: l-rise 0.2s ease; }
+.l-modal { width: min(520px, 100%); max-height: calc(calc(100vh / var(--z, 1)) - 40px); overflow: auto; background: #17181c; border-radius: 20px; padding: 24px; box-shadow: 0 40px 100px rgba(0, 0, 0, 0.6); animation: l-rise 0.2s ease; }
 .l-modal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 18px; }
 .l-modal-head h2 { margin: 0; font-size: 24px; font-weight: 750; letter-spacing: -0.015em; }
 @keyframes l-fade { from { opacity: 0; } }
@@ -258,7 +258,7 @@ textarea.l-input { resize: vertical; min-height: 76px; }
 .l-busy { display: flex; align-items: center; gap: 10px; color: var(--dim); font-size: 14px; font-weight: 600; }
 .l-busy .l-spin { width: 16px; height: 16px; border-width: 2px; }
 
-.l-signin { min-height: 100vh; display: grid; place-items: center; align-content: center; gap: 18px; text-align: center; padding: 24px; }
+.l-signin { min-height: calc(100vh / var(--z, 1)); display: grid; place-items: center; align-content: center; gap: 18px; text-align: center; padding: 24px; }
 .l-signin h1 { font-size: 40px; letter-spacing: -0.025em; margin: 0; max-width: 560px; line-height: 1.1; }
 .l-signin p { color: var(--dim); margin: 0 0 8px; font-size: 17px; }
 
@@ -358,7 +358,7 @@ body { background: #121113; }
 /* Liquid gold: a faint, slow-moving gold and silver backdrop in place of the navy gradient. */
 body { background: #050505; }
 .l-app::before { display: none; }
-.l-app > .l-gold { position: fixed; inset: 0; width: 100vw; height: 100vh; z-index: 0; display: block; pointer-events: none; }
+.l-app > .l-gold { position: fixed; inset: 0; width: calc(100vw / var(--z, 1)); height: calc(100vh / var(--z, 1)); z-index: 0; display: block; pointer-events: none; }
 .l-top .l-nav button.on, .l-h1, .l-title { text-shadow: 0 2px 18px rgba(0, 0, 0, 0.35); }
 
 /* Pact cards: bigger faces in glass rings, and chips in clearer liquid-glass colours. */
@@ -647,7 +647,7 @@ button.l-ledger-row { width: 100%; border: 0; background: none; text-align: left
 .x-google.big { padding: 15px 26px; font-size: 17px; gap: 12px; }
 .x-google:disabled { opacity: 0.7; }
 
-.x-hero { width: min(1180px, 100% - 40px); margin: 0 auto; padding: 70px 0 40px; display: grid; grid-template-columns: 1.05fr 1fr; gap: 30px; align-items: center; min-height: calc(100vh - 80px); }
+.x-hero { width: min(1180px, 100% - 40px); margin: 0 auto; padding: 70px 0 40px; display: grid; grid-template-columns: 1.05fr 1fr; gap: 30px; align-items: center; min-height: calc(calc(100vh / var(--z, 1)) - 80px); }
 .x-kicker { display: inline-block; font-size: 13px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; color: rgba(255, 255, 255, 0.55); margin-bottom: 18px; }
 .x-hero h1 { margin: 0; font-size: clamp(46px, 6.4vw, 84px); line-height: 0.98; letter-spacing: -0.045em; font-weight: 800; }
 .x-hero-copy p { margin: 22px 0 32px; font-size: 20px; line-height: 1.5; color: rgba(245, 245, 247, 0.72); max-width: 470px; }
@@ -878,7 +878,7 @@ button.l-ledger-row { width: 100%; border: 0; background: none; text-align: left
 .l-pact-hero .l-cover { width: 96px; border-radius: 16px; }
 .l-pact-hero .l-title { margin: 4px 0 0; }
 /* The chat is its own column the height of the screen: messages scroll inside it, the composer stays at the bottom. */
-.l-pact-chat.l-chat-wide { position: sticky; top: 24px; max-width: none; margin: 0; padding: 18px 18px 14px; height: calc(100vh - 140px); min-height: 460px;
+.l-pact-chat.l-chat-wide { position: sticky; top: 24px; max-width: none; margin: 0; padding: 18px 18px 14px; height: calc(calc(100vh / var(--z, 1)) - 140px); min-height: 460px;
   display: flex; flex-direction: column; border-radius: 22px; box-sizing: border-box;
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.02)); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 18px 44px rgba(0, 0, 0, 0.35); }
 .l-pact-chat .l-chat-head { margin: 0 0 4px; }
@@ -1213,9 +1213,9 @@ button.l-net { border: 0; background: none; padding: 4px 0; cursor: pointer; }
 .l-top, .l-top:hover { position: sticky; top: 0; z-index: 40;
   background: linear-gradient(180deg, rgba(11, 11, 13, 0.94), rgba(11, 11, 13, 0.82));
   backdrop-filter: blur(18px) saturate(1.2); -webkit-backdrop-filter: blur(18px) saturate(1.2); }
-.l-pact-people { position: sticky; top: calc(var(--top-h) + 36px); max-height: calc(100vh - var(--top-h) - 56px); overflow-y: auto; scrollbar-width: none; }
+.l-pact-people { position: sticky; top: calc(var(--top-h) + 36px); max-height: calc(calc(100vh / var(--z, 1)) - var(--top-h) - 56px); overflow-y: auto; scrollbar-width: none; }
 .l-pact-people::-webkit-scrollbar { display: none; }
-.l-pact-chat.l-chat-wide { position: sticky; top: calc(var(--top-h) + 36px); height: calc(100vh - var(--top-h) - 56px); }
+.l-pact-chat.l-chat-wide { position: sticky; top: calc(var(--top-h) + 36px); height: calc(calc(100vh / var(--z, 1)) - var(--top-h) - 56px); }
 @media (max-width: 860px) {
   .l-pact-people { position: static; max-height: none; overflow: visible; }
   .l-pact-chat.l-chat-wide { position: static; }
@@ -1240,7 +1240,7 @@ span.l-net.owe { text-decoration: none; }
 /* ---- One fixed frame. The header never moves; only the area under it scrolls, with no scrollbars showing.
    The page itself never scrolls, so a trackpad's bounce can't move the header either. */
 html, body { overscroll-behavior: none; }
-.l-app:has(> .l-scroll) { height: 100vh; height: 100dvh; display: flex; flex-direction: column; overflow: hidden; }
+.l-app:has(> .l-scroll) { height: calc(100vh / var(--z, 1)); height: calc(100dvh / var(--z, 1)); display: flex; flex-direction: column; overflow: hidden; }
 .l-app:has(> .l-scroll) > .l-top, .l-app:has(> .l-scroll) > .l-top:hover { position: relative; flex: none; background: transparent; backdrop-filter: none; -webkit-backdrop-filter: none; box-shadow: none; }
 .l-scroll { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; scrollbar-width: none; }
 .l-scroll::-webkit-scrollbar, .l-pact-main::-webkit-scrollbar, .l-pact-chat .l-chat::-webkit-scrollbar, .l-pact-people::-webkit-scrollbar { display: none; }
@@ -1442,11 +1442,11 @@ html, body { overscroll-behavior: none; }
 .l-chat-backdrop { position: fixed; inset: 0; z-index: 59; background: rgba(0, 0, 0, 0.55); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); }
 .l-pact-chat.l-chat-wide.full, .l-scroll.pact .l-pact-chat.l-chat-wide.full {
   position: fixed; z-index: 60; top: 20px; bottom: 20px; left: 50%; transform: translateX(-50%);
-  width: min(960px, calc(100vw - 32px)); height: auto; max-width: none; margin: 0;
+  width: min(960px, calc(calc(100vw / var(--z, 1)) - 32px)); height: auto; max-width: none; margin: 0;
   box-shadow: 0 30px 80px rgba(0, 0, 0, 0.6); }
 .l-pact-chat.full .l-bubble { max-width: 70%; }
 @media (max-width: 640px) {
-  .l-pact-chat.l-chat-wide.full, .l-scroll.pact .l-pact-chat.l-chat-wide.full { top: 0; bottom: 0; width: 100vw; border-radius: 0; }
+  .l-pact-chat.l-chat-wide.full, .l-scroll.pact .l-pact-chat.l-chat-wide.full { top: 0; bottom: 0; width: calc(100vw / var(--z, 1)); border-radius: 0; }
 }
 .l-home-head + .l-home-money { margin-top: 18px; }
 
@@ -1576,3 +1576,69 @@ html, body { overscroll-behavior: none; }
 
 .l-pilot-history { display: flex; align-items: center; justify-content: center; gap: 10px; font-size: 12.5px; color: var(--dim); margin: 2px 0 6px; }
 .l-pilot-history .l-link-btn { background: none; border: 0; padding: 0; color: var(--dim); text-decoration: underline; cursor: pointer; font: inherit; }
+
+/* Desktop shows the app at 80%, the size it was designed at. Viewport units above divide by --z so full-height layouts still fill the screen. */
+@media (min-width: 1100px) {
+  html { zoom: 0.8; --z: 0.8; }
+}
+
+/* Tighter gap between the place/date/budget pills, the steps and the status card. */
+.l-pact-steps { padding: 4px 0 6px; }
+.l-pact-steps .l-progress-steps { margin: 8px 0 4px; }
+
+/* Landing: who still owes in the real Texas Trip, and the Pact Pilot demo. */
+.x-real-owes { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
+.x-real-owes div { display: flex; align-items: center; gap: 8px; font-size: 13.5px; }
+.x-real-owes span { flex: 1; font-weight: 600; }
+.x-real-owes .l-net { min-width: 0; font-size: 13.5px; text-decoration: none; }
+.x-pilot-switch { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding: 4px; border-radius: 999px; background: rgba(255, 255, 255, 0.06); margin-bottom: 14px; font-size: 13.5px; font-weight: 650; }
+.x-pilot-switch span { display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 7px 0; border-radius: 999px; color: var(--dim); }
+.x-pilot-switch span.on { background: linear-gradient(180deg, #f4f4f6, #c9cad0); color: #111; }
+.x-pilot-demo .l-pilot-stats { margin-top: 8px; }
+.x-pilot-demo .l-reply { margin-top: 4px; }
+
+/* The pact timeline next to the iPhones floats on its own, with no browser frame around it. */
+.x-browser { background: none; box-shadow: none; backdrop-filter: none; border-radius: 0; overflow: visible; }
+.x-browser-body { padding: 0; }
+
+/* How the money moves: five steps on one track, with a coin travelling along it. */
+.x-flow-lead { margin: -14px 0 30px; color: var(--dim); font-size: 18px; }
+.x-flow-track { position: relative; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 16px; }
+.x-flow-track::before { content: ''; position: absolute; left: 10%; right: 10%; top: 62px; height: 2px; background: linear-gradient(90deg, rgba(255,255,255,.05), rgba(255,255,255,.28), rgba(255,255,255,.05)); }
+.x-flow-coin { position: absolute; top: 49px; left: 10%; width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; font-weight: 800; font-size: 14px; color: #111;
+  background: radial-gradient(circle at 35% 30%, #fff, #c9cad0 60%, #8c8d93); box-shadow: 0 0 18px rgba(255,255,255,.35); z-index: 1; animation: x-flow-coin 7s cubic-bezier(.6,0,.3,1) infinite; }
+@keyframes x-flow-coin { 0% { left: 10%; opacity: 0; } 6% { opacity: 1; } 22% { left: 10%; } 30% { left: 28%; } 44% { left: 46%; } 58% { left: 46%; } 66% { left: 64%; } 80% { left: 82%; } 94% { opacity: 1; } 100% { left: 82%; opacity: 0; } }
+.x-flow-step { position: relative; display: flex; flex-direction: column; align-items: center; text-align: center; gap: 10px; padding: 22px 16px 20px; border-radius: 22px;
+  background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.08); backdrop-filter: blur(14px); }
+.x-flow-n { position: absolute; top: 12px; left: 14px; font-size: 12px; font-weight: 700; color: var(--faint); }
+.x-flow-icon { width: 64px; height: 64px; border-radius: 20px; display: grid; place-items: center; background: linear-gradient(180deg, #2a2b30, #151619); box-shadow: inset 0 1px 0 rgba(255,255,255,.12), 0 10px 26px rgba(0,0,0,.45); position: relative; z-index: 2; }
+.x-flow-step:nth-child(4) .x-flow-icon { background: linear-gradient(180deg, #f4f4f6, #b9bac0); color: #111; }
+.x-flow-step b { font-size: 17px; margin-top: 4px; }
+.x-flow-text { color: var(--dim); font-size: 14px; line-height: 1.45; }
+.x-flow-tag { margin-top: auto; font-size: 11.5px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; padding: 4px 10px; border-radius: 999px; background: rgba(255,255,255,.07); color: var(--text); }
+.x-flow-foot { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 18px; }
+.x-flow-foot > div { display: flex; gap: 10px; align-items: flex-start; padding: 16px 18px; border-radius: 18px; background: rgba(255,255,255,.03); border: 1px dashed rgba(255,255,255,.14); color: var(--dim); font-size: 15px; line-height: 1.45; }
+.x-flow-foot b { color: var(--text); }
+.x-flow-foot svg { flex: none; margin-top: 2px; }
+@media (max-width: 900px) {
+  .x-flow-track { grid-template-columns: 1fr; }
+  .x-flow-track::before, .x-flow-coin { display: none; }
+  .x-flow-step { flex-direction: row; text-align: left; flex-wrap: wrap; align-items: center; }
+  .x-flow-step b { flex: 1; margin: 0; }
+  .x-flow-text { flex-basis: 100%; }
+  .x-flow-tag { margin: 0; }
+  .x-flow-n { display: none; }
+  .x-flow-foot { grid-template-columns: 1fr; }
+}
+@media (prefers-reduced-motion: reduce) { .x-flow-coin { display: none; } }
+@media (min-width: 901px) {
+  .x-flow-track { gap: 18px; }
+  .x-flow-track::before { top: 78px; }
+  .x-flow-coin { top: 64px; width: 30px; height: 30px; }
+  .x-flow-step { padding: 34px 20px 26px; min-height: 330px; gap: 12px; }
+  .x-flow-icon { width: 84px; height: 84px; border-radius: 26px; }
+  .x-flow-icon svg { width: 34px; height: 34px; }
+  .x-flow-step b { font-size: 20px; }
+  .x-flow-text { font-size: 15.5px; }
+  .x-flow-foot > div { font-size: 16px; padding: 20px 22px; }
+}
