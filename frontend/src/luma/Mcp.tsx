@@ -8,6 +8,9 @@ import { LiquidGold } from './LiquidGold'
 /** Where Grok (or any MCP client) connects. */
 // The connector lives on the Pact site, which forwards to the pact-mcp function, so its sign-in details sit at the
 // root of our own domain where Grok looks for them.
+/** Where to download the Grok Bot app (by SpaceXAI and Cursor). VITE_GROK_BOT_URL overrides it. */
+export const GROK_BOT_URL = (import.meta.env.VITE_GROK_BOT_URL as string | undefined) || 'https://cursor.com/download/bot'
+
 export const MCP_URL = (import.meta.env.VITE_PACT_MCP_URL ?? 'https://pact-chi-nine.vercel.app/mcp').replace(/\/$/, '')
 
 export type McpTool = { name: string; label: string; does: string; read?: boolean; detail: string; ask: string; result: string[] }
@@ -16,7 +19,7 @@ export const mcpTools: McpTool[] = [
   { name: 'list_pacts', label: 'List pacts', does: 'Every pact, its stage and what you owe', read: true,
     detail: 'Grok sees every pact you are in: the dates, the place, how many people, where it is (planning, approving, paying or booked) and what you still owe.',
     ask: 'What trips do I have coming up?',
-    result: ['Austin ACL weekend, Oct 2 to 5, 4 people, approving', 'Texas Trip, Austin, planning', 'You owe $0.10 in Austin Rory'] },
+    result: ['Austin ACL weekend, Oct 2 to 5, 4 people, approving', 'Texas Trip, Austin, planning', 'You owe $0.10 in Austin John'] },
   { name: 'get_pact', label: 'Read a pact', does: 'People, itinerary, prices, latest plan', read: true,
     detail: 'One pact in full: who is in it and who coordinates, everything on the itinerary with its price each, the latest plan Grok wrote, and who has paid.',
     ask: "What's the plan for ACL?",
@@ -48,7 +51,7 @@ export const mcpTools: McpTool[] = [
   { name: 'whats_waiting', label: "What's waiting", does: 'Who each pact is waiting on, and if it is you', read: true,
     detail: 'Grok checks every pact for who still has to approve the plan, who still has to pay, or whether the coordinator has to set up the split or release the money. It tells you when it is waiting on you.',
     ask: "What's waiting on me?",
-    result: ['Texas Trip: waiting on Nihar to approve the plan', 'Austin Rory: waiting on you to release the money', 'Waiting on you: Austin Rory'] },
+    result: ['Texas Trip: waiting on Nihar to approve the plan', 'Austin John: waiting on you to release the money', 'Waiting on you: Austin John'] },
   { name: 'approve_plan', label: 'Approve the plan', does: 'Approves for you, after asking. No money moves',
     detail: "Grok approves the plan that's up for a vote, as you, once you say yes. Approving moves no money: paying your share is its own step with your PIN in the Pact app.",
     ask: 'Approve the Texas Trip plan for me.',
@@ -63,15 +66,15 @@ export const mcpTools: McpTool[] = [
 export const connectorUrl = (token = 'pact_…') => `${MCP_URL}?key=${token}`
 
 /** The whole setup in one paste: Grok connects Pact (Sign in with Google), then plans. */
-export const GROK_PROMPT = `Connect the Pact connector, then be my Pact Planner.
+export const GROK_PROMPT = `Your name is Pact Pilot. Connect the Pact Pilot connector, then help me plan.
 
 Connector
-- Name: Pact
+- Name: Pact Pilot
 - URL: ${MCP_URL}
 - Sign-in: OAuth. Show me the Connect / Sign in button. I'll sign in with Google and tap Allow, then come back here.
 - Don't ask me for a token or an API key.
 
-You are Pact Planner, a travel planner for group trips in Pact. Pact's rule: collect money before you book.
+You are Pact Pilot, a travel planner for group trips in Pact. Pact's rule: collect money before you book.
 
 Tools on the Pact connector
 - list_pacts, get_pact: read my pacts, people, itinerary and stage
@@ -155,6 +158,79 @@ export function ToolGrid() {
   )
 }
 
+/** How Grok Bot works with Pact, and the six setup steps, as pictures. Used on the Grok Bot tab and the landing page. */
+export function GrokBotGuide() {
+  return (
+    <>
+      {/* How it works, as a picture: Grok asks, Pact Pilot plans, you approve in Pact. */}
+      <h2 className="l-h2">How Grok Bot works</h2>
+      <div className="m-flow">
+        <div className="m-flow-node">
+          <span className="m-flow-icon dark"><img src="/grok-bot.png" alt="" /></span>
+          <b>You ask Grok Bot</b>
+          <span>“Plan our Austin trip”</span>
+        </div>
+        <span className="m-flow-arrow" aria-hidden>→</span>
+        <div className="m-flow-node">
+          <span className="m-flow-icon"><img src="/pact-mark.png" alt="" /></span>
+          <b>Pact plans it</b>
+          <span>Reads your pacts, starts votes</span>
+        </div>
+        <span className="m-flow-arrow" aria-hidden>→</span>
+        <div className="m-flow-node">
+          <span className="m-flow-icon go"><Icon name="checkCircle" size={24} /></span>
+          <b>You approve in Pact</b>
+          <span>Pay with your PIN</span>
+        </div>
+      </div>
+
+      {/* Set up: five small pictures, a few words each. */}
+      <h2 className="l-h2">Set it up</h2>
+      <div className="m-setup-steps">
+        <div className="m-sstep">
+          <span className="m-sstep-n">1</span>
+          <div className="m-sstep-pic"><img className="m-app-icon" src="/grok-bot.png" alt="" /><small>Grok Bot</small></div>
+          <b>Get Grok Bot</b>
+          <a className="l-btn l-ghost l-small" href={GROK_BOT_URL} target="_blank" rel="noreferrer">Download</a>
+        </div>
+        <div className="m-sstep">
+          <span className="m-sstep-n">2</span>
+          <div className="m-sstep-pic"><div className="m-mini-bot"><span className="m-mini-plus">+</span><span>Pact Pilot</span></div></div>
+          <b>Create a bot called “Pact Pilot”</b>
+          <span className="m-sstep-hint">It helps plan your pacts</span>
+        </div>
+        <div className="m-sstep">
+          <span className="m-sstep-n">3</span>
+          <div className="m-sstep-pic"><div className="m-mini-doc"><i /><i /><i /><i /></div></div>
+          <b>Copy the prompt</b>
+          <Copy text={GROK_PROMPT} label="Copy" />
+        </div>
+        <div className="m-sstep">
+          <span className="m-sstep-n">4</span>
+          <div className="m-sstep-pic"><div className="m-mini-chat"><span className="me">Your name is Pact Pilot…</span><span className="pill">Connect</span></div></div>
+          <b>Paste it, tap Connect</b>
+        </div>
+        <div className="m-sstep">
+          <span className="m-sstep-n">5</span>
+          <div className="m-sstep-pic"><div className="m-mini-chat"><span className="google">G  Continue with Google</span><span className="pill">Allow</span></div></div>
+          <b>Sign in, tap Allow</b>
+        </div>
+        <div className="m-sstep">
+          <span className="m-sstep-n">6</span>
+          <div className="m-sstep-pic"><div className="m-mini-chat"><span className="me">What’s waiting on me?</span><span className="them"><img src="/grok-bot.png" alt="" width={11} /> Texas Trip: pay $231</span></div></div>
+          <b>Ask anything</b>
+        </div>
+      </div>
+      <details className="m-fold">
+        <summary>See the full setup prompt</summary>
+        <pre className="m-code m-prompt">{GROK_PROMPT}</pre>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}><Copy text={MCP_URL} label="Copy link only" /><Copy text={GROK_PROMPT} label="Copy setup prompt" /></div>
+        <p className="l-faint" style={{ fontSize: 13, margin: 0 }}>No Connect button? In Grok Bot: Connectors → New Connector → Custom, and paste the link only.</p>
+      </details>
+    </>
+  )
+}
+
 type Token = { token_id: string; label: string; token_hint: string; created_at: string; last_used_at: string | null; revoked_at: string | null }
 
 /** The Grok tab: connect with one link and Google, see and disconnect connections, set up the bot. */
@@ -174,30 +250,21 @@ export function ConnectPage() {
   return (
     <main className="l-page">
       <div className="l-head">
-        <h1 className="l-h1" style={{ display: 'flex', gap: 14, alignItems: 'center' }}><span className="m-grok-tile"><Grok size={26} /></span>Grok</h1>
+        <h1 className="l-h1" style={{ display: 'flex', gap: 14, alignItems: 'center' }}><img className="m-bot-tile" src="/grok-bot.png" alt="" />Grok Bot</h1>
       </div>
-      <p className="l-sub" style={{ marginTop: -14, marginBottom: 28 }}>Plan your pacts by chatting with Grok. It can never pay.</p>
+      <p className="l-sub" style={{ marginTop: -14, marginBottom: 24 }}>Plan your pacts from the Grok Bot app. It connects to Pact, and it can never pay.</p>
       <div className="l-card m-hero">
         {tokens && tokens.length > 0
-          ? <span className="m-status on"><Icon name="check" size={16} />Connected to Grok</span>
-          : <span className="m-status">Not connected yet. One paste in Grok and a Google sign-in.</span>}
+          ? <span className="m-status on"><Icon name="check" size={16} />Connected to Grok Bot</span>
+          : <span className="m-status">Not connected to Grok Bot yet</span>}
         <div className="m-hero-actions">
           <Copy text={GROK_PROMPT} label="Copy setup prompt" />
-          <a className="l-btn" href="https://grok.com" target="_blank" rel="noreferrer">Open Grok</a>
+          <a className="l-btn" href={GROK_BOT_URL} target="_blank" rel="noreferrer">Get Grok Bot</a>
         </div>
       </div>
 
-      <h2 className="l-h2">Set up Grok</h2>
-      <div className="l-card m-setup">
-        <ol className="m-steps">
-          <li><span>1</span><b>Copy the setup prompt</b> below.</li>
-          <li><span>2</span>Paste it into a new chat on <a href="https://grok.com" target="_blank" rel="noreferrer">grok.com</a>.</li>
-          <li><span>3</span>Tap <b>Connect</b>, sign in with Google, tap <b>Allow</b>, then <b>Return to Grok</b>. You're set.</li>
-        </ol>
-        <pre className="m-code m-prompt">{GROK_PROMPT}</pre>
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}><Copy text={MCP_URL} label="Copy link only" /><Copy text={GROK_PROMPT} label="Copy setup prompt" /></div>
-        <p className="l-faint" style={{ fontSize: 13, margin: 0 }}>No Connect button? In Grok, open Connectors, then New Connector → Custom, and paste the link only. It signs in the same way.</p>
-      </div>
+      <GrokBotGuide />
+
 
       <h2 className="l-h2">Connections</h2>
       <div className="l-card m-token">
@@ -214,15 +281,17 @@ export function ConnectPage() {
         {error && <p className="l-error">{error}</p>}
       </div>
 
-      <h2 className="l-h2">Using the xAI API instead</h2>
+      <details className="m-fold">
+        <summary>For developers: the xAI API</summary>
       <div className="l-card m-setup">
         <div className="m-token-row"><span className="l-dim">Server</span><code>{MCP_URL}</code><Copy text={MCP_URL} /></div>
         <pre className="m-code">{grokSnippet()}</pre>
         <div style={{ display: 'flex', justifyContent: 'flex-end' }}><Copy text={grokSnippet()} label="Copy request" /></div>
         <p className="l-faint" style={{ fontSize: 13, margin: 0 }}>Any MCP client works the same way: this URL, and it signs in with Google.</p>
       </div>
+      </details>
 
-      <h2 className="l-h2">What Grok can do</h2>
+      <h2 className="l-h2">What Grok Bot can do</h2>
       <ToolGrid />
     </main>
   )

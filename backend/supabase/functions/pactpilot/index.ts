@@ -641,6 +641,12 @@ Deno.serve(async (request) => {
       operationId = operation.data
     }
 
+    // Save the question and answer to the asker's private Pact Pilot history. A failed save never blocks the answer.
+    const saved = await supabase.from("pact_pilot_messages").insert({
+      pact_id: pactId, user_id: user.id, question, reply: reply.slice(0, 20000), actions, operation_id: operationId,
+    })
+    if (saved.error) console.warn("[PactPilot]", JSON.stringify({ requestId, stage: "save_history", error: saved.error.message }))
+
     return json({
       reply,
       summary: reply,

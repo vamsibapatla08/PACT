@@ -14,7 +14,8 @@ const BLEED_X = 0.18
 const BLEED_Y = 0.3
 
 /** The card number is the wallet address: dots, then its last four. */
-export const cardNumber = (address: string | null) => address ?? 'No wallet yet'
+/** The card shows the wallet address with its middle hidden, like a card number: the full one is in the Wallet's Copy. */
+export const cardNumber = (address: string | null) => (address ? `${address.slice(0, 7)}${'x'.repeat(10)}${address.slice(-6)}` : 'No wallet yet')
 
 // ---- Finishes: the card's metal. Grey is the default, and the only one outside the signed-in app.
 

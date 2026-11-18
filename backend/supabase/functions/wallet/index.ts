@@ -441,7 +441,7 @@ async function createPact(userId: string, userJwt: string, pactId: unknown) {
   }
   const key = pactKey(pactId)
   // A released or cancelled pact can never be opened again under the same id.
-  if ((await readPact(key)).state !== 'none') return reply(409, { error: 'This pact is already on chain' })
+  if ((await readPact(key)).state !== 'none') return reply(409, { error: 'Collecting has already started for this pact, so everyone can pay their share now.' })
 
   return await contractChallenge(
     userId, wallet, 'createPact(bytes32,address,uint128,uint32,uint64)',

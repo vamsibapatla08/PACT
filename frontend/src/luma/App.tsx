@@ -43,7 +43,7 @@ export function LumaApp() {
     return () => data.subscription.unsubscribe()
   }, [])
   if (session === undefined) return <div className="l-app"><div className="l-center"><img src="/pact-mark.png" alt="Pact" width={64} /><span className="l-spin" /></div></div>
-  // Grok's "Continue with Google" lands here, signed in or not.
+  // Pact Pilot's "Continue with Google" lands here, signed in or not.
   if (location.pathname === '/connect/authorize' || pendingMcpRequest()) return <AuthorizeMcp session={session} />
   if (!session) return <Landing />
   return <Signed me={session.user.id} />
@@ -149,15 +149,18 @@ function Signed({ me }: { me: string }) {
   )
 }
 
+/** The iPhone app on TestFlight. Set VITE_TESTFLIGHT_URL (the public TestFlight link) in Vercel to show it. */
+export const TESTFLIGHT_URL = (import.meta.env.VITE_TESTFLIGHT_URL as string | undefined) || null
+
 const tabs = [
   { key: 'home', label: 'Home', icon: 'home', path: '/' },
   { key: 'pacts', label: 'Pacts', icon: 'pacts', path: '/pacts' },
   { key: 'friends', label: 'Friends', icon: 'friends', path: '/friends' },
   { key: 'wallet', label: 'Wallet', icon: 'wallet', path: '/wallet' },
-  { key: 'grok', label: 'Grok', icon: 'grok', path: '/grok' },
+  { key: 'grok', label: 'Grok Bot', icon: 'grok', path: '/grok' },
 ]
 
-const tabIcon = (icon: string, size?: number) => (icon === 'grok' ? <Grok size={size} /> : <Icon name={icon} size={size} />)
+const tabIcon = (icon: string, size?: number) => (icon === 'grok' ? <img className="l-bot-icon" src="/grok-bot.png" alt="" width={size ?? 18} height={size ?? 18} /> : <Icon name={icon} size={size} />)
 
 /** Phones: the tabs move to a glass bar at the bottom with a silver +, like the iOS app. */
 /** What a pact is waiting on you for, in a line. Paying and releasing take your PIN. */
@@ -230,6 +233,7 @@ function TopBar({ tab }: { tab: string | null }) {
           {menu && (
             <div className="l-menu" onMouseLeave={() => setMenu(false)}>
               <div><b>{profile?.name ?? 'You'}</b><span>{profile?.email}</span></div>
+              {TESTFLIGHT_URL && <a href={TESTFLIGHT_URL} target="_blank" rel="noreferrer">Get the iPhone app</a>}
               <button type="button" onClick={() => void S.supabase.auth.signOut({ scope: 'local' })}>Sign out</button>
             </div>
           )}
@@ -242,26 +246,38 @@ function TopBar({ tab }: { tab: string | null }) {
 // ---- Home
 
 function Home() {
-  const { me, profile, pacts, data, social, go, refresh, refreshSocial, wallet } = useApp()
+  const { me, profile, pacts, data, social, go, refresh, refreshSocial, wallet, newPact } = useApp()
   const ready = pacts !== null && pacts.every((p) => data[p.pact_id])
   if (!ready) return <div className="l-center"><span className="l-spin" /></div>
   const owe = pacts.reduce((sum, p) => sum + S.owedIn(data[p.pact_id], me), 0)
   const coming = pacts.reduce((sum, p) => sum + S.collectingIn(data[p.pact_id], me), 0)
   const upcoming = sortByDate(pacts).filter((p) => !isPast(p)).slice(0, 3)
   const needsMe = pacts.flatMap((p) => { const w = data[p.pact_id] ? S.waitingOn(data[p.pact_id]) : null; return w && w.people.includes(me) ? [{ pact: p, w }] : [] })
+  const owedInNeeds = needsMe.some(({ w }) => w.what === 'pay')
   return (
     <main className="l-page">
-      <h1 className="l-h1">Hi, {S.firstName(profile?.name)}</h1>
-      <BankCard finish="saved" info={{ balance: wallet?.usdcBalance ?? null, address: wallet?.address ?? null, name: profile?.name ?? null }} footer={
-        <div className="l-card-stats">
-          {owe === 0 && coming === 0 && <span className="l-stat ok"><Icon name="checkCircle" size={16} />Up to date</span>}
-          {owe > 0 && <span className="l-stat owe">You owe <b>{S.dollars(owe)}</b></span>}
-          {coming > 0 && <span className="l-stat">Coming to you <b>{S.dollars(coming)}</b></span>}
-          <button className="l-link" type="button" onClick={() => go('/wallet')}>{wallet ? 'Wallet' : 'Make your wallet'}</button>
+      {/* What you came to do comes first: anything waiting on you, then what's next. Money is a line, not the hero. */}
+      <div className="l-home-head">
+        <div>
+          <h1 className="l-h1">Hi, {S.firstName(profile?.name)}</h1>
         </div>
-      } />
+        <button className="l-plus big" type="button" onClick={newPact}><Icon name="plus" />New pact</button>
+      </div>
 
-      {needsMe.length > 0 && <>
+      {/* Money first, in one line. The full card lives on the Wallet page. */}
+      <button className="l-card l-home-money" type="button" onClick={() => go('/wallet')}>
+        <span className="l-ledger-icon"><Icon name="wallet" /></span>
+        <div className="l-row-main"><b>{wallet ? `${wallet.usdcBalance ?? '0.00'} USDC` : 'No wallet yet'}</b><span>{wallet ? 'Pact Money balance' : 'Make your wallet to pay and get paid'}</span></div>
+        <div className="l-home-money-stats">
+          {/* What you owe is already in Needs you, with its Pay button, so it isn't repeated here. */}
+          {owe > 0 && !owedInNeeds && <span className="l-stat owe">You owe <b>{S.dollars(owe)}</b></span>}
+          {coming > 0 && <span className="l-stat">Coming to you <b>{S.dollars(coming)}</b></span>}
+          {owe === 0 && coming === 0 && <span className="l-stat ok"><Icon name="checkCircle" size={16} />Up to date</span>}
+        </div>
+        <span className="l-home-go" aria-hidden>›</span>
+      </button>
+
+      {needsMe.length > 0 ? <>
         <h2 className="l-h2">Needs you</h2>
         <div className="l-card l-list">
           {needsMe.map(({ pact, w }) => (
@@ -272,7 +288,9 @@ function Home() {
             </button>
           ))}
         </div>
-      </>}
+      </> : pacts.length > 0 && !social.invites.length && (
+        <div className="l-card l-home-calm"><Icon name="checkCircle" size={20} /><span>Nothing is waiting on you.{upcoming[0] ? <> Next up: <b>{upcoming[0].name}</b>.</> : ''}</span></div>
+      )}
 
       {social.invites.length > 0 && <>
         <h2 className="l-h2">Asked in</h2>
@@ -295,6 +313,7 @@ function Home() {
       </div>
       {!pacts.length ? <div className="l-card l-empty"><b>No pacts yet</b><span>Add your friends, then start a pact with them.</span></div>
         : <div style={{ display: 'grid', gap: 12 }}>{upcoming.map((p) => <PactCard key={p.pact_id} pact={p} />)}</div>}
+
     </main>
   )
 }

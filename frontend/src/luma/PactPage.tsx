@@ -8,7 +8,7 @@ type Sheet =
   | { kind: 'settings' } | { kind: 'addPeople' } | { kind: 'addItem' } | { kind: 'grok' }
   | { kind: 'summary'; rec: S.Recommendation } | { kind: 'booking'; booking: S.Booking }
   | { kind: 'action'; action: 'create_pact' | 'pay_share' | 'release' } | { kind: 'person'; member: S.Member }
-  | { kind: 'send'; to: string | null; cents?: number; payback?: boolean } | { kind: 'info' } | { kind: 'dates' } | { kind: 'budget' } | { kind: 'place' }
+  | { kind: 'send'; to: string | null; cents?: number; payback?: boolean; extras?: string } | { kind: 'info' } | { kind: 'dates' } | { kind: 'budget' } | { kind: 'place' }
 
 export function PactPage({ id }: { id: string }) {
   const app = useApp()
@@ -23,22 +23,59 @@ export function PactPage({ id }: { id: string }) {
   const [polls, setPolls] = useState<S.Poll[]>([])
   const [renaming, setRenaming] = useState(false)
   const [tab, setTab] = useState<S.Tab | null>(null)
-  /** An @Grok question from the chat: what was asked, then Grok's answer (or why it failed). */
-  const [ask, setAsk] = useState<{ question: string; answer: S.PilotAnswer | null; error: string | null } | null>(null)
-  async function askGrokInChat(question: string) {
-    setAsk({ question, answer: null, error: null })
-    try { const answer = await S.askGrok(id, question); setAsk({ question, answer, error: null }) }
-    catch (e) { setAsk({ question, answer: null, error: (e as Error).message || "Grok couldn't answer. Try again." }) }
-  }
+  const [extras, setExtras] = useState<S.Extras | null>(null)
+  /** The right panel: the group's Pact Chat, or a private Pact Pilot conversation. */
+  const [panel, setPanel] = useState<'chat' | 'pilot'>('chat')
+  /** The chat (or Pact Pilot) opened full screen. Esc closes it. */
+  const [fullChat, setFullChat] = useState(false)
+  /** A question sent from Pact Chat with @Pilot: it opens Pact Pilot and is asked there, not posted to the group. */
+  const [queued, setQueued] = useState<{ q: string; n: number } | null>(null)
+  useEffect(() => {
+    if (!fullChat) return
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') toggleFullRef.current() }
+    addEventListener('keydown', onKey)
+    return () => removeEventListener('keydown', onKey)
+  }, [fullChat])
   const reloadSide = useCallback(() => {
     void S.loadPolls(id).then(setPolls)
     void S.loadTab(id).then(setTab).catch(() => undefined)
+    void S.loadExtras(id).then(setExtras).catch(() => undefined)
   }, [id])
   // Votes and balances refresh with the pact, every 6 seconds, and right after I act.
   useEffect(() => { reloadSide(); const t = setInterval(reloadSide, 6000); return () => clearInterval(t) }, [reloadSide, tabVersion])
   const chatRef = useRef<HTMLElement>(null)
+  const slotRef = useRef<HTMLDivElement>(null)
+  const dockedHeight = useRef(0)
+  const animating = useRef(false)
+  const HEAVY = { duration: 620, easing: 'cubic-bezier(0.7, 0, 0.2, 1)' }
+  const box = (r: DOMRect) => ({ top: `${r.top}px`, left: `${r.left}px`, width: `${r.width}px`, height: `${r.height}px`, bottom: 'auto', transform: 'none' })
+  const reduced = () => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+  function toggleFull() {
+    const el = chatRef.current
+    if (!el || animating.current) return
+    if (reduced()) { setFullChat((f) => !f); return }
+    animating.current = true
+    const from = el.getBoundingClientRect()
+    if (!fullChat) {
+      dockedHeight.current = from.height
+      setFullChat(true)
+      requestAnimationFrame(() => {
+        const to = el.getBoundingClientRect()
+        const anim = el.animate([box(from), box(to)], HEAVY)
+        anim.onfinish = anim.oncancel = () => { animating.current = false }
+      })
+    } else {
+      const to = slotRef.current?.getBoundingClientRect()
+      if (!to) { setFullChat(false); animating.current = false; return }
+      el.classList.add('closing')
+      const anim = el.animate([box(from), box(to)], { ...HEAVY, duration: 560, fill: 'forwards' })
+      anim.onfinish = () => { setFullChat(false); el.classList.remove('closing'); requestAnimationFrame(() => anim.cancel()); animating.current = false }
+    }
+  }
+  const toggleFullRef = useRef(toggleFull)
+  toggleFullRef.current = toggleFull
   const findingsRef = useRef<HTMLDivElement>(null)
-  /** What Grok is doing right now, shown at the bottom of the chat: thinking, slow, or failed with a retry. */
+  /** What Pact Pilot is doing right now, shown at the bottom of the chat: thinking, slow, or failed with a retry. */
   const [grokJob, setGrokJob] = useState<{ label: string; slow: boolean; error: string | null; retry: () => void } | null>(null)
 
   // Chat arrives live; the plan and the split refresh every 6 seconds, like the iOS chat.
@@ -61,7 +98,7 @@ export function PactPage({ id }: { id: string }) {
 
   const run = useCallback(async (label: string, work: () => Promise<unknown>) => {
     setWorking(label); setError(null)
-    S.setGrokRetryListener(() => setWorking('Grok is taking longer than usual…'))
+    S.setGrokRetryListener(() => setWorking('Pact Pilot is taking longer than usual…'))
     try { await work(); await refreshPact(id) }
     catch (e) { setError((e as Error).message || 'That didn’t go through.') }
     setWorking(null)
@@ -73,7 +110,7 @@ export function PactPage({ id }: { id: string }) {
     S.setGrokRetryListener(() => setGrokJob((j) => (j ? { ...j, slow: true } : j)))
     chatRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
     try { await work(); await refreshPact(id); setGrokJob(null) }
-    catch (e) { setGrokJob({ label, slow: false, error: (e as Error).message || "Grok couldn't answer. Try again.", retry: again }) }
+    catch (e) { setGrokJob({ label, slow: false, error: (e as Error).message || "Pact Pilot couldn't answer. Try again.", retry: again }) }
     finally { S.setGrokRetryListener(null) }
   }, [id, refreshPact])
 
@@ -108,7 +145,7 @@ export function PactPage({ id }: { id: string }) {
   function doStep() {
     if (!step || !d) return
     switch (step.kind) {
-      case 'talk': case 'declined': return void runGrok('Grok is reading the chat to write up what to book…', askBook)
+      case 'talk': case 'declined': return void runGrok('Pact Pilot is reading the chat to write up what to book…', askBook)
       case 'approve': return void run(wallet ? 'Approving…' : 'Set your PIN…', async () => { await S.approve(step.decision, wallet); if (!wallet) app.setWallet(await S.loadWallet()) })
       case 'needsWallet': return void run('Set your PIN…', async () => app.setWallet(await S.makeWallet()))
       case 'startCollecting': return setSheet({ kind: 'action', action: 'create_pact' })
@@ -119,7 +156,7 @@ export function PactPage({ id }: { id: string }) {
 
   return (
     <main className="l-page l-pact-full">
-      <div className="l-pact-grid">
+      <div className={fullChat ? "l-pact-grid chat-full" : "l-pact-grid"}>
         {/* Left: the people, and sending money to any of them. */}
         <aside className="l-pact-people">
           <Cover kind={details.kind} name={pact.name} sub={pact.location} big />
@@ -132,7 +169,7 @@ export function PactPage({ id }: { id: string }) {
                   <small className="host"><Icon name="crown" size={12} />Coordinator</small>
                 </span>
               </button>
-              {host.user_id !== me ? <NetBalance who={host} me={me} tab={tab} onSettle={(cents) => setSheet({ kind: 'send', to: host.user_id, cents, payback: true })} /> : <MyBalance me={me} tab={tab} />}
+              {shareBalance(d, host.user_id, me) ?? (host.user_id !== me ? <NetBalance who={host} me={me} tab={tab} onSettle={(cents) => setSheet({ kind: 'send', to: host.user_id, cents, payback: true })} /> : <MyBalance me={me} tab={tab} />)}
             </div>
           </div>)}
           {/* Everyone else: photo, name (cut with … if long), role under it, then their buttons. Nothing sits beside the name. */}
@@ -143,7 +180,7 @@ export function PactPage({ id }: { id: string }) {
                   <Avatar name={m.name} url={m.avatar_url} size={36} />
                   <span><b>{m.user_id === me ? 'You' : m.name ?? 'Someone'}</b><small>Member</small></span>
                 </button>
-                {m.user_id !== me ? <NetBalance who={m} me={me} tab={tab} onSettle={(cents) => setSheet({ kind: 'send', to: m.user_id, cents, payback: true })} /> : <MyBalance me={me} tab={tab} />}
+                {shareBalance(d, m.user_id, me) ?? (m.user_id !== me ? <NetBalance who={m} me={me} tab={tab} onSettle={(cents) => setSheet({ kind: 'send', to: m.user_id, cents, payback: true })} /> : <MyBalance me={me} tab={tab} />)}
               </div>
             </div>))}
             {d?.joinRequests.map((r) => (
@@ -154,7 +191,7 @@ export function PactPage({ id }: { id: string }) {
             <div className="l-people-row">
               <button type="button" className="l-people-who" onClick={() => setSheet({ kind: 'grok' })}>
                 <span className="l-av" style={{ width: 36, height: 36, background: '#000' }}><Grok size={18} /></span>
-                <span><b>Grok</b><small>Planner</small></span>
+                <span><b>Pact Pilot</b><small>Planner</small></span>
               </button>
             </div>
           </div>
@@ -196,14 +233,14 @@ export function PactPage({ id }: { id: string }) {
           {!finished && <><div className="l-actions-row">
             <div className="l-actions">
             <button className="l-pill" type="button" onClick={() => setSheet({ kind: 'addItem' })}><Icon name="plus" />Add item</button>
-            <button className="l-pill" type="button" disabled={Boolean(grokJob && !grokJob.error)} onClick={() => void runGrok('Grok is summing up the chat…', () => S.askPilot(id, S.summaryQuestion, messages, name))}><Icon name="text" />Summary</button>
+            <button className="l-pill" type="button" disabled={Boolean(grokJob && !grokJob.error)} onClick={() => { setQueued({ q: S.summaryQuestion, n: Date.now() }); setPanel('pilot') }}><Icon name="text" />Summary</button>
             </div>
-            {(step?.kind === 'talk' || step?.kind === 'declined') && <button className="l-book" type="button" disabled={Boolean(grokJob && !grokJob.error)} onClick={() => void runGrok(d?.items.length ? 'Sending it to the group to approve…' : 'Grok is writing up the plan for the group to approve…', askBook)}><Icon name="sparkles" />Send for approval</button>}
+            {(step?.kind === 'talk' || step?.kind === 'declined') && <button className="l-book" type="button" disabled={Boolean(grokJob && !grokJob.error)} onClick={() => void runGrok(d?.items.length ? 'Sending it to the group to approve…' : 'Pact Pilot is writing up the plan for the group to approve…', askBook)}><Icon name="sparkles" />Send for approval</button>}
           </div>
 
           </>}
 
-          {/* Findings: every set of options (Grok's hotels, flights…) as visual cards to vote on and approve. */}
+          {/* Findings: every set of options (Pact Pilot's hotels, flights…) as visual cards to vote on and approve. */}
           {d && (polls.length > 0 || messageFindings.length > 0) && (
             <div className="l-findings" ref={findingsRef}>
               <div className="l-section-title">Findings</div>
@@ -222,6 +259,14 @@ export function PactPage({ id }: { id: string }) {
             </div>
           )}
 
+          {d && d.plan && extras && (
+            <ExtrasCard extras={extras} me={me} members={d.members} working={working}
+              onAdd={() => setSheet({ kind: 'addItem' })}
+              onSend={() => void run('Sending the extras for approval…', async () => { await S.sendExtrasForApproval(id); reloadSide() })}
+              onVote={(roundId, yes) => void run(yes ? 'Approving…' : 'Saying not yet…', async () => { await S.voteExtras(roundId, yes); reloadSide() })}
+              onPay={(roundId, cents) => extras.host && setSheet({ kind: 'send', to: extras.host, cents, extras: roundId })} />
+          )}
+
 
           {/* Narrow screens: the chat sits below, so offer a jump to it. */}
           <div className="l-chat-jump-wrap">
@@ -232,8 +277,26 @@ export function PactPage({ id }: { id: string }) {
         </section>
 
       {/* Right: the chat, always beside the plan on a wide screen. */}
-      <section className="l-chat-wide l-pact-chat" ref={chatRef}>
-        <h2 className="l-chat-head">Chat</h2>
+      {fullChat && <div className="l-chat-backdrop" onClick={toggleFull} />}
+      {/* While the chat is full screen, this keeps its spot in the page, so closing can shrink it back into place. */}
+      {fullChat && <div className="l-chat-slot" ref={slotRef} style={{ height: dockedHeight.current || undefined }} />}
+      <section className={fullChat ? 'l-chat-wide l-pact-chat full' : 'l-chat-wide l-pact-chat'} ref={chatRef}>
+        <div className="l-chat-head l-panel-head">
+          <div className="l-panel-switch" role="tablist" aria-label="Chat or Pact Pilot">
+            <button type="button" role="tab" aria-selected={panel === 'chat'} className={panel === 'chat' ? 'on' : ''} onClick={() => setPanel('chat')}>Pact Chat</button>
+            <button type="button" role="tab" aria-selected={panel === 'pilot'} className={panel === 'pilot' ? 'on' : ''} onClick={() => setPanel('pilot')}><Grok size={14} />Pact Pilot</button>
+          </div>
+          <button type="button" className="l-chat-expand" onClick={toggleFull}
+            aria-label={fullChat ? 'Close full screen' : 'Open the chat full screen'} title={fullChat ? 'Close full screen (Esc)' : 'Full screen'}>
+            {fullChat
+              ? <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5" /></svg>
+              : <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" /></svg>}
+          </button>
+        </div>
+        {panel === 'pilot' && d ? (
+          <PilotPanel id={id} me={me} pact={pact ?? null} d={d} queued={queued} onOpenChat={() => setPanel('chat')}
+            onChanged={() => { reloadSide(); setTabVersion((v) => v + 1); void refreshPact(id) }} />
+        ) : <>
         {d && d.recommendations.length > 0 && (
           <GrokBlock rec={d.recommendations[d.recommendations.length - 1]} big onOpen={(rec) => setSheet({ kind: 'summary', rec })} />
         )}
@@ -243,27 +306,14 @@ export function PactPage({ id }: { id: string }) {
           recs={(d?.recommendations ?? []).slice(0, -1)} onGrok={(rec) => setSheet({ kind: 'summary', rec })} />
         {d && step && !finished && <WaitingCard d={d} me={me} step={step} hasGrok={hasGrok} working={working} onAct={doStep} />}
         {grokJob && <GrokStatus job={grokJob} onDismiss={() => setGrokJob(null)} />}
-        {ask && d && (
-          <div className="l-grok-ask">
-            <div className="l-grok-ask-head">
-              <span className="l-waiting-grok"><Grok size={15} /></span>
-              <b>Grok</b>
-              <span className="l-dim">You asked: {ask.question}</span>
-              <button className="l-x" type="button" aria-label="Close" onClick={() => setAsk(null)}>×</button>
-            </div>
-            {ask.answer ? <PilotAnswerView id={id} me={me} members={d.members} answer={ask.answer}
-                onDone={() => { setAsk(null); reloadSide(); setTabVersion((v) => v + 1); void refreshPact(id) }} onDismiss={() => setAsk(null)} />
-              : ask.error ? <div className="l-grok-ask-error"><p className="l-error">{ask.error}</p><button className="l-btn l-ghost l-small" type="button" onClick={() => void askGrokInChat(ask.question)}>Try again</button></div>
-              : <div className="l-grok-ask-busy"><span>Grok is reading the pact</span><span className="l-dots"><i /><i /><i /></span></div>}
-          </div>
-        )}
-        <Composer id={id} onAskGrok={(q) => void askGrokInChat(q)} />
+        <Composer id={id} onAskGrok={(q) => { setQueued({ q, n: Date.now() }); setPanel('pilot') }} />
+        </>}
       </section>
       </div>
 
       {sheet?.kind === 'settings' && d && <Settings pact={pact} d={d} onClose={() => setSheet(null)} onAddPeople={() => setSheet({ kind: 'addPeople' })} onAddItem={() => setSheet({ kind: 'addItem' })} />}
       {sheet?.kind === 'addPeople' && d && <AddPeople id={id} d={d} onClose={() => setSheet(null)} />}
-      {sheet?.kind === 'addItem' && <AddItem pact={pact} messages={messages} name={name} onClose={() => setSheet(null)} />}
+      {sheet?.kind === 'addItem' && <AddItem pact={pact} messages={messages} name={name} extra={Boolean(d?.plan)} onClose={() => { setSheet(null); reloadSide() }} />}
       {sheet?.kind === 'summary' && <Summary rec={sheet.rec} booking={b && b.rec.recommendation_id === sheet.rec.recommendation_id ? b : null} onBooking={(bk) => setSheet({ kind: 'booking', booking: bk })} onClose={() => setSheet(null)} />}
       {sheet?.kind === 'booking' && d && <BookingDetail b={sheet.booking} d={d} onClose={() => setSheet(null)} />}
       {sheet?.kind === 'grok' && <GrokInfo onClose={() => setSheet(null)} />}
@@ -271,7 +321,7 @@ export function PactPage({ id }: { id: string }) {
       {sheet?.kind === 'dates' && <DatesSheet pact={pact} onClose={() => setSheet(null)} onSaved={() => { setSheet(null); void app.refresh() }} />}
       {sheet?.kind === 'place' && <PlaceSheet pact={pact} onClose={() => setSheet(null)} onSaved={() => { setSheet(null); void app.refresh() }} />}
       {sheet?.kind === 'budget' && <BudgetSheet pact={pact} onClose={() => setSheet(null)} onSaved={() => { setSheet(null); void app.refresh() }} />}
-      {sheet?.kind === 'send' && d && <SendMoney id={id} d={d} initial={sheet.to} cents={sheet.cents} payback={sheet.payback} onClose={() => setSheet(null)} onSent={() => setTabVersion((v) => v + 1)} />}
+      {sheet?.kind === 'send' && d && <SendMoney id={id} d={d} initial={sheet.to} cents={sheet.cents} payback={sheet.payback} extras={sheet.extras} onClose={() => setSheet(null)} onSent={() => { setTabVersion((v) => v + 1); reloadSide() }} />}
       {sheet?.kind === 'info' && <InfoSheet pact={pact} canEdit={iCoordinate} onSettings={() => setSheet({ kind: 'settings' })} onClose={() => setSheet(null)} />}
       {sheet?.kind === 'action' && d && <ActionSheet id={id} action={sheet.action} d={d} iCoordinate={iCoordinate} onClose={() => setSheet(null)} />}
     </main>
@@ -294,13 +344,13 @@ function StepCard({ step, hasGrok, working, onAct, onDecline, chain, members, me
   const heading: Record<S.Step['kind'], string> = {
     talk: hasGrok ? 'Keep planning' : 'Talk it through', declined: 'Not yet', approve: 'Approve the plan', waitingApprovals: 'Waiting on the group',
     needsWallet: 'Everyone approved', settingUp: 'Everyone approved', waitSetup: 'Everyone approved', startCollecting: 'Start collecting',
-    waitStart: 'Split is ready', pay: 'Approve your share', waitPay: 'Collecting', finalise: 'Everyone has paid', waitFinalise: 'Everyone has paid',
+    waitStart: 'Split is ready', checking: 'Checking the split', pay: 'Approve your share', waitPay: 'Collecting', finalise: 'Everyone has paid', waitFinalise: 'Everyone has paid',
     done: 'Booked', cancelled: 'Cancelled',
   }
   const body: Partial<Record<S.Step['kind'], string>> = {
-    talk: 'Agree in the chat on what to book, with the link and price. Then Grok writes it up for everyone to approve.',
-    declined: 'Someone said not yet. Talk it through again, then ask Grok for a new write-up.',
-    approve: 'Grok wrote up what the group agreed. Everyone approves before anyone pays.',
+    talk: 'Agree in the chat on what to book, with the link and price. Then Pact Pilot writes it up for everyone to approve.',
+    declined: 'Someone said not yet. Talk it through again, then ask Pact Pilot for a new write-up.',
+    approve: 'Pact Pilot wrote up what the group agreed. Everyone approves before anyone pays.',
     needsWallet: 'Set your PIN to make the wallet everyone pays into.',
     startCollecting: 'The split is saved. Open it so everyone can pay their share.',
     pay: 'Pay your share into the pact. It goes to the coordinator once everyone has paid.',
@@ -368,7 +418,7 @@ function stageOf(step: S.Step): number {
   switch (step.kind) {
     case 'talk': case 'declined': return 0
     case 'approve': case 'waitingApprovals': case 'needsWallet': case 'settingUp': case 'waitSetup': return 1
-    case 'startCollecting': case 'waitStart': case 'pay': case 'waitPay': case 'finalise': case 'waitFinalise': return 2
+    case 'startCollecting': case 'waitStart': case 'checking': case 'pay': case 'waitPay': case 'finalise': case 'waitFinalise': return 2
     default: return 3
   }
 }
@@ -425,7 +475,7 @@ function Chat({ messages, recs, onGrok, me, name, members, polls, onSeeFindings 
     ...recs.map((rec) => ({ kind: 'grok' as const, at: rec.created_at, rec })),
     ...polls.map((poll) => ({ kind: 'poll' as const, at: poll.created_at, poll })),
   ].sort((x, y) => x.at.localeCompare(y.at))
-  if (!entries.length) return <p className="l-chat-empty">Say hi to the group. Talk through what to book, and Grok will write it up when you're ready.</p>
+  if (!entries.length) return <p className="l-chat-empty">Say hi to the group. Talk through what to book, and Pact Pilot will write it up when you're ready.</p>
   return (
     <div className="l-chat">
       {entries.map((e, i) => {
@@ -528,47 +578,214 @@ function useDictation(onText: (text: string) => void) {
   return { supported: Boolean(Speech), listening, failure, start, stop, clear: () => setFailure(null) }
 }
 
-const AT_GROK = /(^|\s)@grok\b[:,]?/i
+/** Pact Pilot, one to one: preset prompts, your questions and its answers, and voice (speak, and hear it answer).
+ *  Its changes still need your Approve, and its status updates still show in Pact Chat. */
+const PILOT_PRESETS: { label: string; ask?: string; fill?: string; summary?: boolean }[] = [
+  { label: 'Sum up the chat', summary: true },
+  { label: "What's still missing?", ask: 'What does this pact still need decided before we can book?' },
+  { label: 'Who owes what?', ask: 'Who owes what on the tab, and what are the fewest paybacks to square up?' },
+  { label: "What's waiting on us?", ask: 'Who is this pact waiting on right now, and for what?' },
+  { label: 'Find stays in budget', ask: 'Find 3 real places to stay that fit our dates and budget each, and put them to a vote.' },
+  { label: 'Split a cost', fill: 'I paid $ for  , split with everyone' },
+]
+
+function PilotPanel({ id, me, pact, d, queued, onChanged, onOpenChat }: {
+  id: string; me: string; pact: S.Pact | null; d: S.PactData; queued?: { q: string; n: number } | null; onChanged: () => void; onOpenChat: () => void
+}) {
+  const members = d.members
+  const [text, setText] = useState('')
+  const [log, setLog] = useState<{ key: number; question: string; summary: boolean; answer: S.PilotAnswer | null; error: string | null; old?: boolean }[]>([])
+  const [voiceOn, setVoiceOn] = useState(false)
+  const [voiceError, setVoiceError] = useState<string | null>(null)
+  const voice = useDictation(setText)
+  const box = useRef<HTMLTextAreaElement>(null)
+  const end = useRef<HTMLDivElement>(null)
+  const audio = useRef<HTMLAudioElement | null>(null)
+  useEffect(() => { end.current?.scrollIntoView({ block: 'end' }) }, [log])
+  // Your saved conversation with Pact Pilot in this pact comes back when you open the panel.
+  useEffect(() => {
+    let live = true
+    void S.loadPilotHistory(id).then((turns) => {
+      if (!live || !turns.length) return
+      const past = turns.map((t, i) => ({ key: -(turns.length - i), question: t.question === S.summaryQuestion ? 'Sum up the chat' : t.question, summary: t.question === S.summaryQuestion, answer: t.answer, error: null, old: true }))
+      setLog((l) => [...past, ...l.filter((x) => !x.old)])
+    })
+    return () => { live = false }
+  }, [id])
+  const clear = async () => {
+    try { await S.clearPilotHistory(id); setLog([]) } catch (e) { setVoiceError((e as Error).message) }
+  }
+  // A question sent from Pact Chat with @Pilot: ask it here once.
+  const askedFrom = useRef(0)
+  useEffect(() => { if (queued && queued.n !== askedFrom.current) { askedFrom.current = queued.n; void ask(queued.q) } }, [queued]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function say(reply: string) {
+    if (!voiceOn || !reply) return
+    try {
+      const clip = await S.speak(reply)
+      audio.current?.pause()
+      const a = new Audio(URL.createObjectURL(clip))
+      audio.current = a
+      await a.play()
+    } catch (e) { setVoiceError((e as Error).message) }
+  }
+  /** Ask Pact Pilot. `shown` is what your bubble says, when the question sent is longer than what you tapped. */
+  async function ask(question: string, shown?: string) {
+    const q = question.trim()
+    if (!q) return
+    voice.stop(); setText(''); setVoiceError(null)
+    const key = Date.now()
+    setLog((l) => [...l, { key, question: shown ?? (q === S.summaryQuestion ? 'Sum up the chat' : q), summary: q === S.summaryQuestion, answer: null, error: null }])
+    try {
+      const answer = await S.askGrok(id, q)
+      setLog((l) => l.map((x) => (x.key === key ? { ...x, answer } : x)))
+      void say(answer.reply)
+    } catch (e) {
+      setLog((l) => l.map((x) => (x.key === key ? { ...x, error: (e as Error).message || "Pact Pilot couldn't answer. Try again." } : x)))
+    }
+  }
+  const pick = (p: (typeof PILOT_PRESETS)[number]) => {
+    if (p.summary) return void ask(S.summaryQuestion)
+    if (p.fill) { setText(p.fill); requestAnimationFrame(() => box.current?.focus()); return }
+    if (p.ask) void ask(p.ask)
+  }
+  return (
+    <div className="l-pilot-panel">
+      <div className="l-pilot-log">
+        {!log.length && (
+          <div className="l-pilot-hello">
+            <span className="l-waiting-grok"><Grok size={18} /></span>
+            <b>Ask Pact Pilot anything about this pact</b>
+            <span className="l-dim">Only you see this conversation. Anything it changes waits for your Approve, and the group sees its updates in Pact Chat.</span>
+          </div>
+        )}
+        {log.some((x) => x.old) && (
+          <div className="l-pilot-history">
+            <span>Earlier with Pact Pilot · only you see this</span>
+            <button type="button" className="l-link-btn" onClick={() => void clear()}>Clear</button>
+          </div>
+        )}
+        {log.map((x) => (
+          <div key={x.key} className="l-pilot-turn">
+            <div className="l-pilot-q">{x.question}</div>
+            <div className="l-grok-ask">
+              <div className="l-grok-ask-head"><span className="l-waiting-grok"><Grok size={15} /></span><b>Pact Pilot</b>
+                {x.answer && <button className="l-x" type="button" title="Read it aloud" aria-label="Read it aloud" onClick={() => { const was = voiceOn; setVoiceOn(true); void (async () => { try { const clip = await S.speak(x.answer!.reply); audio.current?.pause(); const a = new Audio(URL.createObjectURL(clip)); audio.current = a; await a.play() } catch (e) { setVoiceError((e as Error).message) } setVoiceOn(was) })() }}><Icon name="wave" size={15} /></button>}
+              </div>
+              {x.answer && x.summary && <PactStats pact={pact} d={d} />}
+              {x.answer ? <PilotAnswerView id={id} me={me} members={members} answer={x.answer} onDone={onChanged} onDismiss={() => setLog((l) => l.filter((y) => y.key !== x.key))} />
+                : x.error ? <p className="l-error">{x.error}</p>
+                : <div className="l-grok-ask-busy"><span>Pact Pilot is thinking</span><span className="l-dots"><i /><i /><i /></span></div>}
+            </div>
+            {x.answer && x.key === log[log.length - 1].key && <NextUp id={id} me={me} pact={pact} d={d} onAsk={(q) => void ask(q)} onOpenChat={onOpenChat} />}
+          </div>
+        ))}
+        <div ref={end} />
+      </div>
+      <div className="l-pilot-presets">
+        {PILOT_PRESETS.map((p) => <button key={p.label} type="button" className="l-pill" onClick={() => pick(p)}>{p.label}</button>)}
+      </div>
+      {(voice.failure || voiceError) && <p className="l-error">{voice.failure ?? voiceError}</p>}
+      <form className="l-composer grok" onSubmit={(e) => { e.preventDefault(); void ask(text) }}>
+        <textarea ref={box} rows={1} value={text} placeholder={voice.listening ? 'Listening… speak now' : 'Ask Pact Pilot'} onChange={(e) => setText(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void ask(text) } }} />
+        <button type="button" className={voice.listening ? 'l-icon-btn l-mic on' : 'l-icon-btn l-mic'}
+          onClick={() => { if (voice.listening) { voice.stop(); void ask(text) } else { setVoiceOn(true); void voice.start(text) } }}
+          aria-label={voice.listening ? 'Stop and ask' : 'Talk to Pact Pilot'} title={voice.listening ? 'Stop and ask' : 'Talk to Pact Pilot'}>
+          <Icon name={voice.listening ? 'wave' : 'mic'} />
+        </button>
+        <button type="submit" className="l-send" disabled={!text.trim()} aria-label="Ask Pact Pilot"><Icon name="up" /></button>
+      </form>
+    </div>
+  )
+}
+
+/** The pact's key numbers at a glance, above a summary. */
+function PactStats({ pact, d }: { pact: S.Pact | null; d: S.PactData }) {
+  const when = pact ? S.dateRange(pact.starts_on, pact.ends_on) : null
+  const stats = [
+    { label: 'Where', value: pact?.location },
+    { label: 'When', value: when },
+    { label: 'Budget', value: pact?.budget != null ? `${S.dollars(pact.budget)} each` : null },
+    { label: 'Going', value: `${d.members.length} ${d.members.length === 1 ? 'person' : 'people'}` },
+  ].filter((x): x is { label: string; value: string } => Boolean(x.value))
+  return (
+    <div className="l-pilot-stats">
+      {stats.map((x) => <div key={x.label}><span>{x.label}</span><b>{x.value}</b></div>)}
+    </div>
+  )
+}
+
+/** What to do next, from the pact itself: who it's waiting on, with a button for it. */
+function NextUp({ id, me, pact, d, onAsk, onOpenChat }: {
+  id: string; me: string; pact: S.Pact | null; d: S.PactData; onAsk: (q: string) => void; onOpenChat: () => void
+}) {
+  const [sent, setSent] = useState<string | null>(null)
+  const w = S.waitingOn(d)
+  const name = (u: string) => (u === me ? 'You' : S.firstName(d.members.find((m) => m.user_id === u)?.name))
+  const doing = w && {
+    approve: 'approve the plan',
+    start: 'set up the split and start collecting',
+    pay: w.amount != null ? `pay ${S.dollars(w.amount)}` : 'pay their share',
+    release: 'release the money and book it',
+  }[w.what]
+  const items: { key: string; text: string; button?: { label: string; run: () => void } }[] = []
+  if (w && doing) {
+    for (const u of w.people) {
+      if (u === me) items.push({ key: u, text: `You need to ${doing}`, button: { label: 'Do it', run: onOpenChat } })
+      else {
+        const who = name(u)
+        items.push({ key: u, text: `${who} needs to ${doing}`, button: { label: sent === u ? 'Nudged' : `Nudge ${who}`, run: () => {
+          if (sent === u) return
+          setSent(u)
+          void S.send(id, `${who}, the pact is waiting on you to ${doing}.`).catch(() => setSent(null))
+        } } })
+      }
+    }
+  }
+  if (!d.recommendations.length && !d.plan) items.push({ key: 'stays', text: 'No places to stay yet', button: { label: 'Find stays', run: () => onAsk('Find 3 real places to stay that fit our dates and budget each, and put them to a vote.') } })
+  if (pact && !pact.starts_on) items.push({ key: 'dates', text: 'No dates set yet', button: { label: 'Pick dates', run: () => onAsk('Start a vote on the dates for this trip.') } })
+  if (!items.length) return null
+  return (
+    <div className="l-pilot-next">
+      <span className="l-pilot-next-title">Next up</span>
+      {items.map((x) => (
+        <div key={x.key} className="l-pilot-next-row">
+          <span>{x.text}</span>
+          {x.button && <button type="button" className="l-btn l-small" disabled={x.button.label === 'Nudged'} onClick={x.button.run}>{x.button.label}</button>}
+        </div>
+      ))}
+    </div>
+  )
+}
+
+// @Pilot asks Pact Pilot. @Grok (its old name) still works.
+const AT_GROK = /(^|\s)@(pilot|grok)\b[:,]?/i
 
 function Composer({ id, onAskGrok }: { id: string; onAskGrok: (question: string) => void }) {
   const [text, setText] = useState('')
   const [error, setError] = useState<string | null>(null)
   const voice = useDictation(setText)
-  const box = useRef<HTMLTextAreaElement>(null)
-  const forGrok = AT_GROK.test(text)
-  // Typing "@" (or "@gr…") offers @Grok, so nobody has to remember the name.
-  const suggest = !forGrok && /(^|\s)@[a-z]{0,4}$/i.test(text)
-  const callGrok = () => {
-    setText((t) => (AT_GROK.test(t) ? t : suggest ? t.replace(/@[a-z]{0,4}$/i, '@Grok ') : `@Grok ${t}`))
-    requestAnimationFrame(() => { const el = box.current; if (el) { el.focus(); el.setSelectionRange(el.value.length, el.value.length) } })
-  }
   async function submit() {
     const body = text.trim()
     if (!body) return
     voice.stop()
     setText('')
-    try { await S.send(id, body) } catch (e) { setError((e as Error).message); setText(body); return }
-    // The group sees the question in the chat; Grok answers just above the message box.
-    if (AT_GROK.test(body)) onAskGrok(body.replace(AT_GROK, ' ').replace(/\s+/g, ' ').trim() || 'What should we do next?')
+    // Pact Chat is for the group. A message to @Pilot goes to Pact Pilot instead of the group.
+    if (AT_GROK.test(body)) { onAskGrok(body.replace(AT_GROK, ' ').replace(/\s+/g, ' ').trim() || 'What should we do next?'); return }
+    try { await S.send(id, body) } catch (e) { setError((e as Error).message); setText(body) }
   }
   return (
     <>
       {(error || voice.failure) && <p className="l-error">{error ?? voice.failure}</p>}
-      {suggest && (
-        <button type="button" className="l-at-suggest" onClick={callGrok}>
-          <span className="l-waiting-grok"><Grok size={13} /></span><b>@Grok</b><span>Ask Grok to plan, split or start a vote</span>
-        </button>
-      )}
-      <form className={forGrok ? 'l-composer grok' : 'l-composer'} onSubmit={(e) => { e.preventDefault(); void submit() }}>
-        <button type="button" className={forGrok ? 'l-icon-btn l-grok-btn on' : 'l-icon-btn l-grok-btn'} onClick={callGrok}
-          aria-label="Ask Grok" title="Ask Grok (or type @Grok)"><Grok size={17} /></button>
-        <textarea ref={box} rows={1} value={text} placeholder={voice.listening ? 'Listening… speak now' : 'Message the group, or @Grok to ask Grok'} onChange={(e) => setText(e.target.value)}
+      <form className="l-composer" onSubmit={(e) => { e.preventDefault(); void submit() }}>
+        <textarea rows={1} value={text} placeholder={voice.listening ? 'Listening… speak now' : 'Message the group'} onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void submit() } }} />
         <button type="button" className={voice.listening ? 'l-icon-btn l-mic on' : 'l-icon-btn l-mic'} onClick={() => (voice.listening ? voice.stop() : void voice.start(text))}
           aria-label={voice.listening ? 'Stop talking' : 'Talk instead of typing'} title={voice.listening ? 'Stop' : 'Talk instead of typing'}>
           <Icon name={voice.listening ? 'wave' : 'mic'} />
         </button>
-        <button type="submit" className="l-send" disabled={!text.trim()} aria-label={forGrok ? 'Send and ask Grok' : 'Send'} title={forGrok ? 'Send and ask Grok' : 'Send'}><Icon name="up" /></button>
+        <button type="submit" className="l-send" disabled={!text.trim()} aria-label="Send"><Icon name="up" /></button>
       </form>
     </>
   )
@@ -600,7 +817,7 @@ function Settings({ pact, d, onClose, onAddPeople, onAddItem }: { pact: S.Pact; 
         </div>
       ))}
       {d.joinRequests.map((r) => <div key={r.user_id} className="l-person pending"><Avatar name={r.name} url={r.avatar_url} size={30} /><b>{r.name ?? 'Someone'}</b><small>Pending</small></div>)}
-      <div className="l-person"><span className="l-av" style={{ width: 30, height: 30, background: '#000' }}><Grok size={16} /></span><b>Grok</b><small>Planner</small></div>
+      <div className="l-person"><span className="l-av" style={{ width: 30, height: 30, background: '#000' }}><Grok size={16} /></span><b>Pact Pilot</b><small>Planner</small></div>
       {locked && <p className="l-faint" style={{ fontSize: 13 }}>People are locked once the split is set up.</p>}
 
       <div className="l-head" style={{ margin: '22px 0 6px' }}><b className="l-dim">Overview</b>{iCoordinate && !editing && <button className="l-link" type="button" onClick={() => setEditing(true)}>Edit overview</button>}</div>
@@ -673,7 +890,7 @@ function AddPeople({ id, d, onClose }: { id: string; d: S.PactData; onClose: () 
 
 const placeholders: Record<S.ItemKind, string> = { stay: 'South Congress house', flight: 'Austin to San Antonio', ticket: 'Blockchain summit passes', dinner: 'Team dinner', other: 'Anything else' }
 
-function AddItem({ pact, messages, name, onClose }: { pact: S.Pact; messages: S.Message[]; name: (id: string) => string; onClose: () => void }) {
+function AddItem({ pact, messages, name, extra = false, onClose }: { pact: S.Pact; messages: S.Message[]; name: (id: string) => string; extra?: boolean; onClose: () => void }) {
   const { refreshPact } = useApp()
   const kinds = S.presets[S.detailsOf(pact).kind]
   const [draft, setDraft] = useState<S.ItemDraft>({ kind: kinds[0], title: '', location: '', startsOn: null, endsOn: null, link: '', price: null })
@@ -685,8 +902,9 @@ function AddItem({ pact, messages, name, onClose }: { pact: S.Pact; messages: S.
     try { await work(); await refreshPact(pact.pact_id); onClose() } catch (e) { setError((e as Error).message); setWorking(null) }
   }
   return (
-    <Modal title="Add item" onClose={onClose}>
-      <form className="l-form" onSubmit={(e) => { e.preventDefault(); if (draft.title.trim()) void go('add', () => S.addItem(pact.pact_id, draft)) }}>
+    <Modal title={extra ? 'Add an extra' : 'Add item'} onClose={onClose}>
+      {extra && <p className="l-dim" style={{ margin: '0 0 12px' }}>The split is set up, so this goes in as an extra. The group approves extras, then everyone pays the coordinator their share.</p>}
+      <form className="l-form" onSubmit={(e) => { e.preventDefault(); if (draft.title.trim()) void go('add', () => S.addItem(pact.pact_id, draft, 'manual', extra)) }}>
         <div className="l-kinds">{kinds.map((k) => <button key={k} type="button" className={draft.kind === k ? 'on' : ''} onClick={() => set({ kind: k })}><Icon name={k} />{S.itemTitle(k)}</button>)}</div>
         <label className="l-field"><span>Name</span><input className="l-input" autoFocus value={draft.title} onChange={(e) => set({ title: e.target.value })} placeholder={placeholders[draft.kind]} maxLength={120} /></label>
         <label className="l-field"><span>Where</span><input className="l-input" value={draft.location} onChange={(e) => set({ location: e.target.value })} placeholder="Optional" /></label>
@@ -702,25 +920,25 @@ function AddItem({ pact, messages, name, onClose }: { pact: S.Pact; messages: S.
         {error && <p className="l-error">{error}</p>}
         <button className="l-btn l-wide-btn" type="submit" disabled={Boolean(working) || !draft.title.trim()}>{working === 'add' ? 'Adding…' : `Add ${S.itemTitle(draft.kind).toLowerCase()}`}</button>
         <button className="l-btn l-ghost l-wide-btn" type="button" disabled={Boolean(working)} onClick={() => void go('grok', () => S.addItemsWithGrok(pact.pact_id, messages, name))}>
-          {working === 'grok' ? <Busy text="Grok is reading the chat…" /> : <><img src="/grok.svg" alt="" width={16} />Add from the chat with Grok</>}
+          {working === 'grok' ? <Busy text="Pact Pilot is reading the chat…" /> : <><img src="/grok.svg" alt="" width={16} />Add from the chat with Pact Pilot</>}
         </button>
       </form>
     </Modal>
   )
 }
 
-/** One Grok write-up, spaced out: what it said, what it picked, and the next steps. */
+/** One Pact Pilot write-up, spaced out: what it said, what it picked, and the next steps. */
 function Summary({ rec, booking, onBooking, onClose }: { rec: S.Recommendation; booking: S.Booking | null; onBooking: (b: S.Booking) => void; onClose: () => void }) {
   const when = new Date(rec.created_at).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
   const pick = rec.options[0]
   return (
-    <Modal title={<span style={{ display: 'inline-flex', gap: 10, alignItems: 'center' }}><Grok size={26} />Grok</span>} onClose={onClose}>
+    <Modal title={<span style={{ display: 'inline-flex', gap: 10, alignItems: 'center' }}><Grok size={26} />Pact Pilot</span>} onClose={onClose}>
       <div className="l-sum-block">
         <small>{when}</small>
         {rec.summary.split(/\n{2,}/).map((p, i) => <p key={i}>{p}</p>)}
         {pick && (
           <div className="l-sum-pick">
-            <span className="l-sum-pick-label">Grok picked</span>
+            <span className="l-sum-pick-label">Pact Pilot picked</span>
             <b>{pick.title}</b>
             {pick.price_per_person != null && <span className="l-sum-pick-price">{S.dollars(pick.price_per_person)} each</span>}
           </div>
@@ -735,7 +953,7 @@ function Summary({ rec, booking, onBooking, onClose }: { rec: S.Recommendation; 
   )
 }
 
-/** A Grok write-up in the chat. The first, big setup is shown large at the top; each later question gets its own block. */
+/** A Pact Pilot write-up in the chat. The first, big setup is shown large at the top; each later question gets its own block. */
 function GrokBlock({ rec, big, onOpen }: { rec: S.Recommendation; big?: boolean; onOpen: (rec: S.Recommendation) => void }) {
   const pick = rec.options[0]
   const when = new Date(rec.created_at).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
@@ -743,7 +961,7 @@ function GrokBlock({ rec, big, onOpen }: { rec: S.Recommendation; big?: boolean;
     <button type="button" className={big ? 'l-grok-block big' : 'l-grok-block'} onClick={() => onOpen(rec)}>
       <span className="l-av l-grok-av" style={{ width: big ? 48 : 40, height: big ? 48 : 40 }}><Grok size={big ? 26 : 22} /></span>
       <span className="l-grok-block-main">
-        <b>{big ? 'Grok set up this pact' : pick ? `Grok: ${pick.title}` : 'Grok wrote a plan'}</b>
+        <b>{big ? 'Pact Pilot set up this pact' : pick ? `Pact Pilot: ${pick.title}` : 'Pact Pilot wrote a plan'}</b>
         <small>{when}</small>
       </span>
       <span className="l-grok-one-open">Open</span>
@@ -751,8 +969,8 @@ function GrokBlock({ rec, big, onOpen }: { rec: S.Recommendation; big?: boolean;
   )
 }
 
-/** Grok at work, at the bottom of the chat: thinking, taking longer, or failed with a way to try again. */
-/** Grok's live line at the bottom of the chat: who the pact is waiting on, with their faces. If it's you, your button. */
+/** Pact Pilot at work, at the bottom of the chat: thinking, taking longer, or failed with a way to try again. */
+/** Pact Pilot's live line at the bottom of the chat: who the pact is waiting on, with their faces. If it's you, your button. */
 function WaitingCard({ d, me, step, hasGrok, working, onAct }: {
   d: S.PactData; me: string; step: S.Step; hasGrok: boolean; working: string | null; onAct: () => void
 }) {
@@ -774,7 +992,7 @@ function WaitingCard({ d, me, step, hasGrok, working, onAct }: {
     <div className={`l-waiting${mine ? ' mine' : ''}`} role="status">
       <span className="l-waiting-grok"><Grok size={15} /></span>
       <div className="l-waiting-main">
-        <b>Grok</b>
+        <b>Pact Pilot</b>
         <span>Waiting on {list} {doing}.{mine && pin ? ' You confirm it with your PIN.' : ''}</span>
         <div className="l-waiting-faces">
           {people.slice(0, 6).map((m) => <Avatar key={m.user_id} name={m.name} url={m.avatar_url} size={26} />)}
@@ -790,8 +1008,8 @@ function GrokStatus({ job, onDismiss }: { job: { label: string; slow: boolean; e
     <div className={job.error ? 'l-grok-status error' : 'l-grok-status'}>
       <span className="l-av l-grok-av" style={{ width: 40, height: 40 }}><Grok size={22} /></span>
       <div className="l-grok-status-main">
-        {job.error ? <><b>Grok couldn't answer</b><span>{job.error}</span></>
-          : <><b>{job.slow ? 'Grok is taking longer than usual…' : job.label}</b><span className="l-dots"><i /><i /><i /></span></>}
+        {job.error ? <><b>Pact Pilot couldn't answer</b><span>{job.error}</span></>
+          : <><b>{job.slow ? 'Pact Pilot is taking longer than usual…' : job.label}</b><span className="l-dots"><i /><i /><i /></span></>}
       </div>
       {job.error && <div className="l-grok-status-actions">
         <button className="l-btn l-small" type="button" onClick={job.retry}>Try again</button>
@@ -822,11 +1040,11 @@ function GrokInfo({ onClose }: { onClose: () => void }) {
     <div className="l-item"><div className="l-item-icon"><Icon name={icon} /></div><div><b>{title}</b><span>{text}</span></div></div>
   )
   return (
-    <Modal title={<span style={{ display: 'inline-flex', gap: 10, alignItems: 'center' }}><Grok size={26} />Grok</span>} onClose={onClose}>
+    <Modal title={<span style={{ display: 'inline-flex', gap: 10, alignItems: 'center' }}><Grok size={26} />Pact Pilot</span>} onClose={onClose}>
       <p className="l-dim" style={{ marginTop: 0 }}>Your pact's planner</p>
       {line('text', 'Reads the group chat', 'When you tap Set up with Grok, it reads what everyone said.')}
       {line('list', 'Writes up the booking', 'The one thing you agreed on, its link, and the price for each person.')}
-      {line('checkCircle', 'Never touches money', "Everyone approves their own share. Grok can't pay or book on its own.")}
+      {line('checkCircle', 'Never touches money', "Everyone approves their own share. Pact Pilot can't pay or book on its own.")}
       <p className="l-dim" style={{ fontSize: 14 }}>Connected through Pact. Nothing to set up.</p>
       <a className="l-btn l-ghost l-wide-btn" href="https://grok.com" target="_blank" rel="noreferrer" style={{ textDecoration: 'none' }}>Open your own Grok<Icon name="link" size={15} /></a>
     </Modal>
@@ -869,9 +1087,14 @@ function ActionSheet({ id, action, d, iCoordinate, onClose }: { id: string; acti
     pay_share: { title: 'Approve your share', text: `Pay ${S.dollars(share)} into the pact. It's held until everyone has paid, then goes to the coordinator.`, button: `Approve ${S.dollars(share)}` },
     release: { title: 'Finalise and book', text: `Everyone has paid. Release ${S.dollars(total)} to yourself, then book it.`, button: `Finalise · ${S.dollars(total)}` },
   }[action]
+  // Collecting already started (on another device, or before this page refreshed): say so, nothing to do here.
+  const alreadyOpen = action === 'create_pact' && chain != null && chain.state !== 'none'
+  const shown = alreadyOpen
+    ? { title: 'Collecting has started', text: `The split is already open, so everyone can pay their ${S.dollars(share)} share now. There's nothing else to do here.`, button: '' }
+    : copy
   return (
-    <Modal title={copy.title} onClose={onClose}>
-      <p className="l-dim" style={{ marginTop: 0, lineHeight: 1.5 }}>{copy.text}</p>
+    <Modal title={shown.title} onClose={onClose}>
+      <p className="l-dim" style={{ marginTop: 0, lineHeight: 1.5 }}>{shown.text}</p>
       {chain && chain.state !== 'none' && <>
         <b className="l-dim">Who's paid</b>
         {d.members.map((m) => {
@@ -886,10 +1109,10 @@ function ActionSheet({ id, action, d, iCoordinate, onClose }: { id: string; acti
       </>}
       {error && <p className="l-error">{error}</p>}
       <div style={{ marginTop: 18 }}>
-        {state === 'done' ? <button className="l-btn l-wide-btn" type="button" onClick={onClose}>Done</button>
+        {state === 'done' || alreadyOpen ? <button className="l-btn l-wide-btn" type="button" onClick={() => { void refreshPact(id); onClose() }}>Done</button>
           : state === 'busy' ? <Busy text="Confirm with your PIN, then Arc confirms it…" />
           : <button className="l-btn l-wide-btn" type="button" disabled={action !== 'pay_share' && !iCoordinate}
-              onClick={async () => { setState('busy'); setError(null); try { await S.pactAction(action, id); await refreshPact(id); setWallet(await S.loadWallet()); setState('done') } catch (e) { setError((e as Error).message); setState('idle') } }}>{copy.button}</button>}
+              onClick={async () => { setState('busy'); setError(null); try { await S.pactAction(action, id); await refreshPact(id); setWallet(await S.loadWallet()); setState('done') } catch (e) { const msg = (e as Error).message ?? ''; if (/already (on chain|started|open)/i.test(msg)) { await refreshPact(id); setState('done'); return } setError(msg || "That didn't go through. Try again."); setState('idle') } }}>{copy.button}</button>}
       </div>
     </Modal>
   )
@@ -897,8 +1120,70 @@ function ActionSheet({ id, action, d, iCoordinate, onClose }: { id: string; acti
 
 /** Send USDC to someone in the pact by who they are, not their address. Confirmed with my PIN, and a note goes in the
  *  chat. From Settle it's a payback (it counts on the tab); from Send money it's a plain send. */
-function SendMoney({ id, d, initial, cents: preset, payback, onClose, onSent }: {
-  id: string; d: S.PactData; initial: string | null; cents?: number; payback?: boolean; onClose: () => void; onSent: () => void
+/** Extras: things added after the split was locked. The group approves a round, then each person pays the
+ *  coordinator their share with their PIN. The first split stays as it is. */
+function ExtrasCard({ extras, me, members, working, onAdd, onSend, onVote, onPay }: {
+  extras: S.Extras; me: string; members: S.Member[]; working: string | null
+  onAdd: () => void; onSend: () => void; onVote: (roundId: string, yes: boolean) => void; onPay: (roundId: string, cents: number) => void
+}) {
+  const host = members.find((m) => m.user_id === extras.host)
+  const hostName = extras.host === me ? 'you' : S.firstName(host?.name)
+  const unsentEach = extras.unsent.reduce((n, i) => n + (i.price_each ?? 0), 0)
+  const open = extras.rounds.find((r) => r.status === 'open')
+  return (
+    <div className="l-about l-extras">
+      <div className="l-extras-head">
+        <div className="l-section-title">Extras</div>
+        <button className="l-pill" type="button" onClick={onAdd}><Icon name="plus" />Add an extra</button>
+      </div>
+      {!extras.unsent.length && !extras.rounds.length && (
+        <p className="l-dim" style={{ margin: 0 }}>The split is set up, so the plan is locked. Anything else (a taxi, a dinner) goes here as an extra: the group approves it, then everyone pays {hostName} their share.</p>
+      )}
+      {extras.unsent.length > 0 && (
+        <div className="l-extras-round">
+          {extras.unsent.map((i) => <div key={i.item_id ?? i.title} className="l-extras-item"><span>{i.title}</span><b>{i.price_each != null ? `${S.dollars(i.price_each)} each` : 'No price'}</b></div>)}
+          <div className="l-extras-foot">
+            <span className="l-dim">Not sent yet · {S.dollars(unsentEach)} each</span>
+            <button className="l-btn l-small" type="button" disabled={Boolean(working) || Boolean(open) || unsentEach <= 0} onClick={onSend}
+              title={open ? 'Finish the extras already up for approval first' : undefined}>Send extras for approval</button>
+          </div>
+        </div>
+      )}
+      {extras.rounds.map((r) => {
+        const each = r.share_cents
+        const myVote = r.votes[me]
+        const approvals = Object.values(r.votes).filter((v) => v === 'approve').length
+        const iPaid = r.paid.includes(me) || extras.host === me
+        const payers = members.filter((m) => m.user_id !== extras.host)
+        const paidCount = payers.filter((m) => r.paid.includes(m.user_id)).length
+        return (
+          <div key={r.round_id} className="l-extras-round">
+            <div className="l-extras-title"><b>{S.cents(each)} each</b><span className={`l-chip-status ${r.status}`}>{r.status === 'open' ? 'Approving' : paidCount >= payers.length ? 'All paid' : 'Paying'}</span></div>
+            {r.items.map((i, k) => <div key={k} className="l-extras-item"><span>{i.title}</span><b>{i.price_each != null ? `${S.dollars(i.price_each)} each` : ''}</b></div>)}
+            {r.status === 'open' ? (
+              <div className="l-extras-foot">
+                <span className="l-dim">Approved by {approvals} of {members.length}</span>
+                {!myVote && <div className="l-extras-buttons">
+                  <button className="l-btn l-ghost l-small" type="button" disabled={Boolean(working)} onClick={() => onVote(r.round_id, false)}>Not yet</button>
+                  <button className="l-btn l-small" type="button" disabled={Boolean(working)} onClick={() => onVote(r.round_id, true)}>Approve</button>
+                </div>}
+              </div>
+            ) : (
+              <div className="l-extras-foot">
+                <span className="l-dim">{paidCount} of {payers.length} paid {hostName}</span>
+                {!iPaid && <button className="l-btn l-small" type="button" disabled={Boolean(working)} onClick={() => onPay(r.round_id, each)}>Pay {S.cents(each)} to {hostName}</button>}
+                {iPaid && extras.host !== me && <span className="l-net owed">Paid</span>}
+              </div>
+            )}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+function SendMoney({ id, d, initial, cents: preset, payback, extras, onClose, onSent }: {
+  id: string; d: S.PactData; initial: string | null; cents?: number; payback?: boolean; extras?: string; onClose: () => void; onSent: () => void
 }) {
   const { me, wallet, go, setWallet } = useApp()
   const people = d.members.filter((m) => m.user_id !== me)
@@ -917,8 +1202,8 @@ function SendMoney({ id, d, initial, cents: preset, payback, onClose, onSent }: 
     if (!who) return
     setState('busy'); setError(null)
     try {
-      await (payback ? S.payBack(id, who.user_id, cents) : S.sendTo(id, who.user_id, cents))
-      const what = note.trim() ? ` for ${note.trim()}` : payback ? ' to settle up' : ''
+      await (extras ? S.payExtras(id, extras, who.user_id, cents) : payback ? S.payBack(id, who.user_id, cents) : S.sendTo(id, who.user_id, cents))
+      const what = note.trim() ? ` for ${note.trim()}` : extras ? ' for the extras' : payback ? ' to settle up' : ''
       await S.send(id, `Sent ${S.cents(cents)} to ${S.firstName(who.name)}${what}.`).catch(() => undefined)
       setWallet(await S.loadWallet())
       onSent()
@@ -977,6 +1262,19 @@ function NetBalance({ who, me, tab, onSettle }: { who: S.Member; me: string; tab
   const net = theyOwe - iOwe
   if (net < 0) return <button className="l-net owe" type="button" onClick={() => onSettle(-net)} title={`You owe ${S.firstName(who.name)} ${S.cents(net)}. Tap to settle.`}>−{S.cents(net)}</button>
   return <span className={net > 0 ? 'l-net owed' : 'l-net'} title={net > 0 ? `${S.firstName(who.name)} owes you ${S.cents(net)}` : 'Nothing owed either way'}>{net > 0 ? '+' : ''}{S.cents(net)}</span>
+}
+
+/** While the pact is collecting: each person's share, minus until they pay, then $0.00 in green. */
+function shareBalance(d: S.PactData | null, userId: string, me: string) {
+  const chain = d?.chain
+  if (!chain || chain.state !== 'open') return null
+  const row = chain.members.find((m) => m.userId === userId)
+  if (!row) return null
+  const share = Math.round(Number(chain.share.usdc) * 100)
+  const who = userId === me ? 'You' : S.firstName(d.members.find((m) => m.user_id === userId)?.name)
+  return row.paid
+    ? <span className="l-net owed" title={`${who} paid ${userId === me ? 'your' : 'their'} share`}>{S.cents(0)}</span>
+    : <span className="l-net owe" title={`${who} still ${userId === me ? 'owe' : 'owes'} ${S.cents(share)}`}>−{S.cents(share)}</span>
 }
 
 /** My own row: where I stand with the whole group on this pact's tab. Green when I'm owed, red when I owe. */
@@ -1099,7 +1397,7 @@ function PollCard({ poll, me, members, pact, iCoordinate, onVoted, onAddedToPlan
   )
 }
 
-/** Options Grok (or anyone) posted as a chat message, as cards. Tick one to vote: the first tick turns the list into a vote. */
+/** Options Pact Pilot (or anyone) posted as a chat message, as cards. Tick one to vote: the first tick turns the list into a vote. */
 function MessageOptions({ id, found, onStarted }: { id: string; found: NonNullable<ReturnType<typeof S.parseOptions>>; onStarted: () => void }) {
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -1136,7 +1434,7 @@ function VoteCheck({ on, disabled, label, onClick }: { on: boolean; disabled?: b
   )
 }
 
-/** In the chat: one line saying what Grok found, and a button to see and vote on it in Findings. */
+/** In the chat: one line saying what Pact Pilot found, and a button to see and vote on it in Findings. */
 function FoundSummary({ found, votes, onOpen }: { found: { title: string; options: { price_each: number | null }[] }; votes?: number; onOpen: () => void }) {
   const prices = found.options.map((o) => o.price_each).filter((p): p is number => p != null)
   const range = !prices.length ? null : Math.min(...prices) === Math.max(...prices) ? `${S.dollars(prices[0])} each` : `${S.dollars(Math.min(...prices))}–${S.dollars(Math.max(...prices))} each`

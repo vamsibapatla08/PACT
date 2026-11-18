@@ -54,7 +54,7 @@ export type Step =
   | { kind: 'talk' } | { kind: 'declined' }
   | { kind: 'approve'; decision: Decision } | { kind: 'waitingApprovals'; approved: number; of: number }
   | { kind: 'needsWallet' } | { kind: 'settingUp' } | { kind: 'waitSetup'; host: string }
-  | { kind: 'startCollecting' } | { kind: 'waitStart'; host: string }
+  | { kind: 'startCollecting' } | { kind: 'waitStart'; host: string } | { kind: 'checking' }
   | { kind: 'pay'; amount: number } | { kind: 'waitPay'; paid: number; of: number }
   | { kind: 'finalise'; total: number } | { kind: 'waitFinalise'; host: string }
   | { kind: 'done'; total: number; host: string } | { kind: 'cancelled' }
@@ -78,7 +78,7 @@ const bookingQuestion = `Find the one thing our group agreed to book in the chat
 Return it as the only option, with price_per_person for each of us and its link. Don't suggest other places.`
 const itemsQuestion = `List each thing our group agreed to book in the chat above as its own option: a stay, a flight, tickets or a dinner. \
 Give each its price_per_person and link. Don't add anything we didn't agree on.`
-export const summaryQuestion = "Sum up what our group has agreed so far and what is still missing. Don't suggest places."
+export const summaryQuestion = "Sum up where our group stands. Use the pact's saved details (place, dates, budget, people, the plan and who has paid) as well as the chat. Say what is decided and what is still missing. Don't suggest places."
 
 export function friendly(error: unknown, fallback: string) {
   const text = String((error as { message?: string })?.message ?? error).toLowerCase()
@@ -154,13 +154,17 @@ export async function loadSplit(id: string) {
   const rows = (Array.isArray(data) ? data : []) as (FundingPlan & { user_id: string | null; share_status: string; tx_hash: string | null; paid_at: string | null })[]
   const plan = rows[0] ?? null
   const receipts: Receipt[] = rows.filter((r) => r.user_id).map((r) => ({ user_id: r.user_id!, status: r.share_status, tx_hash: r.tx_hash, paid_at: r.paid_at }))
-  const chain = await invoke<Chain>('wallet', { action: 'pact_status', pactId: id }).catch(() => null)
+  const read = () => invoke<Chain>('wallet', { action: 'pact_status', pactId: id })
+  const chain = await read().catch(() => new Promise((ok) => setTimeout(ok, 900)).then(read)).catch(() => null)
   return { plan, chain, receipts, events: (events ?? []) as PaymentEvent[] }
 }
 
 export async function loadItems(id: string): Promise<Item[]> {
-  const { data } = await supabase.from('pact_items').select('item_id, kind, title, location, starts_on, ends_on, link, price_each, source, created_by')
-    .eq('pact_id', id).order('starts_on', { ascending: true, nullsFirst: false }).order('created_at', { ascending: true })
+  const cols = 'item_id, kind, title, location, starts_on, ends_on, link, price_each, source, created_by'
+  const order = <T extends { order: (c: string, o: object) => T }>(q: T) => q.order('starts_on', { ascending: true, nullsFirst: false }).order('created_at', { ascending: true })
+  let { data, error } = await order(supabase.from('pact_items').select(cols).eq('pact_id', id).eq('extra', false))
+  // Before the extras migration is live there's no "extra" column: load every item, as before.
+  if (error && /extra/.test(error.message)) ({ data } = await order(supabase.from('pact_items').select(cols).eq('pact_id', id)))
   return (data ?? []).map((i) => ({ ...i, price_each: i.price_each == null ? null : Number(i.price_each) })) as Item[]
 }
 
@@ -177,7 +181,7 @@ export async function loadPactData(id: string, me: string): Promise<PactData> {
 export const coordinator = (d: Pick<PactData, 'members'>) => d.members.find((m) => m.role === 'host') ?? null
 
 export function booking(d: PactData) {
-  // The plan the group is voting on (or approved) stays in charge, even if Grok writes a newer summary afterwards.
+  // The plan the group is voting on (or approved) stays in charge, even if Pact Pilot writes a newer summary afterwards.
   // Recommendations are newest first, so a plan sent for approval later still wins. With no vote yet, the newest one.
   const voted = d.recommendations.find((r) => d.decisions.some((x) => x.recommendation_id === r.recommendation_id && x.status !== 'rejected'))
   const rec = voted ?? d.recommendations[0]
@@ -211,6 +215,8 @@ export function step(d: PactData, me: string, hasWallet: boolean): Step {
     if (chain.funded) return iCoordinate ? { kind: 'finalise', total } : { kind: 'waitFinalise', host }
     return { kind: 'waitPay', paid: chain.sharesPaid, of: chain.sharesNeeded }
   }
+  // The split is saved. If PactSplit couldn't be read just now, don't guess "not started": say we're checking.
+  if (d.plan && !chain) return { kind: 'checking' }
   if (d.plan) return iCoordinate ? { kind: 'startCollecting' } : { kind: 'waitStart', host }
   const b = booking(d)
   const k = b && consent(d, b)
@@ -223,8 +229,8 @@ export function step(d: PactData, me: string, hasWallet: boolean): Step {
 /** The step as a line of text, and whether it's mine to do. Same wording as the iOS floating step. */
 export function stepLabel(s: Step, hasGrok: boolean): { text: string; action: boolean } {
   switch (s.kind) {
-    case 'talk': return { text: hasGrok ? 'Planning' : 'Set up with Grok', action: !hasGrok }
-    case 'declined': return { text: 'Set up with Grok again', action: true }
+    case 'talk': return { text: hasGrok ? 'Planning' : 'Set up with Pact Pilot', action: !hasGrok }
+    case 'declined': return { text: 'Set up with Pact Pilot again', action: true }
     case 'approve': return { text: 'Approve', action: true }
     case 'needsWallet': return { text: 'Set my PIN to collect', action: true }
     case 'startCollecting': return { text: 'Start collecting', action: true }
@@ -234,6 +240,7 @@ export function stepLabel(s: Step, hasGrok: boolean): { text: string; action: bo
     case 'settingUp': return { text: 'Setting up the split', action: false }
     case 'waitSetup': return { text: `Waiting for ${s.host} to set up the split`, action: false }
     case 'waitStart': return { text: `Waiting for ${s.host} to start collecting`, action: false }
+    case 'checking': return { text: 'Checking the latest from Arc…', action: false }
     case 'waitPay': return { text: `You're in · ${s.paid} of ${s.of} paid`, action: false }
     case 'waitFinalise': return { text: `Everyone's paid · waiting for ${s.host}`, action: false }
     case 'done': return { text: `Done · ${dollars(s.total)} to ${s.host}`, action: false }
@@ -277,7 +284,7 @@ export function dateRange(start: string | null, end: string | null) {
   return !end || end === start ? f(start) : `${f(start)} – ${f(end)}`
 }
 
-// ---- Chat and Grok
+// ---- Chat and Pact Pilot
 
 export async function loadMessages(id: string): Promise<Message[]> {
   const { data } = await supabase.from('pact_messages').select('message_id, pact_id, sender_id, body, created_at')
@@ -307,7 +314,7 @@ function withChat(question: string, messages: Message[], name: (id: string) => s
 
 type Answer = { summary: string; options: Option[]; tasks?: unknown[]; costs?: Cost[]; next_steps?: string[] }
 
-/** Called while Grok is on its second try, so the page can say so. */
+/** Called while Pact Pilot is on its second try, so the page can say so. */
 export let onGrokRetry: (() => void) | null = null
 export const setGrokRetryListener = (f: (() => void) | null) => { onGrokRetry = f }
 
@@ -316,11 +323,11 @@ async function askPilotRaw(id: string, question: string, messages: Message[], na
   const ask = () => invoke<Answer>('pactpilot', { pact_id: id, question: withChat(question, messages, name), quick: question === summaryQuestion })
   try { return await ask() }
   catch (e) {
-    // Grok sometimes runs past the function's time limit. One more try usually lands.
+    // Pact Pilot sometimes runs past the function's time limit. One more try usually lands.
     if (!/timed out|request failed \(5\d\d\)|non-2xx|50[234]/i.test(String((e as Error).message))) throw e
     onGrokRetry?.()
     try { return await ask() }
-    catch { throw new Error('Grok is slow right now and timed out twice. Try again in a minute.') }
+    catch { throw new Error('Pact Pilot is slow right now and timed out twice. Try again in a minute.') }
   }
 }
 
@@ -343,18 +350,18 @@ async function createDecision(id: string, question: string, recommendationId: st
   if (error) throw new Error("Couldn't start the vote.")
 }
 
-/** Grok reads the chat, writes up the one thing to book, and it goes to everyone to approve. */
+/** Pact Pilot reads the chat, writes up the one thing to book, and it goes to everyone to approve. */
 export async function askGrokToBook(id: string, me: string, pact: Pact, messages: Message[], name: (id: string) => string) {
   await askPilot(id, bookingQuestion, messages, name)
   const d = await loadPactData(id, me)
   const b = booking(d)
-  if (!b) throw new Error("Grok couldn't find one thing you've agreed to book yet. Agree on it in the chat, with the link and price, then try again.")
+  if (!b) throw new Error("Pact Pilot couldn't find one thing you've agreed to book yet. Agree on it in the chat, with the link and price, then try again.")
   if (consent(d, b)) return
   await createDecision(id, b.question, b.rec.recommendation_id)
   await importFromGrok(pact, d, me)
 }
 
-/** Grok's write-up fills in the link and price when the coordinator hasn't set them yet. */
+/** Pact Pilot's write-up fills in the link and price when the coordinator hasn't set them yet. */
 async function importFromGrok(pact: Pact, d: PactData, me: string) {
   const b = booking(d)
   if (coordinator(d)?.user_id !== me || !b) return
@@ -380,7 +387,7 @@ export async function approve(decision: Decision, wallet: Wallet | null) {
 /** Once everyone approves, the coordinator saves the split: the price each, paid to them, due in a week. */
 export async function setUpSplit(id: string, d: PactData, wallet: Wallet) {
   const b = booking(d)
-  if (!b || b.perPerson == null) throw new Error("Grok's card has no price yet. Ask Grok again with the price in the chat.")
+  if (!b || b.perPerson == null) throw new Error("Pact Pilot's card has no price yet. Ask Pact Pilot again with the price in the chat.")
   try {
     await invoke('create-pact-payment-plan', {
       pactId: id, shareUsdc: String(Math.round(b.perPerson * 100) / 100),
@@ -456,13 +463,45 @@ export function guessKind(title: string): ItemKind {
 
 export type ItemDraft = { kind: ItemKind; title: string; location: string; startsOn: string | null; endsOn: string | null; link: string; price: number | null }
 
-export async function addItem(id: string, d: ItemDraft, source: 'manual' | 'grok' = 'manual') {
+/** Add to the plan. Once the split is set up, the plan is locked, so new things go in as extras instead. */
+export async function addItem(id: string, d: ItemDraft, source: 'manual' | 'grok' = 'manual', extra = false) {
   const { error } = await supabase.from('pact_items').insert({
     pact_id: id, kind: d.kind, title: d.title.trim(), location: d.location.trim() || null,
     starts_on: d.startsOn, ends_on: d.startsOn ? (d.endsOn && d.endsOn >= d.startsOn ? d.endsOn : d.startsOn) : null,
-    link: withScheme(d.link) || null, price_each: d.price, source,
+    link: withScheme(d.link) || null, price_each: d.price, source, extra,
   })
-  if (error) throw new Error(/row-level security/i.test(error.message) ? 'Items are locked once the split is set up.' : "Couldn't add that item.")
+  if (error) throw new Error(/row-level security/i.test(error.message) ? (extra ? "Couldn't add that extra." : 'The split is set up, so add it as an extra.') : "Couldn't add that item.")
+}
+
+// ---- Extras: things added after the split is locked. The group approves a round of them, then each person pays
+// the coordinator their share directly (PIN). The first split stays as it is.
+
+export type ExtraItem = { item_id?: string; kind: ItemKind; title: string; price_each: number | null; link: string | null; created_by?: string }
+export type ExtrasRound = { round_id: string; status: 'open' | 'approved'; share_cents: number; created_at: string; items: ExtraItem[]; votes: Record<string, 'approve' | 'reject'>; paid: string[] }
+export type Extras = { host: string | null; unsent: ExtraItem[]; rounds: ExtrasRound[] }
+
+export async function loadExtras(id: string): Promise<Extras> {
+  const { data, error } = await supabase.rpc('get_pact_extras', { p_pact_id: id })
+  if (error) throw new Error("Couldn't load the extras.")
+  return data as Extras
+}
+
+export async function sendExtrasForApproval(id: string) {
+  const { error } = await supabase.rpc('send_pact_extras_for_approval', { p_pact_id: id })
+  if (error) throw new Error(said(error, "Couldn't send the extras for approval."))
+}
+
+export async function voteExtras(roundId: string, approve: boolean) {
+  const { error } = await supabase.rpc('vote_pact_extras', { p_round_id: roundId, p_approve: approve })
+  if (error) throw new Error(said(error, "Your vote didn't count. Try again."))
+}
+
+/** Pay my share of an approved extras round to the coordinator. It's marked for the round before the PIN. */
+export async function payExtras(id: string, roundId: string, host: string, amountCents: number) {
+  const requestId = crypto.randomUUID()
+  const { error } = await supabase.rpc('mark_pact_extras_payment', { p_round_id: roundId, p_request_id: requestId })
+  if (error) throw new Error(said(error, "Couldn't start the payment."))
+  await sendTo(id, host, amountCents, requestId)
 }
 
 // ---- Vote cards: a few options (hotels, flights…) the group picks from. One vote each, changeable.
@@ -485,14 +524,14 @@ export async function loadPolls(id: string): Promise<Poll[]> {
   })) as Poll[]
 }
 
-/** Start a vote from a list of options (for example one Grok posted as a chat message). */
+/** Start a vote from a list of options (for example one Pact Pilot posted as a chat message). */
 export async function startPoll(id: string, title: string, options: Omit<PollOption, 'key'>[], kind: ItemKind = 'other') {
   const { data, error } = await supabase.rpc('create_pact_poll', { p_pact_id: id, p_title: title.slice(0, 120), p_options: options, p_kind: kind, p_source: 'manual' })
   if (error) throw new Error(/PGRST202|schema cache|does not exist/i.test(error.message) ? "Votes aren't switched on yet. Run the database update first." : "Couldn't start the vote.")
   return data as string
 }
 
-/** Reads a numbered list of options out of a chat message, like Grok's "1. Holiday Inn Express: ~$222 each … https://…
+/** Reads a numbered list of options out of a chat message, like Pact Pilot's "1. Holiday Inn Express: ~$222 each … https://…
  *  2. Hilton…". Returns null for an ordinary message. */
 export function parseOptions(text: string): { title: string; options: Omit<PollOption, 'key'>[] } | null {
   const parts = text.split(/(?:^|\s)(\d{1,2})[.)]\s+(?=\S)/)
@@ -545,12 +584,12 @@ export const itemsTotal = (items: Item[]) => {
   return prices.length ? prices.reduce((a, b) => a + b, 0) : null
 }
 
-/** Grok reads the chat and each thing the group agreed on becomes an item. */
+/** Pact Pilot reads the chat and each thing the group agreed on becomes an item. */
 export async function addItemsWithGrok(id: string, messages: Message[], name: (id: string) => string) {
   let answer: Answer
   try { answer = await askPilotRaw(id, itemsQuestion, messages, name) }
-  catch (e) { throw new Error(said(e, "Grok couldn't read the chat. Try again.")) }
-  if (!answer.options?.length) throw new Error("Grok didn't find anything agreed in the chat yet. Add an item by hand, or agree on one in the chat first.")
+  catch (e) { throw new Error(said(e, "Pact Pilot couldn't read the chat. Try again.")) }
+  if (!answer.options?.length) throw new Error("Pact Pilot didn't find anything agreed in the chat yet. Add an item by hand, or agree on one in the chat first.")
   for (const o of answer.options) {
     await addItem(id, { kind: guessKind(`${o.title} ${o.description}`), title: o.title.slice(0, 120), location: '', startsOn: null, endsOn: null, link: o.link ?? '', price: o.price_per_person ?? null }, 'grok')
   }
@@ -728,7 +767,7 @@ export async function loadLedger(address: string, pactIds: string[]): Promise<Le
 // "verified" means QuickNode has confirmed every payment the chain shows (and the release, once released).
 // "onchain" means the chain shows it but QuickNode hasn't confirmed all of it yet.
 
-/** Who the pact is waiting on right now, and for what. Drives Grok's "Waiting on…" card and the Needs you list. */
+/** Who the pact is waiting on right now, and for what. Drives Pact Pilot's "Waiting on…" card and the Needs you list. */
 export type Waiting = { what: 'approve' | 'start' | 'pay' | 'release'; people: string[]; amount: number | null }
 export function waitingOn(d: PactData): Waiting | null {
   const host = coordinator(d)?.user_id ?? null
@@ -740,6 +779,7 @@ export function waitingOn(d: PactData): Waiting | null {
     const unpaid = chain.members.filter((m) => m.address && !m.paid && m.userId).map((m) => m.userId)
     return unpaid.length ? { what: 'pay', people: unpaid, amount: Number(chain.share.usdc) || null } : null
   }
+  if (d.plan && !chain) return null // not read yet: don't guess
   if (d.plan) return host ? { what: 'start', people: [host], amount: null } : null
   const b = booking(d)
   const k = b && consent(d, b)
@@ -826,27 +866,55 @@ export async function sendTo(id: string, toUser: string, amountCents: number, re
   if (t.status !== 'confirmed') throw new Error('The send has not confirmed yet. Check your wallet activity before sending again.')
 }
 
+/** Pact Pilot's answer read aloud by the ElevenLabs voice. Returns an audio clip to play. */
+export async function speak(text: string): Promise<Blob> {
+  const { data, error } = await supabase.functions.invoke('pilot-voice', { body: { text: text.slice(0, 1200) } })
+  if (error || !(data instanceof Blob)) throw new Error("Pact Pilot's voice isn't available right now.")
+  return data
+}
+
 export type PilotAction = { tool: string; args: Record<string, unknown> }
-/** Grok's reply, and the changes it wants to make. operationId is the saved plan the asker approves. */
+/** Pact Pilot's reply, and the changes it wants to make. operationId is the saved plan the asker approves. */
 export type PilotAnswer = { reply: string; actions: PilotAction[]; operationId: string | null }
 
-/** Ask Grok anything about the pact. It reads the tab and the plan, and proposes changes that only run once you approve. */
+/** Ask Pact Pilot anything about the pact. It reads the tab and the plan, and proposes changes that only run once you approve. */
 export async function askGrok(id: string, question: string): Promise<PilotAnswer> {
-  const a = await invoke<{ reply?: string; summary?: string; actions?: PilotAction[]; operation_id?: string | null }>('pactpilot', { pact_id: id, question: question.slice(0, 2000), idempotency_key: crypto.randomUUID() })
+  const a = await invoke<{ reply?: string; summary?: string; actions?: PilotAction[]; operation_id?: string | null }>('pactpilot', { pact_id: id, question: question.slice(0, 2000), quick: question === summaryQuestion, idempotency_key: crypto.randomUUID() })
   return { reply: a.reply ?? a.summary ?? '', actions: a.actions ?? [], operationId: a.operation_id ?? null }
+}
+
+/** Your saved Pact Pilot conversation in this pact, oldest first. Empty if the history table isn't live yet. */
+export type PilotTurn = { id: string; question: string; answer: PilotAnswer; at: string }
+export async function loadPilotHistory(id: string): Promise<PilotTurn[]> {
+  const { data, error } = await supabase.from('pact_pilot_messages')
+    .select('message_id, question, reply, created_at')
+    .eq('pact_id', id).order('created_at', { ascending: false }).limit(40)
+  if (error || !data) return []
+  return data.reverse().map((r) => ({
+    id: r.message_id as string, question: r.question as string, at: r.created_at as string,
+    answer: { reply: r.reply as string, actions: [], operationId: null }, // past proposals were approved or dropped then
+  }))
+}
+
+/** Clear your own Pact Pilot conversation in this pact. */
+export async function clearPilotHistory(id: string) {
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return
+  const { error } = await supabase.from('pact_pilot_messages').delete().eq('pact_id', id).eq('user_id', user.id)
+  if (error) throw new Error("Couldn't clear the conversation.")
 }
 
 /** Run the plan the asker approved, one change at a time, and record how it went. It runs once: a second tap fails in the database. */
 export async function approveGrok(id: string, operationId: string) {
   const { data: plan, error } = await supabase.rpc('begin_pact_ai_operation', { p_operation_id: operationId })
-  if (error) throw new Error(said(error, 'That plan was already approved or has expired. Ask Grok again.'))
+  if (error) throw new Error(said(error, 'That plan was already approved or has expired. Ask Pact Pilot again.'))
   const actions = ((plan as { actions?: PilotAction[] } | null)?.actions ?? [])
   const results: unknown[] = []
   try {
     for (const a of actions) results.push(await invoke('pactpilot', { pact_id: id, tool: a.tool, args: a.args }))
   } catch (e) {
     await supabase.rpc('finish_pact_ai_operation', { p_operation_id: operationId, p_status: 'failed', p_result: { results, error: (e as Error).message } })
-    throw new Error(said(e, "Grok's change didn't go through."))
+    throw new Error(said(e, "Pact Pilot's change didn't go through."))
   }
   await supabase.rpc('finish_pact_ai_operation', { p_operation_id: operationId, p_status: 'completed', p_result: { results } })
 }

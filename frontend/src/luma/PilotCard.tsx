@@ -2,7 +2,7 @@ import { useState } from 'react'
 import * as S from './store'
 import { Busy, Grok } from './ui'
 
-/** Ask Grok for anything in the pact. Its changes show as one approve card and run only when you approve. */
+/** Ask Pact Pilot for anything in the pact. Its changes show as one approve card and run only when you approve. */
 export function PilotCard({ id, me, members, onDone }: { id: string; me: string; members: S.Member[]; onDone: () => void }) {
   const [question, setQuestion] = useState('')
   const [answer, setAnswer] = useState<S.PilotAnswer | null>(null)
@@ -16,8 +16,8 @@ export function PilotCard({ id, me, members, onDone }: { id: string; me: string;
   }
   return (
     <div className="l-about l-pilot">
-      <div className="l-section-title">Ask Grok</div>
-      <form className="l-tab-ask" onSubmit={(e) => { e.preventDefault(); if (question.trim()) void run('Grok is reading the pact…', async () => { setAnswer(await S.askGrok(id, question)); setQuestion('') }) }}>
+      <div className="l-section-title">Ask Pact Pilot</div>
+      <form className="l-tab-ask" onSubmit={(e) => { e.preventDefault(); if (question.trim()) void run('Pact Pilot is reading the pact…', async () => { setAnswer(await S.askGrok(id, question)); setQuestion('') }) }}>
         <span className="l-av" style={{ width: 26, height: 26, background: '#000' }}><Grok size={15} /></span>
         <input className="l-input" value={question} onChange={(e) => setQuestion(e.target.value)} disabled={Boolean(working)} maxLength={600}
           placeholder="“I got coffee for everyone, $18” · “Start a vote on Friday or Saturday” · “Can I crash at the hotel too?”" />
@@ -30,7 +30,7 @@ export function PilotCard({ id, me, members, onDone }: { id: string; me: string;
   )
 }
 
-/** Grok's reply, and any changes it wants to make as one card you approve. Used by the Ask Grok card and by @Grok in the chat. */
+/** Pact Pilot's reply, and any changes it wants to make as one card you approve. Used by the Ask Pact Pilot card and by @Pilot in the chat. */
 export function PilotAnswerView({ id, me, members, answer, onDone, onDismiss }: {
   id: string; me: string; members: S.Member[]; answer: S.PilotAnswer; onDone: () => void; onDismiss: () => void
 }) {
@@ -40,10 +40,10 @@ export function PilotAnswerView({ id, me, members, answer, onDone, onDismiss }: 
   const changes = answer.actions.filter((a) => !a.tool.startsWith('read_'))
   return (
     <div className="l-tab-answer">
-      <p>{answer.reply}</p>
+      <ReplyText text={answer.reply} />
       {changes.length > 0 && (
         <div className="l-pilot-plan">
-          <span className="l-dim">Grok wants to</span>
+          <span className="l-dim">Pact Pilot wants to</span>
           <ul>{changes.map((a, i) => <li key={i}>{label(a, who)}</li>)}</ul>
           {answer.operationId ? (
             <div className="l-pilot-buttons">
@@ -53,7 +53,7 @@ export function PilotAnswerView({ id, me, members, answer, onDone, onDismiss }: 
               </button>
               <button className="l-btn l-ghost l-small" type="button" disabled={working} onClick={onDismiss}>Not now</button>
             </div>
-          ) : <p className="l-error">Grok's plan wasn't saved, so it can't run. Ask again.</p>}
+          ) : <p className="l-error">Pact Pilot's plan wasn't saved, so it can't run. Ask again.</p>}
         </div>
       )}
       {error && <p className="l-error">{error}</p>}
@@ -81,4 +81,33 @@ function label(a: S.PilotAction, who: (id: string) => string) {
     case 'enqueue_email': return 'Email everyone the details'
     default: return a.tool.replaceAll('_', ' ')
   }
+}
+
+const MONTH = '(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\\.?'
+/** Money, dates and counts stand out in Pact Pilot's replies. */
+const METRIC = new RegExp(
+  `(\\$\\d[\\d,]*(?:\\.\\d{1,2})?(?:\\s?(?:each|per person|a person|a head))?` +
+  `|\\b${MONTH} \\d{1,2}(?:\\s?[-–]\\s?(?:${MONTH} )?\\d{1,2})?(?:, \\d{4})?` +
+  `|\\b(?:\\d+|one|two|three|four|five|six|seven|eight|nine|ten) (?:nights?|days?|people|members?|guests?|rooms?|beds?|votes?)\\b)`, 'gi')
+
+function highlight(line: string) {
+  return line.split(METRIC).map((part, i) => (i % 2 ? <b key={i} className="l-metric">{part}</b> : part))
+}
+
+/** Pact Pilot's reply, one sentence per line so it reads at a glance. */
+export function ReplyText({ text }: { text: string }) {
+  const lines = text.split(/\n+/).flatMap((block) => {
+    const b = block.trim()
+    if (!b) return []
+    if (/^([-•*]|\d+[.)])\s/.test(b)) return [b]
+    return b.split(/(?<=[.!?])\s+(?=[A-Z"“($])/)
+  })
+  return (
+    <div className="l-reply">
+      {lines.map((l, i) => {
+        const bullet = /^[-•*]\s+/.test(l)
+        return <p key={i} className={bullet ? 'bullet' : undefined}>{highlight(bullet ? l.replace(/^[-•*]\s+/, '') : l)}</p>
+      })}
+    </div>
+  )
 }

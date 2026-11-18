@@ -285,13 +285,19 @@ async function call(name: string, args: Json, me: Me): Promise<{ text: string; d
       const link = text(args.link, 500)
       need(!link || /^https?:\/\//i.test(link), 'link must start with https://')
       const start = day(args.starts_on)
-      const { error } = await db.from('pact_items').insert({
+      const row = {
         pact_id: id, kind: args.kind, title, location: text(args.location, 120) || null,
         starts_on: start, ends_on: start ? (day(args.ends_on) ?? start) : null,
         link: link || null, price_each: typeof args.price_each === 'number' && args.price_each >= 0 ? args.price_each : null, source: 'grok',
-      })
-      need(!error, /row-level security/i.test(error?.message ?? '') ? 'Items are locked once the split is set up.' : "Couldn't add that item.")
-      return { text: `Added ${args.kind} "${title}"${typeof args.price_each === 'number' ? ` at ${money(args.price_each)} each` : ''}.` }
+      }
+      // Once the split is set up the plan is locked, so it goes in as an extra the group approves and pays separately.
+      const { data: locked } = await db.from('pact_payments').select('payment_id').eq('pact_id', id).maybeSingle()
+      const { error } = await db.from('pact_items').insert({ ...row, extra: Boolean(locked) })
+      need(!error, "Couldn't add that item.")
+      const price = typeof args.price_each === 'number' ? ` at ${money(args.price_each)} each` : ''
+      return { text: locked
+        ? `The split is already set up, so I added ${args.kind} "${title}"${price} as an extra. Anyone can send the extras for approval on the pact page; then everyone pays the coordinator their share with their PIN.`
+        : `Added ${args.kind} "${title}"${price}.` }
     }
     case 'start_vote': {
       const id = text(args.pact_id, 40)
