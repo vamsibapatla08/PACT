@@ -366,6 +366,29 @@ async function pactRoster(userJwt: string, pactId: string) {
   return (members ?? []) as { user_id: string; role: string }[]
 }
 
+/** The pact's collection round and whether someone left mid-collection, from the saved plan. Round 0 with no plan. */
+async function roundOf(pactId: string) {
+  const { data, error } = await admin.from('pact_payments').select('round, needs_reopen, reopen_total, share_usdc, shares_needed').eq('pact_id', pactId).maybeSingle()
+  if (error) throw error
+  return { round: (data?.round as number | undefined) ?? 0, needsReopen: Boolean(data?.needs_reopen), plan: data }
+}
+
+/** Is this user in the pact now, or were they before leaving? Former members can still take a refund. */
+async function everInPact(userId: string, pactId: string) {
+  const { data } = await admin.from('pact_members').select('membership_status').eq('pact_id', pactId).eq('user_id', userId).maybeSingle()
+  return Boolean(data)
+}
+
+/** The newest cancelled round this wallet paid into and hasn't taken back yet, if any. */
+async function refundableRound(pactId: string, round: number, address: string) {
+  for (let r = round; r >= 0; r--) {
+    const key = pactKey(pactId, r)
+    const pact = await readPact(key)
+    if (pact.state === 'cancelled' && await readPaid(key, address)) return { round: r, key, pact }
+  }
+  return null
+}
+
 // A PactSplit call from the user's wallet, once their balance covers `valueWei` plus gas.
 async function contractChallenge(
   userId: string, wallet: { id: string; address: string }, signature: string, params: string[], valueWei = 0n,
@@ -394,7 +417,9 @@ async function payShare(userId: string, userJwt: string, pactId: unknown) {
 
   const wallet = await myWallet(userId)
   if (!wallet) return reply(409, { error: 'Set up your wallet first' })
-  const key = pactKey(pactId)
+  const { round, needsReopen } = await roundOf(pactId)
+  if (needsReopen) return reply(409, { error: 'Someone left, so the coordinator is reopening the collection with new shares. Pay once it reopens.' })
+  const key = pactKey(pactId, round)
   const pact = await readPact(key)
   if (pact.state !== 'open') return reply(409, { error: 'This pact is not open for payment' })
   // Anyone can call createPact with a known id, so only pay into the one the real host opened.
@@ -425,10 +450,21 @@ async function createPact(userId: string, userJwt: string, pactId: unknown) {
 
   const wallet = await hostWallet(userId, userJwt, pactId)
   if (wallet instanceof Response) return wallet
-  const { data: plan, error } = await admin.from('pact_payments')
-    .select('payee_address, share_usdc, shares_needed, deadline').eq('pact_id', pactId).maybeSingle()
+  const { data: saved, error } = await admin.from('pact_payments')
+    .select('payee_address, share_usdc, shares_needed, deadline, round, needs_reopen').eq('pact_id', pactId).maybeSingle()
   if (error) throw error
-  if (!plan) return reply(409, { error: 'Make a funding plan for this pact first' })
+  if (!saved) return reply(409, { error: 'Make a funding plan for this pact first' })
+  // The last round was cancelled: open a new round. Someone left before it opened: share the total again first.
+  // Either way the shares are recomputed for everyone still in, so a leaver's part is reallocated.
+  const current = (await readPact(pactKey(pactId, saved.round ?? 0))).state
+  if (current === 'open') return reply(409, { error: 'Collecting has already started for this pact, so everyone can pay their share now.' })
+  if (current === 'released') return reply(409, { error: 'This pact is already paid out' })
+  let plan = saved
+  if (current === 'cancelled' || saved.needs_reopen) {
+    const { data: next, error: roundError } = await admin.rpc('start_pact_payment_round', { p_pact_id: pactId, p_new_round: current === 'cancelled' })
+    if (roundError) return reply(409, { error: roundError.message })
+    plan = next
+  }
   const payee = plan.payee_address as string
   const share = usdcWei(String(plan.share_usdc))
   const sharesNeeded = plan.shares_needed as number
@@ -439,7 +475,7 @@ async function createPact(userId: string, userJwt: string, pactId: unknown) {
   if (!(deadline > Date.now() / 1000 + PIN_MARGIN_SECONDS)) {
     return reply(409, { error: 'The funding plan deadline has passed or is too close' })
   }
-  const key = pactKey(pactId)
+  const key = pactKey(pactId, plan.round ?? 0)
   // A released or cancelled pact can never be opened again under the same id.
   if ((await readPact(key)).state !== 'none') return reply(409, { error: 'Collecting has already started for this pact, so everyone can pay their share now.' })
 
@@ -460,7 +496,9 @@ async function closePact(userId: string, userJwt: string, pactId: unknown, fn: '
   if (fn === 'release' && !isHost) return reply(403, { error: 'Only the host can do this' })
   const wallet = await myWallet(userId)
   if (!wallet) return reply(409, { error: 'Set up your wallet first' })
-  const key = pactKey(pactId)
+  const { round, needsReopen } = await roundOf(pactId)
+  if (fn === 'release' && needsReopen) return reply(409, { error: 'Someone left, so cancel and reopen the collection with new shares first' })
+  const key = pactKey(pactId, round)
   const blocked = closeBlocker(fn, await readPact(key), isHost, wallet.address, Date.now() / 1000)
   if (blocked) return reply(409, { error: blocked })
 
@@ -472,15 +510,16 @@ async function claimRefund(userId: string, userJwt: string, pactId: unknown) {
   if (!PACT_SPLIT_ADDRESS) return reply(503, { error: 'Payments are not set up yet' })
   if (typeof pactId !== 'string' || !UUID.test(pactId)) return reply(400, { error: 'pactId must be a pact id' })
 
-  const roster = await pactRoster(userJwt, pactId)
-  if (!roster.some((m) => m.user_id === userId)) return reply(403, { error: 'You are not in this pact' })
+  void userJwt
+  // Someone who left can still take back what they paid.
+  if (!await everInPact(userId, pactId)) return reply(403, { error: 'You are not in this pact' })
   const wallet = await myWallet(userId)
   if (!wallet) return reply(409, { error: 'Set up your wallet first' })
-  const key = pactKey(pactId)
-  const blocked = refundBlocker(await readPact(key), await readPaid(key, wallet.address))
-  if (blocked) return reply(409, { error: blocked })
+  const { round } = await roundOf(pactId)
+  const found = await refundableRound(pactId, round, wallet.address)
+  if (!found) return reply(409, { error: refundBlocker(await readPact(pactKey(pactId, round)), false) ?? 'You have no share to take back' })
 
-  return await contractChallenge(userId, wallet, 'claimRefund(bytes32)', [key])
+  return await contractChallenge(userId, wallet, 'claimRefund(bytes32)', [found.key])
 }
 
 // Read only, so no PIN. Where a PIN challenge from this user's own wallet stands: awaiting_pin, pending,
@@ -511,8 +550,12 @@ async function pactStatus(userId: string, userJwt: string, pactId: unknown) {
   if (error) throw error
   const addressOf = new Map((wallets ?? []).map((w: { user_id: string; address: string }) => [w.user_id, w.address]))
 
-  const key = pactKey(pactId)
+  const { round, needsReopen, plan } = await roundOf(pactId)
+  const key = pactKey(pactId, round)
   const pact = await readPact(key)
+  const myAddress = addressOf.get(userId) ?? null
+  // Only a pact with a cancelled or reopened collection can owe anyone a refund, so most reads skip this entirely.
+  const mine = myAddress && (round > 0 || pact.state === 'cancelled') ? await refundableRound(pactId, round, myAddress) : null
   const members = await Promise.all(roster.map(async (m) => {
     const address = addressOf.get(m.user_id) ?? null
     const paid = address && pact.state !== 'none' ? await readPaid(key, address) : false
@@ -520,7 +563,15 @@ async function pactStatus(userId: string, userJwt: string, pactId: unknown) {
   }))
   const hostId = roster.find((m) => m.role === 'host')?.user_id
   const hostAddress = hostId ? addressOf.get(hostId) ?? null : null
-  const view = pactStatusView(pactId, PACT_SPLIT_ADDRESS, pact, members, hostAddress)
+  // The share the next round would ask each person for, once someone has left (the same total, fewer people).
+  const reopenShare = plan && (needsReopen || pact.state === 'cancelled')
+    ? Math.ceil((Number(plan.reopen_total ?? Number(plan.share_usdc) * Number(plan.shares_needed)) * 100) / Math.max(1, members.filter((m) => m.address).length)) / 100
+    : null
+  const view = {
+    ...pactStatusView(pactId, PACT_SPLIT_ADDRESS, pact, members, hostAddress),
+    round, needsReopen, reopenShare,
+    myRefund: mine ? { round: mine.round, amount: usdcString(mine.pact.share) } : null,
+  }
   // Save what the contract says so pact_shares and the Fund step follow real payments. Only for a pact the
   // real host opened, and a failed save never breaks the read.
   if (view.openedByHost) {

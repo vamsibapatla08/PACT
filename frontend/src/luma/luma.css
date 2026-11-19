@@ -1323,9 +1323,10 @@ html, body { overscroll-behavior: none; }
 .l-pilot-hello .l-waiting-grok { width: 44px; height: 44px; }
 .l-pilot-turn { display: grid; gap: 8px; }
 .l-pilot-q { justify-self: end; max-width: 86%; padding: 10px 14px; border-radius: 18px; border-bottom-right-radius: 6px; background: var(--silver); color: #0b0b0d; font-weight: 600; }
-.l-pilot-presets { display: flex; gap: 8px; overflow-x: auto; scrollbar-width: none; padding-bottom: 2px; }
-.l-pilot-presets::-webkit-scrollbar { display: none; }
-.l-pilot-presets .l-pill { flex: none; }
+.l-pilot-presets { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; padding-bottom: 2px; }
+.l-pilot-presets-label { font-size: 12px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--dim); margin-right: 2px; }
+.l-pilot-presets .l-pill { flex: none; display: inline-flex; align-items: center; gap: 6px; padding: 7px 12px; font-size: 13.5px; }
+.l-pilot-presets .l-pill svg { opacity: 0.75; }
 .l-voice { font-size: 16px; }
 .l-voice.on { box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.8); }
 .l-menu a { display: block; padding: 9px 12px; border-radius: 9px; font-weight: 500; color: var(--text); text-decoration: none; }
@@ -1642,3 +1643,47 @@ html, body { overscroll-behavior: none; }
   .x-flow-text { font-size: 15.5px; }
   .x-flow-foot > div { font-size: 16px; padding: 20px 22px; }
 }
+
+/* Pact Pilot researching: steps tick off one by one under a moving bar. */
+.l-research { display: grid; gap: 10px; padding: 2px 0; }
+.l-research-bar { position: relative; height: 3px; border-radius: 99px; overflow: hidden; background: rgba(255, 255, 255, 0.08); }
+.l-research-bar i { position: absolute; inset: 0 auto 0 0; width: 40%; border-radius: inherit; background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.85), transparent); animation: l-research-sweep 1.4s ease-in-out infinite; }
+.l-research ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 7px; }
+.l-research li { display: flex; align-items: center; gap: 9px; font-size: 14px; color: var(--faint, rgba(255, 255, 255, 0.35)); transition: color 0.3s ease; }
+.l-research li.now { color: var(--text, #fff); }
+.l-research li.done { color: var(--dim); }
+.l-research-dot { width: 8px; height: 8px; flex: none; border-radius: 99px; border: 1.5px solid currentColor; transition: background 0.3s ease; }
+.l-research li.done .l-research-dot { background: var(--go, #3ecf8e); border-color: var(--go, #3ecf8e); }
+.l-research li.now .l-research-dot { background: currentColor; animation: l-research-pulse 1s ease-in-out infinite; }
+.l-research li .l-dots { margin-left: 2px; }
+.l-research li .l-dots i { width: 4px; height: 4px; }
+@keyframes l-research-sweep { 0% { transform: translateX(-100%); } 100% { transform: translateX(250%); } }
+@keyframes l-research-pulse { 50% { opacity: 0.35; } }
+@media (prefers-reduced-motion: reduce) { .l-research-bar i, .l-research li.now .l-research-dot { animation: none; } }
+
+/* A soft, slow glow on the next thing to do, so it invites a tap without shouting. */
+.l-glow { position: relative; animation: l-glow 2.6s ease-in-out infinite; }
+@keyframes l-glow {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(255, 255, 255, 0), 0 0 0 1px rgba(255, 255, 255, 0.16); }
+  50% { box-shadow: 0 0 22px 2px rgba(255, 255, 255, 0.16), 0 0 0 1px rgba(255, 255, 255, 0.5); }
+}
+@media (prefers-reduced-motion: reduce) { .l-glow { animation: none; box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.5); } }
+
+/* Pact Pilot's "Start here" list. */
+.l-start { display: grid; gap: 8px; width: 100%; max-width: 420px; margin-top: 18px; text-align: left; }
+.l-start-step { display: flex; align-items: center; gap: 12px; width: 100%; padding: 12px 14px; border-radius: 16px; border: 0; cursor: pointer;
+  color: inherit; font: inherit; text-align: left; background: rgba(255, 255, 255, 0.06); transition: background 0.2s ease; }
+.l-start-step:hover { background: rgba(255, 255, 255, 0.1); }
+.l-start-step:disabled { opacity: 0.5; cursor: default; }
+.l-start-step span { display: grid; gap: 2px; }
+.l-start-step b { font-size: 14.5px; }
+.l-start-step small { font-size: 12.5px; color: var(--dim); }
+.l-panel-switch button.l-glow { color: var(--text, #fff); }
+
+/* Try again and remove, top right of a vote card. */
+.l-poll-tools { margin-left: auto; display: flex; align-items: center; gap: 6px; flex: none; }
+.l-poll-tools .l-pill { display: inline-flex; align-items: center; gap: 6px; padding: 6px 11px; font-size: 13px; }
+.l-poll-head > .l-poll-tools { display: flex; }
+.l-poll-tools .l-x { width: 32px; height: 32px; flex: none; display: grid; place-items: center; border: 0; border-radius: 999px; cursor: pointer;
+  color: var(--dim); background: rgba(255, 255, 255, 0.07); }
+.l-poll-tools .l-x:hover { color: var(--text, #fff); background: rgba(255, 255, 255, 0.13); }

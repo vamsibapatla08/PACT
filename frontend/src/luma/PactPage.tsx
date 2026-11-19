@@ -7,8 +7,9 @@ import { PilotAnswerView } from './PilotCard'
 type Sheet =
   | { kind: 'settings' } | { kind: 'addPeople' } | { kind: 'addItem' } | { kind: 'grok' }
   | { kind: 'summary'; rec: S.Recommendation } | { kind: 'booking'; booking: S.Booking }
-  | { kind: 'action'; action: 'create_pact' | 'pay_share' | 'release' } | { kind: 'person'; member: S.Member }
+  | { kind: 'action'; action: S.MoneyAction } | { kind: 'person'; member: S.Member }
   | { kind: 'send'; to: string | null; cents?: number; payback?: boolean; extras?: string } | { kind: 'info' } | { kind: 'dates' } | { kind: 'budget' } | { kind: 'place' }
+  | { kind: 'removeItem'; item: S.Item }
 
 export function PactPage({ id }: { id: string }) {
   const app = useApp()
@@ -25,7 +26,10 @@ export function PactPage({ id }: { id: string }) {
   const [tab, setTab] = useState<S.Tab | null>(null)
   const [extras, setExtras] = useState<S.Extras | null>(null)
   /** The right panel: the group's Pact Chat, or a private Pact Pilot conversation. */
-  const [panel, setPanel] = useState<'chat' | 'pilot'>('chat')
+  const [panel, setPanel] = useState<'chat' | 'pilot'>(() => (S.takePilotFirst(id) ? 'pilot' : 'chat'))
+  /** Set once you tap a tab yourself, so the page never switches it under you. */
+  const pickedPanel = useRef(false)
+  const pick = (next: 'chat' | 'pilot') => { pickedPanel.current = true; setPanel(next) }
   /** The chat (or Pact Pilot) opened full screen. Esc closes it. */
   const [fullChat, setFullChat] = useState(false)
   /** A question sent from Pact Chat with @Pilot: it opens Pact Pilot and is asked there, not posted to the group. */
@@ -85,7 +89,7 @@ export function PactPage({ id }: { id: string }) {
   // or tab reloads the page once (changes that land together are batched). Nothing re-asks the database on a timer,
   // apart from a once-a-minute backup check while the page is on screen.
   useEffect(() => {
-    void S.loadMessages(id).then(setMessages)
+    void S.loadMessages(id).then((all) => { setMessages(all); if (!all.length && !pickedPanel.current) setPanel('pilot') })
     let pending: ReturnType<typeof setTimeout> | null = null
     const changed = () => {
       if (pending) clearTimeout(pending)
@@ -160,17 +164,24 @@ export function PactPage({ id }: { id: string }) {
   const hasGrok = Boolean(latest)
   const finished = step?.kind === 'done' || step?.kind === 'cancelled'
   const proof = d ? S.verification(d) : null
-  const askBook = (): Promise<unknown> => (d?.items.length ? S.bookItems(id, pact, d.items, me) : S.askGrokToBook(id, me, pact, messages, name))
+
+  const details0 = pact ? S.detailsOf(pact) : null
+  const findAsk = pact ? S.findQuestion(details0?.kind ?? 'other', pact.location, S.dateRange(pact.starts_on, pact.ends_on) ?? null, details0?.budget ?? null) : ''
+  const findText = S.findLabel(null, details0?.kind)
+  function findOptions() { if (!findAsk) return; setQueued({ q: findAsk, n: Date.now() }); setPanel('pilot') }
 
   function doStep() {
     if (!step || !d) return
     switch (step.kind) {
-      case 'talk': case 'declined': return void runGrok('Pact Pilot is reading the chat to write up what to book…', askBook)
+      // Planning: Pact Pilot searches for real options and puts them to a vote. Ticks are approvals, so nobody types.
+      case 'talk': case 'declined': return findOptions()
       case 'approve': return void run(wallet ? 'Approving…' : 'Set your PIN…', async () => { await S.approve(step.decision, wallet); if (!wallet) app.setWallet(await S.loadWallet()) })
       case 'needsWallet': return void run('Set your PIN…', async () => app.setWallet(await S.makeWallet()))
       case 'startCollecting': return setSheet({ kind: 'action', action: 'create_pact' })
       case 'pay': return setSheet({ kind: 'action', action: 'pay_share' })
       case 'finalise': return setSheet({ kind: 'action', action: 'release' })
+      case 'reallocate': return setSheet({ kind: 'action', action: 'cancel' })
+      case 'reopen': return setSheet({ kind: 'action', action: 'create_pact' })
     }
   }
 
@@ -229,10 +240,10 @@ export function PactPage({ id }: { id: string }) {
           <div className="l-titlebar">
             <PactTitle id={id} name={pact.name} editing={renaming} onEditing={setRenaming} canEdit={iCoordinate} onSaved={() => void app.refresh()} />
             <div className="l-meta-row">
-              <TitleChip icon="pin" label={pact.location || 'Add place'} empty={!pact.location}
+              <TitleChip icon="pin" label={pact.location || 'Add place'} empty={!pact.location} glow={!pact.location}
                 canEdit={iCoordinate} hint="Where" onClick={() => setSheet({ kind: 'place' })} />
               <div className="l-meta-right">
-                <TitleChip icon="calendar" label={S.dateRange(pact.starts_on, pact.ends_on) ?? 'Add dates'} empty={!pact.starts_on}
+                <TitleChip icon="calendar" label={S.dateRange(pact.starts_on, pact.ends_on) ?? 'Add dates'} empty={!pact.starts_on} glow={Boolean(pact.location) && !pact.starts_on}
                   canEdit={iCoordinate} hint="Dates" onClick={() => setSheet({ kind: 'dates' })} />
                 <TitleChip icon="wallet" label={details.budget != null ? `${S.dollars(details.budget)} each` : 'Add budget'} empty={details.budget == null}
                   canEdit={iCoordinate} hint="Budget per person" onClick={() => setSheet({ kind: 'budget' })} />
@@ -255,7 +266,15 @@ export function PactPage({ id }: { id: string }) {
             <button className="l-pill" type="button" onClick={() => setSheet({ kind: 'addItem' })}><Icon name="plus" />Add item</button>
             <button className="l-pill" type="button" disabled={Boolean(grokJob && !grokJob.error)} onClick={() => { setQueued({ q: S.summaryQuestion, n: Date.now() }); setPanel('pilot') }}><Icon name="text" />Summary</button>
             </div>
-            {(step?.kind === 'talk' || step?.kind === 'declined') && <button className="l-book" type="button" disabled={Boolean(grokJob && !grokJob.error)} onClick={() => void runGrok(d?.items.length ? 'Sending it to the group to approve…' : 'Pact Pilot is writing up the plan for the group to approve…', askBook)}><Icon name="sparkles" />Send for approval</button>}
+            {/* Sends what's on the plan as one plan for everyone to approve, priced at the items' total each. Only shows
+                once there's something on the plan, so it never guesses from the chat. */}
+            {(step?.kind === 'talk' || step?.kind === 'declined') && d && d.items.length > 0 && S.itemsTotal(d.items, d.members.length) != null && (
+              <button className={['l-book', 'l-glow'].join(' ')} type="button" disabled={Boolean(grokJob && !grokJob.error)}
+                title="Everyone on the pact approves this plan before anyone pays"
+                onClick={() => void runGrok('Sending the plan to the group to approve…', () => S.sendForApproval(id, pact!, me, polls, name))}>
+                <Icon name="sparkles" />Send {d.items.length} {d.items.length === 1 ? 'item' : 'items'} for approval · {S.dollars(S.itemsTotal(d.items, d.members.length)!)} each
+              </button>
+            )}
           </div>
 
           </>}
@@ -265,7 +284,8 @@ export function PactPage({ id }: { id: string }) {
             <div className="l-findings" ref={findingsRef}>
               <div className="l-section-title">Findings</div>
               {[...polls].sort((x, y) => Number(y.status === 'open') - Number(x.status === 'open') || y.created_at.localeCompare(x.created_at)).map((poll) => (
-                <PollCard key={poll.poll_id} poll={poll} me={me} members={d.members} pact={pact} iCoordinate={iCoordinate} locked={Boolean(d.plan)}
+                <PollCard key={poll.poll_id} poll={poll} me={me} members={d.members} pact={pact} iCoordinate={iCoordinate} locked={Boolean(d.plan)} canSend={step?.kind === 'talk' || step?.kind === 'declined'}
+                  onRetry={(q) => { setQueued({ q, n: Date.now() }); setPanel('pilot') }}
                   onVoted={reloadSide} onAddedToPlan={() => { reloadSide(); void refreshPact(id) }} />
               ))}
               {messageFindings.map((f) => <MessageOptions key={f.m.message_id} id={id} found={f.found} onStarted={reloadSide} />)}
@@ -275,8 +295,16 @@ export function PactPage({ id }: { id: string }) {
           {d && d.items.length > 0 && (
             <div className="l-about">
               <div className="l-section-title">Plan</div>
-              <Items items={d.items} />
+              <Items items={d.items} d={d} canRemove={iCoordinate && Boolean(d.plan) && d.chain?.state !== 'released'}
+                canEdit={iCoordinate && d.chain?.state !== 'released'}
+                onScope={(item, scope) => void run(scope === 'group' ? 'Splitting it between everyone…' : 'Making it per person…', async () => { await S.setItemScope(id, item.item_id, scope); await refreshPact(id) })}
+                onRemove={(item) => setSheet({ kind: 'removeItem', item })} />
             </div>
+          )}
+
+          {d && tab?.pending && tab.pending.length > 0 && (
+            <PendingSplits pending={tab.pending} me={me} members={d.members} working={working}
+              onApprove={(expenseId) => void run('Approving…', async () => { await S.approveSplit(expenseId); reloadSide() })} />
           )}
 
           {d && d.plan && extras && (
@@ -303,8 +331,11 @@ export function PactPage({ id }: { id: string }) {
       <section className={fullChat ? 'l-chat-wide l-pact-chat full' : 'l-chat-wide l-pact-chat'} ref={chatRef}>
         <div className="l-chat-head l-panel-head">
           <div className="l-panel-switch" role="tablist" aria-label="Chat or Pact Pilot">
-            <button type="button" role="tab" aria-selected={panel === 'chat'} className={panel === 'chat' ? 'on' : ''} onClick={() => setPanel('chat')}>Pact Chat</button>
-            <button type="button" role="tab" aria-selected={panel === 'pilot'} className={panel === 'pilot' ? 'on' : ''} onClick={() => setPanel('pilot')}><Grok size={14} />Pact Pilot</button>
+            <button type="button" role="tab" aria-selected={panel === 'chat'} className={panel === 'chat' ? 'on' : ''} onClick={() => pick('chat')}>Pact Chat</button>
+            {/* While planning, the Pact Pilot tab glows from Pact Chat to say: start here. */}
+            <button type="button" role="tab" aria-selected={panel === 'pilot'}
+              className={[panel === 'pilot' ? 'on' : '', panel === 'chat' && (step?.kind === 'talk' || step?.kind === 'declined') ? 'l-glow' : ''].join(' ')}
+              onClick={() => pick('pilot')}><Grok size={14} />Pact Pilot</button>
           </div>
           <button type="button" className="l-chat-expand" onClick={toggleFull}
             aria-label={fullChat ? 'Close full screen' : 'Open the chat full screen'} title={fullChat ? 'Close full screen (Esc)' : 'Full screen'}>
@@ -315,15 +346,25 @@ export function PactPage({ id }: { id: string }) {
         </div>
         {panel === 'pilot' && d ? (
           <PilotPanel id={id} me={me} pact={pact ?? null} d={d} queued={queued} onOpenChat={() => setPanel('chat')}
+            onAct={doStep} findAsk={findAsk} findText={findText} hasPolls={polls.length > 0} canEdit={iCoordinate}
+            onSetPlace={() => setSheet({ kind: 'place' })} onSetDates={() => setSheet({ kind: 'dates' })}
             onChanged={() => { reloadSide(); setTabVersion((v) => v + 1); void refreshPact(id) }} />
         ) : <>
         {d && d.recommendations.length > 0 && (
           <GrokBlock rec={d.recommendations[d.recommendations.length - 1]} big onOpen={(rec) => setSheet({ kind: 'summary', rec })} />
         )}
-        <Chat messages={messages} me={me} name={name} members={d?.members ?? []} polls={polls} pact={pact} iCoordinate={iCoordinate} locked={Boolean(d?.plan)}
+        <Chat messages={messages} me={me} name={name} members={d?.members ?? []} polls={polls} pact={pact} iCoordinate={iCoordinate} locked={Boolean(d?.plan)} canSend={step?.kind === 'talk' || step?.kind === 'declined'}
+          onRetry={(q) => { setQueued({ q, n: Date.now() }); setPanel('pilot') }}
           onVoted={reloadSide} onAddedToPlan={() => { reloadSide(); void refreshPact(id) }}
           onSeeFindings={() => findingsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
           recs={(d?.recommendations ?? []).slice(0, -1)} onGrok={(rec) => setSheet({ kind: 'summary', rec })} />
+        {d?.chain?.myRefund && (
+          <div className="l-card l-status">
+            <h3>You have {S.dollars(Number(d.chain.myRefund.amount))} to take back</h3>
+            <p>The collection was cancelled, so the share you paid is yours again. It goes straight back to your wallet.</p>
+            <button className="l-btn" type="button" onClick={() => setSheet({ kind: 'action', action: 'claim_refund' })}>Take back {S.dollars(Number(d.chain.myRefund.amount))}</button>
+          </div>
+        )}
         {d && step && !finished && <WaitingCard d={d} me={me} step={step} hasGrok={hasGrok} working={working} onAct={doStep} />}
         {grokJob && <GrokStatus job={grokJob} onDismiss={() => setGrokJob(null)} />}
         <Composer id={id} onAskGrok={(q) => { setQueued({ q, n: Date.now() }); setPanel('pilot') }} />
@@ -342,6 +383,8 @@ export function PactPage({ id }: { id: string }) {
       {sheet?.kind === 'place' && <PlaceSheet pact={pact} onClose={() => setSheet(null)} onSaved={() => { setSheet(null); void app.refresh() }} />}
       {sheet?.kind === 'budget' && <BudgetSheet pact={pact} onClose={() => setSheet(null)} onSaved={() => { setSheet(null); void app.refresh() }} />}
       {sheet?.kind === 'send' && d && <SendMoney id={id} d={d} initial={sheet.to} cents={sheet.cents} payback={sheet.payback} extras={sheet.extras} onClose={() => setSheet(null)} onSent={() => { setTabVersion((v) => v + 1); reloadSide() }} />}
+      {sheet?.kind === 'removeItem' && d && <RemoveItemSheet id={id} item={sheet.item} d={d} me={me}
+        onClose={() => setSheet(null)} onDone={(act) => { setSheet(act ? { kind: 'action', action: 'cancel' } : null); reloadSide(); void refreshPact(id) }} />}
       {sheet?.kind === 'info' && <InfoSheet pact={pact} canEdit={iCoordinate} onSettings={() => setSheet({ kind: 'settings' })} onClose={() => setSheet(null)} />}
       {sheet?.kind === 'action' && d && <ActionSheet id={id} action={sheet.action} d={d} iCoordinate={iCoordinate} onClose={() => setSheet(null)} />}
     </main>
@@ -362,19 +405,22 @@ function StepCard({ step, hasGrok, working, onAct, onDecline, chain, members, me
 }) {
   const label = S.stepLabel(step, hasGrok)
   const heading: Record<S.Step['kind'], string> = {
-    talk: hasGrok ? 'Keep planning' : 'Talk it through', declined: 'Not yet', approve: 'Approve the plan', waitingApprovals: 'Waiting on the group',
+    talk: 'Find options and vote', declined: 'Not yet', approve: 'Approve the plan', waitingApprovals: 'Waiting on the group',
     needsWallet: 'Everyone approved', settingUp: 'Everyone approved', waitSetup: 'Everyone approved', startCollecting: 'Start collecting',
     waitStart: 'Split is ready', checking: 'Checking the split', pay: 'Approve your share', waitPay: 'Collecting', finalise: 'Everyone has paid', waitFinalise: 'Everyone has paid',
-    done: 'Booked', cancelled: 'Cancelled',
+    done: 'Booked', cancelled: 'Cancelled', reallocate: 'Someone left', waitReopen: 'Someone left', reopen: 'Collecting was cancelled',
   }
   const body: Partial<Record<S.Step['kind'], string>> = {
-    talk: 'Agree in the chat on what to book, with the link and price. Then Pact Pilot writes it up for everyone to approve.',
-    declined: 'Someone said not yet. Talk it through again, then ask Pact Pilot for a new write-up.',
+    talk: 'Pact Pilot finds real options and puts them to a vote. Everyone just ticks the one they want, no typing, and the winner goes up for approval.',
+    declined: 'Someone said not yet. Find new options and vote again.',
     approve: 'Pact Pilot wrote up what the group agreed. Everyone approves before anyone pays.',
     needsWallet: 'Set your PIN to make the wallet everyone pays into.',
-    startCollecting: 'The split is saved. Open it so everyone can pay their share.',
+    startCollecting: 'Everyone approved. Open the collection so everyone pays their share, then book it once it’s all in.',
     pay: 'Pay your share into the pact. It goes to the coordinator once everyone has paid.',
     finalise: 'Release the money to yourself and book it.',
+    reallocate: 'The shares need to change. Cancel this collection so everyone who paid gets it back, then reopen it so the people still in share the same total.',
+    waitReopen: "The coordinator is reopening the collection so the people still in share the cost. Don't pay until it reopens.",
+    reopen: 'Everyone who paid can take their share back. Reopen it to collect again from the people still in.',
   }
   const showProgress = chain && chain.state === 'open'
   return (
@@ -388,7 +434,7 @@ function StepCard({ step, hasGrok, working, onAct, onDecline, chain, members, me
       </>}
       {working ? <Busy text={working} /> : label.action && (
         <div className="l-status-actions">
-          <button className="l-btn" type="button" onClick={onAct}>{label.text}</button>
+          <button className={['l-btn', step.kind === 'talk' || step.kind === 'declined' ? '' : 'l-glow'].join(' ')} type="button" onClick={onAct}>{label.text}</button>
           {onDecline && <button className="l-btn l-ghost" type="button" onClick={onDecline}>Not yet</button>}
         </div>
       )}
@@ -438,7 +484,8 @@ function stageOf(step: S.Step): number {
   switch (step.kind) {
     case 'talk': case 'declined': return 0
     case 'approve': case 'waitingApprovals': case 'needsWallet': case 'settingUp': case 'waitSetup': return 1
-    case 'startCollecting': case 'waitStart': case 'checking': case 'pay': case 'waitPay': case 'finalise': case 'waitFinalise': return 2
+    case 'startCollecting': case 'waitStart': case 'checking': case 'pay': case 'waitPay': case 'finalise': case 'waitFinalise':
+    case 'reallocate': case 'waitReopen': case 'reopen': return 2
     default: return 3
   }
 }
@@ -461,16 +508,29 @@ function Progress({ step }: { step: S.Step }) {
   )
 }
 
-function Items({ items }: { items: S.Item[] }) {
-  const total = S.itemsTotal(items)
+function Items({ items, d, canRemove, onRemove, canEdit, onScope }: {
+  items: S.Item[]; d?: S.PactData; canRemove?: boolean; onRemove?: (item: S.Item) => void
+  canEdit?: boolean; onScope?: (item: S.Item, scope: 'each' | 'group') => void
+}) {
+  const people = d?.members.length ?? 1
+  const total = S.itemsTotal(items, people)
   return (
     <div style={{ marginTop: 6 }}>
       {items.map((i) => (
         <div className="l-item" key={i.item_id}>
           <div className="l-item-icon"><Icon name={i.kind} /></div>
           <div style={{ minWidth: 0 }}><b>{i.title}</b><span>{[S.itemTitle(i.kind), S.dateRange(i.starts_on, i.ends_on), i.location].filter(Boolean).join(' · ')}</span></div>
-          {i.price_each != null && <span className="l-item-price">{S.dollars(i.price_each)}</span>}
+          {i.price_each != null && <span className="l-item-price" title={S.priceText(i, people) ?? ''}>
+            {i.price_scope === 'group' ? <>{S.dollars(S.itemEach(i, people)!)}<small className="l-faint" style={{ display: 'block', fontSize: 11, fontWeight: 600 }}>{S.dollars(i.price_each)} split</small></> : S.dollars(i.price_each)}
+          </span>}
+          {/* Bought once for everyone (a domain, a house) or paid by each person (tickets, meals)? Tap to flip. */}
+          {canEdit && onScope && i.price_each != null && (
+            <button className="l-pill" type="button" style={{ padding: '5px 10px', fontSize: 12 }}
+              title={i.price_scope === 'group' ? 'Each person pays the full price' : 'Bought once for the whole group, so the price is split'}
+              onClick={() => onScope(i, i.price_scope === 'group' ? 'each' : 'group')}>{i.price_scope === 'group' ? 'For the group' : 'Each'}</button>
+          )}
           {i.link && <a className="l-icon-btn" href={i.link} target="_blank" rel="noreferrer" aria-label="Open link"><Icon name="link" /></a>}
+          {canRemove && onRemove && <button className="l-icon-btn" type="button" aria-label={`Remove ${i.title}`} title="Remove from the plan" onClick={() => onRemove(i)}><Icon name="x" /></button>}
         </div>
       ))}
       {total != null && <div className="l-item"><b style={{ flex: 1 }}>Each person pays</b><span className="l-item-price">{S.dollars(total)}</span></div>}
@@ -478,9 +538,10 @@ function Items({ items }: { items: S.Item[] }) {
   )
 }
 
-function Chat({ messages, recs, onGrok, me, name, members, polls, pact, iCoordinate, locked, onVoted, onAddedToPlan, onSeeFindings }: {
+function Chat({ messages, recs, onGrok, me, name, members, polls, pact, iCoordinate, locked, canSend, onVoted, onAddedToPlan, onSeeFindings, onRetry }: {
   messages: S.Message[]; recs: S.Recommendation[]; onGrok: (rec: S.Recommendation) => void; me: string; name: (id: string) => string; members: S.Member[]
-  polls: S.Poll[]; pact: S.Pact | undefined; iCoordinate: boolean; locked: boolean; onVoted: () => void; onAddedToPlan: () => void; onSeeFindings: () => void
+  polls: S.Poll[]; pact: S.Pact | undefined; iCoordinate: boolean; locked: boolean; canSend: boolean; onVoted: () => void; onAddedToPlan: () => void; onSeeFindings: () => void
+  onRetry: (question: string) => void
 }) {
   const end = useRef<HTMLDivElement>(null)
   const seen = useRef<number | null>(null)
@@ -495,7 +556,7 @@ function Chat({ messages, recs, onGrok, me, name, members, polls, pact, iCoordin
     ...recs.map((rec) => ({ kind: 'grok' as const, at: rec.created_at, rec })),
     ...polls.map((poll) => ({ kind: 'poll' as const, at: poll.created_at, poll })),
   ].sort((x, y) => x.at.localeCompare(y.at))
-  if (!entries.length) return <p className="l-chat-empty">Say hi to the group. Talk through what to book, and Pact Pilot will write it up when you're ready.</p>
+  if (!entries.length) return <p className="l-chat-empty">Say hi to the group. To get going, open Pact Pilot: it finds options and puts them to a vote, and everyone just ticks one.</p>
   return (
     <div className="l-chat">
       {entries.map((e, i) => {
@@ -506,7 +567,7 @@ function Chat({ messages, recs, onGrok, me, name, members, polls, pact, iCoordin
         if (e.kind === 'grok') return [divider, <GrokBlock key={e.rec.recommendation_id} rec={e.rec} onOpen={onGrok} />]
         // A vote shows right in the chat as cards everyone can tick, the same as in Findings.
         if (e.kind === 'poll') return [divider, pact
-          ? <PollCard key={e.poll.poll_id} poll={e.poll} me={me} members={members} pact={pact} iCoordinate={iCoordinate} locked={locked} compact onVoted={onVoted} onAddedToPlan={onAddedToPlan} />
+          ? <PollCard key={e.poll.poll_id} poll={e.poll} me={me} members={members} pact={pact} iCoordinate={iCoordinate} locked={locked} canSend={canSend} compact onVoted={onVoted} onAddedToPlan={onAddedToPlan} onRetry={onRetry} />
           : <FoundSummary key={e.poll.poll_id} found={e.poll} votes={Object.keys(e.poll.votes).length} onOpen={onSeeFindings} />]
         const m = e.m
         const found = S.parseOptions(m.body)
@@ -664,17 +725,43 @@ function useVoiceRecorder(onHeard: (text: string) => void) {
 
 /** Pact Pilot, one to one: preset prompts, your questions and its answers, and voice (speak, and hear it answer).
  *  Its changes still need your Approve, and its status updates still show in Pact Chat. */
-const PILOT_PRESETS: { label: string; ask?: string; fill?: string; summary?: boolean }[] = [
-  { label: 'Sum up the chat', summary: true },
-  { label: "What's still missing?", ask: 'What does this pact still need decided before we can book?' },
-  { label: 'Who owes what?', ask: 'Who owes what on the tab, and what are the fewest paybacks to square up?' },
-  { label: "What's waiting on us?", ask: 'Who is this pact waiting on right now, and for what?' },
-  { label: 'Find stays in budget', ask: 'Find 3 real places to stay that fit our dates and budget each, and put them to a vote.' },
-  { label: 'Split a cost', fill: 'I paid $ for  , split with everyone' },
+const PILOT_PRESETS: { label: string; icon: string; ask?: string; fill?: string; summary?: boolean }[] = [
+  { label: 'Vote on the idea', icon: 'sparkles', ask: "Put our idea to a vote so we agree before planning anything: give 3 clear options for what this pact is (what we do and where), each with a rough price per person, and put them to a vote." },
+  { label: 'Vote on 3 events', icon: 'ticket', ask: 'Find the top 3 paid events or activities that fit our place, dates and budget, each with its ticket price per person, when it is, and a link, and put them to a vote.' },
+  { label: 'Vote on 3 stays', icon: 'stay', ask: 'Find 3 real places to stay that fit our dates and budget each, and put them to a vote.' },
+  { label: 'Sum up the chat', icon: 'wave', summary: true },
+  { label: "What's left to decide?", icon: 'checkCircle', ask: 'What does this pact still need decided before we can book?' },
+  { label: 'Who owes what?', icon: 'wallet', ask: 'Who owes what on the tab, and what are the fewest paybacks to square up?' },
+  { label: 'Who are we waiting on?', icon: 'pacts', ask: 'Who is this pact waiting on right now, and for what?' },
+  { label: 'Split a cost', icon: 'plus', fill: 'I paid $ for  , split with everyone' },
 ]
 
-function PilotPanel({ id, me, pact, d, queued, onChanged, onOpenChat }: {
+/** While Pact Pilot works: the steps it's going through, one after another, with a moving bar. Research (a vote,
+ *  finding places or events) gets research steps; anything else gets a short read-and-answer sequence. */
+const RESEARCH = /\b(poll|vote|find|search|look for|top \d|options|stays?|hotels?|events?|activities|flights?|restaurants?)\b/i
+function PilotThinking({ question }: { question: string }) {
+  const steps = RESEARCH.test(question)
+    ? ['Reading the chat', 'Searching for real options', 'Checking prices and dates', 'Comparing the best ones', 'Building the vote']
+    : ['Reading the chat', 'Checking the plan and the tab', 'Writing the answer']
+  const [at, setAt] = useState(0)
+  useEffect(() => { const t = setInterval(() => setAt((n) => Math.min(n + 1, steps.length - 1)), 2200); return () => clearInterval(t) }, [steps.length])
+  return (
+    <div className="l-research" role="status" aria-live="polite">
+      <div className="l-research-bar"><i /></div>
+      <ul>
+        {steps.map((s, i) => (
+          <li key={s} className={i < at ? 'done' : i === at ? 'now' : ''}>
+            <span className="l-research-dot" />{s}{i === at && <span className="l-dots"><i /><i /><i /></span>}
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
+function PilotPanel({ id, me, pact, d, queued, onChanged, onOpenChat, onAct, findAsk, findText, hasPolls, canEdit, onSetPlace, onSetDates }: {
   id: string; me: string; pact: S.Pact | null; d: S.PactData; queued?: { q: string; n: number } | null; onChanged: () => void; onOpenChat: () => void
+  onAct: () => void; findAsk: string; findText: string; hasPolls: boolean; canEdit: boolean; onSetPlace: () => void; onSetDates: () => void
 }) {
   const members = d.members
   const [text, setText] = useState('')
@@ -744,6 +831,17 @@ function PilotPanel({ id, me, pact, d, queued, onChanged, onOpenChat }: {
             <span className="l-waiting-grok"><Grok size={18} /></span>
             <b>Ask Pact Pilot anything about this pact</b>
             <span className="l-dim">Only you see this conversation. Anything it changes waits for your Approve, and the group sees its updates in Pact Chat.</span>
+            {/* Start here: the next thing to do glows. Place and dates first, so the search finds the right things. */}
+            {!hasPolls && (
+              <div className="l-start">
+                <span className="l-pilot-presets-label">Start here</span>
+                {canEdit && !pact?.location && <button type="button" className="l-start-step l-glow" onClick={onSetPlace}><Icon name="pin" size={16} /><span><b>Add the place</b><small>So Pact Pilot searches in the right city</small></span></button>}
+                {canEdit && pact?.location && !pact.starts_on && <button type="button" className="l-start-step l-glow" onClick={onSetDates}><Icon name="calendar" size={16} /><span><b>Set the dates</b><small>So it only finds what's on when you go</small></span></button>}
+                <button type="button" className={['l-start-step', (!canEdit || (pact?.location && pact.starts_on)) ? 'l-glow' : ''].join(' ')} disabled={!findAsk} onClick={() => void ask(findAsk)}>
+                  <Icon name="sparkles" size={16} /><span><b>{findText}</b><small>Pact Pilot searches and puts 3 to a vote. Everyone just ticks one.</small></span>
+                </button>
+              </div>
+            )}
           </div>
         )}
         {log.some((x) => x.old) && (
@@ -762,19 +860,21 @@ function PilotPanel({ id, me, pact, d, queued, onChanged, onOpenChat }: {
               {x.answer && x.summary && <PactStats pact={pact} d={d} />}
               {x.answer ? <PilotAnswerView id={id} me={me} members={members} answer={x.answer} onDone={onChanged} onOpenChat={onOpenChat} onDismiss={() => setLog((l) => l.filter((y) => y.key !== x.key))} />
                 : x.error ? <p className="l-error">{x.error}</p>
-                : <div className="l-grok-ask-busy"><span>Pact Pilot is thinking</span><span className="l-dots"><i /><i /><i /></span></div>}
+                : <PilotThinking question={x.question} />}
             </div>
-            {x.answer && x.key === log[log.length - 1].key && <NextUp id={id} me={me} pact={pact} d={d} onAsk={(q) => void ask(q)} onOpenChat={onOpenChat} />}
+            {x.answer && x.key === log[log.length - 1].key && <NextUp id={id} me={me} pact={pact} d={d} onAsk={(q) => void ask(q)} onAct={onAct} findAsk={findAsk} findText={findText} />}
           </div>
         ))}
         <div ref={end} />
       </div>
-      <div className="l-pilot-presets">
-        {PILOT_PRESETS.map((p) => <button key={p.label} type="button" className="l-pill" onClick={() => pick(p)}>{p.label}</button>)}
+      {/* Every shortcut shows (they wrap), so nothing hides off the edge. Votes first, then questions. */}
+      <div className="l-pilot-presets" aria-label="Things to ask Pact Pilot">
+        <span className="l-pilot-presets-label">Try</span>
+        {PILOT_PRESETS.map((p) => <button key={p.label} type="button" className="l-pill" onClick={() => pick(p)}><Icon name={p.icon} size={14} />{p.label}</button>)}
       </div>
       {(talk.failure || voice.failure || voiceError) && <p className="l-error">{talk.failure ?? voice.failure ?? voiceError}</p>}
       <form className="l-composer grok" onSubmit={(e) => { e.preventDefault(); void ask(text) }}>
-        <textarea ref={box} rows={1} value={text} placeholder={talk.state === 'listening' ? "Listening… pause when you're done" : talk.state === 'hearing' ? 'Writing down what you said…' : voice.listening ? 'Listening… speak now' : 'Ask Pact Pilot'} onChange={(e) => setText(e.target.value)}
+        <textarea ref={box} rows={1} value={text} placeholder={talk.state === 'listening' ? "Listening… pause when you're done" : talk.state === 'hearing' ? 'Writing down what you said…' : voice.listening ? 'Listening… speak now' : 'Ask Pact Pilot anything'} onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void ask(text) } }} />
         {talk.supported ? (
         <button type="button" className={talk.state !== 'idle' ? 'l-icon-btn l-mic on' : 'l-icon-btn l-mic'} disabled={talk.state === 'hearing'}
@@ -812,8 +912,8 @@ function PactStats({ pact, d }: { pact: S.Pact | null; d: S.PactData }) {
 }
 
 /** What to do next, from the pact itself: who it's waiting on, with a button for it. */
-function NextUp({ id, me, pact, d, onAsk, onOpenChat }: {
-  id: string; me: string; pact: S.Pact | null; d: S.PactData; onAsk: (q: string) => void; onOpenChat: () => void
+function NextUp({ id, me, pact, d, onAsk, onAct, findAsk, findText }: {
+  id: string; me: string; pact: S.Pact | null; d: S.PactData; onAsk: (q: string) => void; onAct: () => void; findAsk: string; findText: string
 }) {
   const [sent, setSent] = useState<string | null>(null)
   const w = S.waitingOn(d)
@@ -827,7 +927,10 @@ function NextUp({ id, me, pact, d, onAsk, onOpenChat }: {
   const items: { key: string; text: string; button?: { label: string; run: () => void } }[] = []
   if (w && doing) {
     for (const u of w.people) {
-      if (u === me) items.push({ key: u, text: `You need to ${doing}`, button: { label: 'Do it', run: onOpenChat } })
+      if (u === me) {
+        const label = { approve: 'Approve', start: 'Start collecting', pay: w.amount != null ? `Pay ${S.dollars(w.amount)}` : 'Pay', release: 'Release' }[w.what]
+        items.push({ key: u, text: `You need to ${doing}`, button: { label, run: onAct } })
+      }
       else {
         const who = name(u)
         items.push({ key: u, text: `${who} needs to ${doing}`, button: { label: sent === u ? 'Nudged' : `Nudge ${who}`, run: () => {
@@ -838,7 +941,7 @@ function NextUp({ id, me, pact, d, onAsk, onOpenChat }: {
       }
     }
   }
-  if (!d.recommendations.length && !d.plan) items.push({ key: 'stays', text: 'No places to stay yet', button: { label: 'Find stays', run: () => onAsk('Find 3 real places to stay that fit our dates and budget each, and put them to a vote.') } })
+  if (!d.recommendations.length && !d.plan && findAsk) items.push({ key: 'find', text: 'Nothing picked yet', button: { label: findText, run: () => onAsk(findAsk) } })
   if (pact && !pact.starts_on) items.push({ key: 'dates', text: 'No dates set yet', button: { label: 'Pick dates', run: () => onAsk('Start a vote on the dates for this trip.') } })
   if (!items.length) return null
   return (
@@ -938,13 +1041,13 @@ function Settings({ pact, d, onClose, onAddPeople, onAddItem }: { pact: S.Pact; 
 
       <div className="l-head" style={{ margin: '24px 0 4px' }}>
         <b className="l-dim">Itinerary</b>
-        {S.itemsTotal(d.items) != null && <span className="l-dim" style={{ fontSize: 14, fontWeight: 600 }}>{S.dollars(S.itemsTotal(d.items)!)} each</span>}
+        {S.itemsTotal(d.items, d.members.length) != null && <span className="l-dim" style={{ fontSize: 14, fontWeight: 600 }}>{S.dollars(S.itemsTotal(d.items, d.members.length)!)} each</span>}
       </div>
       {d.items.length ? d.items.map((i) => (
         <div className="l-item" key={i.item_id}>
           <div className="l-item-icon"><Icon name={i.kind} /></div>
           <div style={{ minWidth: 0, flex: 1 }}><b>{i.title}</b><span>{[S.itemTitle(i.kind), S.dateRange(i.starts_on, i.ends_on), i.location].filter(Boolean).join(' · ')}</span></div>
-          {i.price_each != null && <span className="l-item-price">{S.dollars(i.price_each)}</span>}
+          {i.price_each != null && <span className="l-item-price">{S.dollars(S.itemEach(i, d.members.length)!)}</span>}
           {i.link && <a className="l-icon-btn" href={i.link} target="_blank" rel="noreferrer" aria-label="Open link"><Icon name="link" /></a>}
           {!locked && (i.created_by === me || iCoordinate) && <button className="l-remove" type="button" disabled={busy} onClick={() => void act(() => S.removeItem(i.item_id))}>Remove</button>}
         </div>
@@ -953,7 +1056,9 @@ function Settings({ pact, d, onClose, onAddPeople, onAddItem }: { pact: S.Pact; 
       {/* Leave (anyone) or delete (the coordinator). A second tap confirms, so nothing goes on a slip. */}
       <div className="l-head" style={{ margin: '22px 0 6px' }}><b className="l-dim">{iCoordinate ? 'Delete this pact' : 'Leave this pact'}</b></div>
       <p className="l-faint" style={{ fontSize: 13, margin: '0 0 10px' }}>
-        {iCoordinate ? 'Deletes the chat, plan, votes and tab for everyone. This can’t be undone.' : 'You leave the chat and the plan. Someone can ask you back in later.'}
+        {iCoordinate ? 'Deletes the chat, plan, votes and tab for everyone. This can’t be undone.'
+          : locked ? 'You leave the chat and the plan. Your part of the split is shared by everyone else: the coordinator reopens the collection with new shares, and anything you paid comes back to you.'
+          : 'You leave the chat and the plan. Someone can ask you back in later.'}
       </p>
       {confirming ? (
         <div className="l-pilot-buttons">
@@ -1034,7 +1139,14 @@ function AddItem({ pact, messages, name, extra = false, onClose }: { pact: S.Pac
           <label className="l-field"><span>To</span><input className="l-input" type="date" value={draft.endsOn ?? ''} min={draft.startsOn} onChange={(e) => set({ endsOn: e.target.value })} /></label>
         </div>}
         <div className="l-two">
-          <label className="l-field"><span>Price each</span><input className="l-input" inputMode="decimal" value={draft.price ?? ''} onChange={(e) => set({ price: e.target.value === '' ? null : Number(e.target.value.replace(/[^0-9.]/g, '')) || 0 })} placeholder="$" /></label>
+          <label className="l-field"><span>{draft.scope === 'group' ? 'Price for the group' : 'Price each'}</span><input className="l-input" inputMode="decimal" value={draft.price ?? ''} onChange={(e) => set({ price: e.target.value === '' ? null : Number(e.target.value.replace(/[^0-9.]/g, '')) || 0 })} placeholder="$" /></label>
+          {/* A domain or a whole house is bought once and split; tickets and meals are per person. */}
+          <div className="l-field"><span>Who pays this price</span>
+            <div className="l-kinds">
+              <button type="button" className={draft.scope !== 'group' ? 'on' : ''} onClick={() => set({ scope: 'each' })}>Each person</button>
+              <button type="button" className={draft.scope === 'group' ? 'on' : ''} onClick={() => set({ scope: 'group' })}>Whole group, split</button>
+            </div>
+          </div>
           <label className="l-field"><span>Link</span><input className="l-input" value={draft.link} onChange={(e) => set({ link: e.target.value })} placeholder="Booking link" /></label>
         </div>
         {error && <p className="l-error">{error}</p>}
@@ -1195,26 +1307,51 @@ function Person({ member, onSend, onClose }: { member: S.Member; onSend: () => v
 }
 
 /** Start collecting, pay my share, or finalise: one PactSplit call, confirmed with my PIN. */
-function ActionSheet({ id, action, d, iCoordinate, onClose }: { id: string; action: 'create_pact' | 'pay_share' | 'release'; d: S.PactData; iCoordinate: boolean; onClose: () => void }) {
+function ActionSheet({ id, action: first, d, iCoordinate, onClose }: { id: string; action: S.MoneyAction; d: S.PactData; iCoordinate: boolean; onClose: () => void }) {
   const { me, refreshPact, setWallet } = useApp()
+  const [action, setAction] = useState<S.MoneyAction>(first)
   const [state, setState] = useState<'idle' | 'busy' | 'done'>('idle')
   const [error, setError] = useState<string | null>(null)
   const chain = d.chain
   const share = Number(chain?.share.usdc ?? d.plan?.share_usdc ?? 0)
   const total = Number(chain?.total.usdc ?? 0) || share * (d.plan?.shares_needed ?? d.members.length)
+  const reopening = chain?.state === 'cancelled' || Boolean(chain?.needsReopen)
+  const newShare = chain?.reopenShare ?? share
+  const refund = Number(chain?.myRefund?.amount ?? 0)
   const copy = {
-    create_pact: { title: 'Start collecting', text: `Open the split so everyone can pay their ${S.dollars(share)} share. It all comes to you once everyone has paid.`, button: 'Start collecting' },
+    create_pact: reopening
+      ? { title: 'Reopen collecting', text: `Open a new collection so the people still in share the same total: ${S.dollars(newShare)} each. Anyone who paid before takes that back separately.`, button: `Reopen at ${S.dollars(newShare)} each` }
+      : { title: 'Start collecting', text: `Open the split so everyone can pay their ${S.dollars(share)} share. It all comes to you once everyone has paid.`, button: 'Start collecting' },
+    cancel: { title: 'Cancel collecting',
+      text: chain?.needsReopen
+        ? `Someone left, so the shares have to change. Cancelling lets everyone who paid take their ${S.dollars(share)} back. Then you reopen it at ${S.dollars(newShare)} each for the people still in.`
+        : `Everyone who paid can take their ${S.dollars(share)} back. You can reopen it afterwards.`,
+      button: 'Cancel collecting' },
+    claim_refund: { title: 'Take your share back', text: `The collection was cancelled. Take back the ${S.dollars(refund)} you paid in. It goes straight to your wallet.`, button: `Take back ${S.dollars(refund)}` },
     pay_share: { title: 'Approve your share', text: `Pay ${S.dollars(share)} into the pact. It's held until everyone has paid, then goes to the coordinator.`, button: `Approve ${S.dollars(share)}` },
     release: { title: 'Finalise and book', text: `Everyone has paid. Release ${S.dollars(total)} to yourself, then book it.`, button: `Finalise · ${S.dollars(total)}` },
   }[action]
   // Collecting already started (on another device, or before this page refreshed): say so, nothing to do here.
-  const alreadyOpen = action === 'create_pact' && chain != null && chain.state !== 'none'
+  const alreadyOpen = action === 'create_pact' && chain != null && chain.state === 'open' && !chain.needsReopen
   const shown = alreadyOpen
     ? { title: 'Collecting has started', text: `The split is already open, so everyone can pay their ${S.dollars(share)} share now. There's nothing else to do here.`, button: '' }
     : copy
+  const collectingFor = action === 'create_pact' && !reopening && !alreadyOpen ? d.items : []
   return (
     <Modal title={shown.title} onClose={onClose}>
       <p className="l-dim" style={{ marginTop: 0, lineHeight: 1.5 }}>{shown.text}</p>
+      {collectingFor.length > 0 && <>
+        <b className="l-dim">What everyone approved</b>
+        {collectingFor.map((i) => (
+          <div key={i.item_id} className="l-person"><span>{i.title}</span><small>{i.price_each != null ? `${S.dollars(Number(i.price_each))} each` : 'No price'}</small></div>
+        ))}
+        {iCoordinate && state === 'idle' && (
+          <button className="l-btn l-ghost l-wide-btn" type="button" style={{ marginTop: 10 }}
+            onClick={async () => { setError(null); try { await S.changePlan(id); await refreshPact(id); onClose() } catch (e) { setError((e as Error).message) } }}>
+            Something's wrong? Change the plan
+          </button>
+        )}
+      </>}
       {chain && chain.state !== 'none' && <>
         <b className="l-dim">Who's paid</b>
         {d.members.map((m) => {
@@ -1228,10 +1365,14 @@ function ActionSheet({ id, action, d, iCoordinate, onClose }: { id: string; acti
         })}
       </>}
       {error && <p className="l-error">{error}</p>}
+      {/* The coordinator can always call it off: everyone who paid takes their share back. */}
+      {iCoordinate && chain?.state === 'open' && action !== 'cancel' && state === 'idle' && (
+        <button className="l-btn l-ghost l-wide-btn" type="button" style={{ marginTop: 12, color: '#ff6b6b' }} onClick={() => { setError(null); setAction('cancel') }}>Cancel collecting and refund everyone</button>
+      )}
       <div style={{ marginTop: 18 }}>
         {state === 'done' || alreadyOpen ? <button className="l-btn l-wide-btn" type="button" onClick={() => { void refreshPact(id); onClose() }}>Done</button>
           : state === 'busy' ? <Busy text="Confirm with your PIN, then Arc confirms it…" />
-          : <button className="l-btn l-wide-btn" type="button" disabled={action !== 'pay_share' && !iCoordinate}
+          : <button className="l-btn l-wide-btn" type="button" disabled={action !== 'pay_share' && action !== 'claim_refund' && !iCoordinate}
               onClick={async () => { setState('busy'); setError(null); try { await S.pactAction(action, id); await refreshPact(id); setWallet(await S.loadWallet()); setState('done') } catch (e) { const msg = (e as Error).message ?? ''; if (/already (on chain|started|open)/i.test(msg)) { await refreshPact(id); setState('done'); return } setError(msg || "That didn't go through. Try again."); setState('idle') } }}>{copy.button}</button>}
       </div>
     </Modal>
@@ -1240,6 +1381,75 @@ function ActionSheet({ id, action, d, iCoordinate, onClose }: { id: string; acti
 
 /** Send USDC to someone in the pact by who they are, not their address. Confirmed with my PIN, and a note goes in the
  *  chat. From Settle it's a payback (it counts on the tab); from Send money it's a plain send. */
+/** Take an item off a plan that's already split. Says exactly what happens to the money before you confirm. */
+function RemoveItemSheet({ id, item, d, me, onClose, onDone }: {
+  id: string; item: S.Item; d: S.PactData; me: string; onClose: () => void; onDone: (cancelNow: boolean) => void
+}) {
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const chain = d.chain
+  const share = Number(chain?.state === 'open' ? chain.share.usdc : d.plan?.share_usdc ?? 0)
+  const price = S.itemEach(item, d.members.length) ?? 0
+  const next = Math.round((share - price) * 100) / 100
+  const open = chain?.state === 'open'
+  const payers = open ? chain.members.filter((m) => m.paid) : []
+  const name = (u: string) => (u === me ? 'You' : S.firstName(d.members.find((m) => m.user_id === u)?.name))
+  return (
+    <Modal title={`Remove ${item.title}?`} onClose={onClose}>
+      <p className="l-dim" style={{ marginTop: 0, lineHeight: 1.5 }}>
+        Everyone's share drops from {S.dollars(share)} to <b>{S.dollars(next)}</b>.{' '}
+        {!open ? "Collecting hasn't started, so nobody has paid. It just changes the amount."
+          : !payers.length ? "Collecting has started but nobody has paid yet. You'll cancel the collection and reopen it at the new amount."
+          : `${payers.map((p) => name(p.userId)).join(', ')} already paid ${S.dollars(share)}. You'll cancel the collection, they each take their ${S.dollars(share)} back, and everyone pays ${S.dollars(next)} when you reopen it.`}
+      </p>
+      {error && <p className="l-error">{error}</p>}
+      <div className="l-pilot-buttons">
+        <button className="l-btn" type="button" disabled={busy || !(next > 0)}
+          onClick={async () => {
+            setBusy(true); setError(null)
+            try { const r = await S.removePlanItem(id, item.item_id); onDone(Boolean(r?.reopen && open)) }
+            catch (e) { setError((e as Error).message); setBusy(false) }
+          }}>{busy ? 'Removing…' : open ? 'Remove and cancel the collection' : `Remove · ${S.dollars(next)} each`}</button>
+        <button className="l-btn l-ghost" type="button" disabled={busy} onClick={onClose}>Keep it</button>
+      </div>
+      {!(next > 0) && <p className="l-faint" style={{ fontSize: 13 }}>That's everything in the split. Use Change the plan to start again instead.</p>}
+    </Modal>
+  )
+}
+
+/** Splits from someone's wallet waiting for the group. Each person approves their part; once everyone has, it counts
+ *  on the tab and shows in who owes what. */
+function PendingSplits({ pending, me, members, working, onApprove }: {
+  pending: S.PendingSplit[]; me: string; members: S.Member[]; working: string | null; onApprove: (expenseId: string) => void
+}) {
+  const who = (id: string) => (id === me ? 'You' : S.firstName(members.find((m) => m.user_id === id)?.name))
+  return (
+    <div className="l-about l-extras">
+      <div className="l-section-title">Waiting for approval</div>
+      {pending.map((e) => {
+        const payer = Object.keys(e.payers)[0]
+        const inIt = Object.keys(e.shares)
+        const mine = e.shares[me]
+        const approved = e.approved_by.includes(me)
+        const left = inIt.filter((u) => !e.approved_by.includes(u))
+        return (
+          <div key={e.expense_id} className="l-item">
+            <div className="l-item-icon"><Icon name="wallet" /></div>
+            <div style={{ minWidth: 0, flex: 1 }}>
+              <b>{e.title}</b>
+              <span>{who(payer)} paid {S.cents(e.total_cents)} · split {inIt.length} ways{mine ? ` · your part ${S.cents(mine)}` : ''}</span>
+              <span className="l-faint">{left.length ? `Waiting on ${left.map(who).join(', ')}` : 'Everyone approved'}</span>
+            </div>
+            {mine != null && !approved
+              ? <button className="l-settle" type="button" disabled={Boolean(working)} onClick={() => onApprove(e.expense_id)}>Approve {S.cents(mine)}</button>
+              : <span className="l-faint" style={{ fontSize: 13 }}>{approved ? 'You approved' : ''}</span>}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
 /** Extras: things added after the split was locked. The group approves a round, then each person pays the
  *  coordinator their share with their PIN. The first split stays as it is. */
 function ExtrasCard({ extras, me, members, working, onAdd, onSend, onVote, onPay }: {
@@ -1455,7 +1665,7 @@ function OptionGrid({ options, title, compact, renderFoot }: {
             <OptionImage option={o} />
             <div className="l-opt-body">
               <b className="l-opt-name">{o.name}</b>
-              {o.price_each != null && <div className="l-opt-price">{S.dollars(o.price_each)}<small> each</small></div>}
+              {o.price_each != null && <div className="l-opt-price">{S.dollars(o.price_each)}<small>{o.price_for === 'group' ? ' for the group' : ' each'}</small></div>}
               {o.notes && !compact && <p className="l-opt-notes">{o.notes}</p>}
               {o.link && <a className="l-inline-link" href={o.link} target="_blank" rel="noreferrer">{siteOf(o.link)} ↗</a>}
             </div>
@@ -1469,8 +1679,9 @@ function OptionGrid({ options, title, compact, renderFoot }: {
 
 /** A vote: the options as cards, tap Vote on one (tap again to take it back), live counts and faces, and Approve for
  *  the coordinator on the one that's ahead. */
-function PollCard({ poll, me, members, pact, iCoordinate, locked, compact, onVoted, onAddedToPlan }: {
-  poll: S.Poll; me: string; members: S.Member[]; pact: S.Pact; iCoordinate: boolean; locked: boolean; compact?: boolean; onVoted: () => void; onAddedToPlan: () => void
+function PollCard({ poll, me, members, pact, iCoordinate, locked, canSend, compact, onVoted, onAddedToPlan, onRetry }: {
+  poll: S.Poll; me: string; members: S.Member[]; pact: S.Pact; iCoordinate: boolean; locked: boolean; canSend: boolean; compact?: boolean
+  onVoted: () => void; onAddedToPlan: () => void; onRetry: (question: string) => void
 }) {
   const [note, setNote] = useState<string | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
@@ -1482,25 +1693,63 @@ function PollCard({ poll, me, members, pact, iCoordinate, locked, compact, onVot
   const count = (key: string) => Object.values(votes).filter((v) => v === key).length
   const top = Math.max(0, ...poll.options.map((o) => count(o.key)))
   const open = poll.status === 'open'
+  // A tick is your approval. Once more than half the group has ticked the same option, the vote decides itself: the
+  // winner goes on the plan and up for approval, with everyone who ticked it already counted as approving.
   async function vote(key: string) {
     setBusy(key); setError(null); setMineNow(votes[me] === key ? null : key)
-    try { await S.votePoll(poll.poll_id, key); onVoted() } catch (e) { setError((e as Error).message); setMineNow(undefined) }
-    setBusy(null)
-  }
-  async function approve(option: S.PollOption) {
-    setBusy(option.key); setError(null)
     try {
-      const extra = await S.addPollPickToPlan(pact, poll, option, locked)
-      setNote(extra ? `${option.name} went in as an extra. Send the extras to the group to approve.` : `${option.name} is on the plan.`)
-      onAddedToPlan()
-    } catch (e) { setError((e as Error).message) }
+      await S.votePoll(poll.poll_id, key)
+      const won = votes[me] === key ? null : await S.decidePoll(poll.poll_id)
+      const option = won ? poll.options.find((o) => o.key === won) : null
+      if (option) {
+        const how = await S.approvePollPick(pact, poll, option, me, locked, canSend)
+        setNote(how === 'extra' ? `The group picked ${option.name}. It went in as an extra for the group to approve.`
+          : `The group picked ${option.name}. It's on the plan. Send the plan for approval when you're ready.`)
+        onAddedToPlan()
+      } else onVoted()
+    } catch (e) { setError((e as Error).message); setMineNow(undefined) }
     setBusy(null)
   }
+  const canRemove = open && !poll.winner_key && (iCoordinate || poll.created_by === me)
+  const decidedOnce = useRef(false)
+  useEffect(() => {
+    if (!open || decidedOnce.current || top * 2 <= members.length) return
+    decidedOnce.current = true
+    void (async () => {
+      const won = await S.decidePoll(poll.poll_id)
+      const option = won ? poll.options.find((o) => o.key === won) : null
+      if (!option) return
+      try {
+        const how = await S.approvePollPick(pact, poll, option, me, locked, canSend)
+        setNote(how === 'extra' ? `The group picked ${option.name}. It went in as an extra.` : `The group picked ${option.name}. It's on the plan.`)
+        onAddedToPlan()
+      } catch (e) { setError((e as Error).message) }
+    })()
+  }, [open, top, members.length]) // eslint-disable-line react-hooks/exhaustive-deps
+  async function remove(retry: boolean) {
+    setBusy('remove'); setError(null)
+    try {
+      await S.removePoll(poll.poll_id)
+      if (retry) onRetry(S.retryQuestion(poll))
+      onVoted()
+    } catch (e) { setError((e as Error).message); setBusy(null) }
+  }
+  // How many more ticks the leading option needs to decide the vote.
+  const toDecide = Math.floor(members.length / 2) + 1 - top
   return (
     <div className="l-poll">
       <div className="l-poll-head">
         {poll.source === 'grok' && <span className="l-av" style={{ width: 28, height: 28, background: '#000' }}><Grok size={15} /></span>}
         <div><b>{poll.title}</b><span>{open ? `${total} of ${members.length} voted` : 'Decided'}</span></div>
+        {/* Not a good set? Try again searches for 3 different ones; the X just removes it. */}
+        {canRemove && (
+          <div className="l-poll-tools">
+            <button className="l-pill" type="button" disabled={Boolean(busy)} title="Remove this and find 3 different options"
+              onClick={() => void remove(true)}><Icon name="sparkles" size={14} />Try again</button>
+            <button className="l-x" type="button" disabled={Boolean(busy)} aria-label="Remove this vote" title="Remove this vote"
+              onClick={() => void remove(false)}><Icon name="x" size={15} /></button>
+          </div>
+        )}
       </div>
       <OptionGrid options={poll.options} compact={compact} renderFoot={(o) => {
         const n = count(o.key)
@@ -1513,7 +1762,8 @@ function PollCard({ poll, me, members, pact, iCoordinate, locked, compact, onVot
             <span className="l-poll-faces">{voters.slice(0, 4).map((m) => <Avatar key={m.user_id} name={m.name} url={m.avatar_url} size={22} />)}</span>
             <span className="l-opt-count">{n} {n === 1 ? 'vote' : 'votes'}</span>
             {open && <VoteCheck on={chosen} disabled={Boolean(busy)} label={o.name} onClick={() => void vote(o.key)} />}
-            {iCoordinate && open && leading && <button className="l-settle" type="button" disabled={Boolean(busy)} title={locked ? 'The split is set up, so this goes in as an extra' : 'Add it to the plan'} onClick={() => void approve(o)}>{locked ? 'Add as extra' : 'Approve'}</button>}
+            {open && leading && toDecide > 0 && <span className="l-faint" style={{ fontSize: 12, marginLeft: 'auto' }}>{toDecide} more to decide</span>}
+            {!open && poll.winner_key === o.key && <span className="l-faint" style={{ fontSize: 12, marginLeft: 'auto' }}>Picked</span>}
           </div>
         )
       }} />
@@ -1609,11 +1859,11 @@ function PactTitle({ id, name, canEdit, editing, onEditing, onSaved }: {
 }
 
 /** A pill beside the title: the dates or the budget. The coordinator taps it to change it; everyone else just reads it. */
-function TitleChip({ icon, label, empty, canEdit, hint, onClick }: { icon: string; label: string; empty: boolean; canEdit: boolean; hint: string; onClick: () => void }) {
+function TitleChip({ icon, label, empty, canEdit, hint, onClick, glow }: { icon: string; label: string; empty: boolean; canEdit: boolean; hint: string; onClick: () => void; glow?: boolean }) {
   if (!canEdit && empty) return null
   const body = <><Icon name={icon} size={16} /><span>{label}</span></>
   return canEdit
-    ? <button className={empty ? 'l-chip empty' : 'l-chip'} type="button" onClick={onClick} title={hint}>{body}</button>
+    ? <button className={[empty ? 'l-chip empty' : 'l-chip', glow ? 'l-glow' : ''].join(' ')} type="button" onClick={onClick} title={hint}>{body}</button>
     : <span className="l-chip" title={hint}>{body}</span>
 }
 

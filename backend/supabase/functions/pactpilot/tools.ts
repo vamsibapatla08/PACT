@@ -76,7 +76,7 @@ export async function executePactPilotTool({ client, pactId, tool, args }: ToolI
   if (tool === "prepare_booking_proposal") {
     const bookingId = args.booking_id
     const providerRef = typeof args.provider_ref === "string" ? args.provider_ref.trim() : ""
-    const totalCents = Number.isInteger(args.total_cents) ? args.total_cents : NaN
+    const totalCents = typeof args.total_cents === "number" && Number.isInteger(args.total_cents) ? args.total_cents : NaN
     const currency = typeof args.currency === "string" ? args.currency : "USD"
     const expiresAt = typeof args.quote_expires_at === "string" ? args.quote_expires_at : ""
     const fingerprint = typeof args.fingerprint === "string" ? args.fingerprint.trim() : ""

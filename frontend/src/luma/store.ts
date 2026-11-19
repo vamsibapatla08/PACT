@@ -23,12 +23,18 @@ export type Decision = {
 export type Chain = {
   state: string; payee?: string | null; sharesPaid: number; sharesNeeded: number; funded: boolean
   share: { usdc: string }; total: { usdc: string }; members: { userId: string; role: string; address: string | null; paid: boolean }[]
+  /** Someone left mid-collection: the coordinator cancels and reopens it, and reopenShare is the new share each. */
+  needsReopen?: boolean; reopenShare?: number | null; round?: number
+  /** What I paid into a cancelled collection and can take back. */
+  myRefund?: { round: number; amount: string } | null
 }
 export type FundingPlan = { payee_address: string; share_usdc: number; shares_needed: number; deadline: string }
 export type Wallet = { address: string; usdcBalance: string | null }
 export type Item = {
   item_id: string; kind: ItemKind; title: string; location: string | null; starts_on: string | null; ends_on: string | null
   link: string | null; price_each: number | null; source: string; created_by: string
+  /** 'group': bought once for everyone, so the price is split. 'each': everyone pays it. */
+  price_scope?: 'each' | 'group'
 }
 export type FriendRequest = { request_id: string; incoming: boolean; user_id: string; name: string | null; email: string | null; avatar_url: string | null }
 export type PactInvite = { pact_id: string; pact_name: string; inviter_name: string | null; inviter_avatar_url: string | null; member_count: number }
@@ -54,10 +60,11 @@ export type Step =
   | { kind: 'talk' } | { kind: 'declined' }
   | { kind: 'approve'; decision: Decision } | { kind: 'waitingApprovals'; approved: number; of: number }
   | { kind: 'needsWallet' } | { kind: 'settingUp' } | { kind: 'waitSetup'; host: string }
-  | { kind: 'startCollecting' } | { kind: 'waitStart'; host: string } | { kind: 'checking' }
+  | { kind: 'startCollecting'; share: number | null } | { kind: 'waitStart'; host: string } | { kind: 'checking' }
   | { kind: 'pay'; amount: number } | { kind: 'waitPay'; paid: number; of: number }
   | { kind: 'finalise'; total: number } | { kind: 'waitFinalise'; host: string }
   | { kind: 'done'; total: number; host: string } | { kind: 'cancelled' }
+  | { kind: 'reallocate'; share: number | null } | { kind: 'waitReopen'; host: string } | { kind: 'reopen'; share: number | null }
 
 export type PactData = {
   members: Member[]
@@ -75,9 +82,32 @@ export type Receipt = { user_id: string; status: string; tx_hash: string | null;
 export type PaymentEvent = { event_type: string; tx_hash: string; block_number: number | null; created_at: string }
 
 const bookingQuestion = `Find the one thing our group agreed to book in the chat above. Use any link and price someone shared. \
-Return it as the only option, with price_per_person for each of us and its link. Don't suggest other places.`
+Return it as the only option, with price_per_person for each of us and its link. Don't suggest other places. \
+price_per_person must be a real price someone shared or the price of the option the group voted for. Never use the \
+pact's budget as the price: if nobody gave a price, set it to null.`
 const itemsQuestion = `List each thing our group agreed to book in the chat above as its own option: a stay, a flight, tickets or a dinner. \
 Give each its price_per_person and link. Don't add anything we didn't agree on.`
+/** A new pact opens on its Pact Pilot tab, once. */
+let pilotFirst: string | null = null
+export const openPilotFirst = (id: string) => { pilotFirst = id }
+export const takePilotFirst = (id: string) => { const yes = pilotFirst === id; if (yes) pilotFirst = null; return yes }
+
+/** What "Find options" searches for, from the kind of pact: restaurants for a dinner, stays for a trip, and so on. */
+export function findLabel(p: Pick<Pact, 'description'> & { kind?: string } | null, kind?: string) {
+  const k = kind ?? p?.kind
+  return k === 'dinner' ? 'Find restaurants' : k === 'trip' || k === 'stay' ? 'Find stays' : k === 'event' ? 'Find events' : 'Find options'
+}
+export function findQuestion(kind: string, place: string | null, dates: string | null, budget: number | null) {
+  const where = place ? ` in ${place}` : ''
+  const when = dates ? ` for ${dates}` : ''
+  const money = budget != null ? ` within our budget of $${budget} each` : ' that fit our budget'
+  const what = kind === 'dinner' ? `3 real restaurants${where}${when}${money}, each with a typical price per person and a link`
+    : kind === 'trip' || kind === 'stay' ? `3 real places to stay${where}${when}${money}, each with its price per person and a link`
+    : kind === 'event' ? `3 real paid events or activities${where}${when}${money}, each with its ticket price per person, when it is, and a link`
+    : `3 real options for what this pact is about${where}${when}${money}, each with its price per person and a link`
+  return `Find ${what}, and put them to a vote.`
+}
+
 export const summaryQuestion = "Sum up where our group stands. Use the pact's saved details (place, dates, budget, people, the plan and who has paid) as well as the chat. Say what is decided and what is still missing. Don't suggest places."
 
 export function friendly(error: unknown, fallback: string) {
@@ -165,7 +195,7 @@ export async function loadSplit(id: string) {
  *  20261118130000_realtime_pact_changes migration. */
 export const LIVE_PACT_TABLES = [
   'pact_polls', 'pact_items', 'pact_decisions', 'pact_recommendations', 'pact_payments', 'pact_shares',
-  'pact_members', 'pact_expenses', 'pact_settlements', 'pact_tab_paybacks', 'pact_extras_rounds',
+  'pact_members', 'pact_expenses', 'pact_settlements', 'pact_tab_paybacks', 'pact_extras_rounds', 'pact_expense_approvals',
 ] as const
 
 /** Run fn at most `limit` at a time over items, so a long list never floods the database all at once. */
@@ -187,12 +217,15 @@ export function pollWhileVisible(fn: () => void, ms: number) {
 }
 
 export async function loadItems(id: string): Promise<Item[]> {
-  const cols = 'item_id, kind, title, location, starts_on, ends_on, link, price_each, source, created_by'
+  const base = 'item_id, kind, title, location, starts_on, ends_on, link, price_each, source, created_by'
   const order = <T extends { order: (c: string, o: object) => T }>(q: T) => q.order('starts_on', { ascending: true, nullsFirst: false }).order('created_at', { ascending: true })
+  let cols = `${base}, price_scope`
   let { data, error } = await order(supabase.from('pact_items').select(cols).eq('pact_id', id).eq('extra', false))
+  // Before the group-prices update is live there's no price_scope: everything is per person, as before.
+  if (error && /price_scope/.test(error.message)) { cols = base; ({ data, error } = await order(supabase.from('pact_items').select(cols).eq('pact_id', id).eq('extra', false))) }
   // Before the extras migration is live there's no "extra" column: load every item, as before.
   if (error && /extra/.test(error.message)) ({ data } = await order(supabase.from('pact_items').select(cols).eq('pact_id', id)))
-  return (data ?? []).map((i) => ({ ...i, price_each: i.price_each == null ? null : Number(i.price_each) })) as Item[]
+  return ((data ?? []) as unknown as Item[]).map((i) => ({ ...i, price_each: i.price_each == null ? null : Number(i.price_each), price_scope: i.price_scope === 'group' ? 'group' : 'each' }))
 }
 
 export async function loadJoinRequests(id: string): Promise<JoinRequest[]> {
@@ -236,7 +269,10 @@ export function step(d: PactData, me: string, hasWallet: boolean): Step {
   if (chain && chain.state !== 'none') {
     const total = Number(chain.total.usdc) || 0
     if (chain.state === 'released') return { kind: 'done', total, host }
-    if (chain.state === 'cancelled') return { kind: 'cancelled' }
+    // Cancelled: everyone takes their share back, and the coordinator can open a new round.
+    if (chain.state === 'cancelled') return iCoordinate ? { kind: 'reopen', share: chain.reopenShare ?? null } : { kind: 'cancelled' }
+    // Someone left: the shares must change, so the coordinator cancels this round and reopens it. Nobody pays meanwhile.
+    if (chain.needsReopen) return iCoordinate ? { kind: 'reallocate', share: chain.reopenShare ?? null } : { kind: 'waitReopen', host }
     const mine = chain.members.find((m) => m.userId === me)
     if (mine?.address && !mine.paid) return { kind: 'pay', amount: Number(chain.share.usdc) || 0 }
     if (chain.funded) return iCoordinate ? { kind: 'finalise', total } : { kind: 'waitFinalise', host }
@@ -244,7 +280,7 @@ export function step(d: PactData, me: string, hasWallet: boolean): Step {
   }
   // The split is saved. If PactSplit couldn't be read just now, don't guess "not started": say we're checking.
   if (d.plan && !chain) return { kind: 'checking' }
-  if (d.plan) return iCoordinate ? { kind: 'startCollecting' } : { kind: 'waitStart', host }
+  if (d.plan) return iCoordinate ? { kind: 'startCollecting', share: Number(d.plan.share_usdc) || null } : { kind: 'waitStart', host }
   const b = booking(d)
   const k = b && consent(d, b)
   if (!k) return { kind: 'talk' }
@@ -256,11 +292,11 @@ export function step(d: PactData, me: string, hasWallet: boolean): Step {
 /** The step as a line of text, and whether it's mine to do. Same wording as the iOS floating step. */
 export function stepLabel(s: Step, hasGrok: boolean): { text: string; action: boolean } {
   switch (s.kind) {
-    case 'talk': return { text: hasGrok ? 'Planning' : 'Set up with Pact Pilot', action: !hasGrok }
-    case 'declined': return { text: 'Set up with Pact Pilot again', action: true }
+    case 'talk': return { text: hasGrok ? 'Find more options' : 'Find options with Pact Pilot', action: true }
+    case 'declined': return { text: 'Find new options', action: true }
     case 'approve': return { text: 'Approve', action: true }
     case 'needsWallet': return { text: 'Set my PIN to collect', action: true }
-    case 'startCollecting': return { text: 'Start collecting', action: true }
+    case 'startCollecting': return { text: s.share != null ? `Start collecting · ${dollars(s.share)} each` : 'Start collecting', action: true }
     case 'pay': return { text: `Approve ${dollars(s.amount)}`, action: true }
     case 'finalise': return { text: `Finalise and book · ${dollars(s.total)}`, action: true }
     case 'waitingApprovals': return { text: `You approved · ${s.approved} of ${s.of}`, action: false }
@@ -272,6 +308,9 @@ export function stepLabel(s: Step, hasGrok: boolean): { text: string; action: bo
     case 'waitFinalise': return { text: `Everyone's paid · waiting for ${s.host}`, action: false }
     case 'done': return { text: `Done · ${dollars(s.total)} to ${s.host}`, action: false }
     case 'cancelled': return { text: 'Cancelled · everyone can take their share back', action: false }
+    case 'reallocate': return { text: `Someone left · cancel and reopen${s.share != null ? ` at ${dollars(s.share)} each` : ''}`, action: true }
+    case 'reopen': return { text: `Reopen collecting${s.share != null ? ` at ${dollars(s.share)} each` : ''}`, action: true }
+    case 'waitReopen': return { text: `Someone left · waiting for ${s.host} to reopen with new shares`, action: false }
   }
 }
 
@@ -281,7 +320,7 @@ export function chip(s: Step): { text: string; tone: 'go' | 'warn' | 'mute' } {
     case 'done': return { text: 'Booked', tone: 'go' }
     case 'pay': return { text: `Owe ${dollars(s.amount)}`, tone: 'warn' }
     case 'approve': return { text: 'Approve', tone: 'warn' }
-    case 'startCollecting': case 'finalise': case 'needsWallet': return { text: 'Your move', tone: 'warn' }
+    case 'startCollecting': case 'finalise': case 'needsWallet': case 'reallocate': case 'reopen': return { text: 'Your move', tone: 'warn' }
     case 'waitPay': return { text: `${s.paid} of ${s.of} paid`, tone: 'mute' }
     case 'waitFinalise': return { text: 'Everyone paid', tone: 'go' }
     case 'cancelled': return { text: 'Cancelled', tone: 'mute' }
@@ -374,7 +413,7 @@ async function createDecision(id: string, question: string, recommendationId: st
   const { error } = await supabase.rpc('create_pact_decision', {
     p_pact_id: id, p_question: question, p_options: ['Approve', 'Not yet'], p_approval_rule: 'unanimous', p_recommendation_id: recommendationId,
   })
-  if (error) throw new Error("Couldn't start the vote.")
+  if (error) throw new Error(/already up for approval/i.test(error.message) ? 'This plan is already up for approval.' : "Couldn't start the vote.")
 }
 
 /** Pact Pilot reads the chat, writes up the one thing to book, and it goes to everyone to approve. */
@@ -387,7 +426,7 @@ export async function askGrokToBook(id: string, me: string, pact: Pact, messages
     const leader = [...voted.options].sort((a, b) => count(b.key) - count(a.key))[0]
     await addPollPickToPlan(pact, voted, leader)
     const fresh = await loadPactData(id, me)
-    return bookItems(id, pact, fresh.items, me)
+    return bookItems(id, pact, fresh.items, me, fresh.members.length)
   }
   await askPilot(id, bookingQuestion, messages, name)
   const d = await loadPactData(id, me)
@@ -430,10 +469,14 @@ export async function setUpSplit(id: string, d: PactData, wallet: Wallet) {
       pactId: id, shareUsdc: String(Math.round(b.perPerson * 100) / 100),
       deadline: new Date(Date.now() + 7 * 864e5).toISOString(), payeeAddress: wallet.address,
     })
-  } catch (e) { throw new Error(said(e, "Couldn't save the plan.")) }
+  } catch (e) {
+    if (/already (has a funding plan|open on chain)/i.test(said(e, ''))) return
+    throw new Error(said(e, "Couldn't save the plan."))
+  }
 }
 
-export async function pactAction(action: 'create_pact' | 'pay_share' | 'release', id: string) {
+export type MoneyAction = 'create_pact' | 'pay_share' | 'release' | 'cancel' | 'claim_refund'
+export async function pactAction(action: MoneyAction, id: string) {
   try { return await runPactAction(action, id) }
   catch (e) { throw new Error(said(e, "That didn't go through.")) }
 }
@@ -510,14 +553,14 @@ export function guessKind(title: string): ItemKind {
   return 'other'
 }
 
-export type ItemDraft = { kind: ItemKind; title: string; location: string; startsOn: string | null; endsOn: string | null; link: string; price: number | null }
+export type ItemDraft = { kind: ItemKind; title: string; location: string; startsOn: string | null; endsOn: string | null; link: string; price: number | null; scope?: 'each' | 'group' }
 
 /** Add to the plan. Once the split is set up, the plan is locked, so new things go in as extras instead. */
 export async function addItem(id: string, d: ItemDraft, source: 'manual' | 'grok' = 'manual', extra = false) {
   const { error } = await supabase.from('pact_items').insert({
     pact_id: id, kind: d.kind, title: d.title.trim(), location: d.location.trim() || null,
     starts_on: d.startsOn, ends_on: d.startsOn ? (d.endsOn && d.endsOn >= d.startsOn ? d.endsOn : d.startsOn) : null,
-    link: withScheme(d.link) || null, price_each: d.price, source, extra,
+    link: withScheme(d.link) || null, price_each: d.price, source, extra, ...(d.scope === 'group' ? { price_scope: 'group' } : {}),
   })
   if (error) throw new Error(/row-level security/i.test(error.message) ? (extra ? "Couldn't add that extra." : 'The split is set up, so add it as an extra.') : "Couldn't add that item.")
 }
@@ -555,10 +598,10 @@ export async function payExtras(id: string, roundId: string, host: string, amoun
 
 // ---- Vote cards: a few options (hotels, flights…) the group picks from. One vote each, changeable.
 
-export type PollOption = { key: string; name: string; price_each: number | null; link: string | null; notes: string | null; image?: string | null }
+export type PollOption = { key: string; name: string; price_each: number | null; link: string | null; notes: string | null; image?: string | null; price_for?: 'each' | 'group' }
 export type Poll = {
   poll_id: string; pact_id: string; title: string; kind: ItemKind; options: PollOption[]; status: 'open' | 'closed'
-  source: 'manual' | 'grok'; created_by: string; created_at: string
+  source: 'manual' | 'grok'; created_by: string; created_at: string; winner_key?: string | null
   votes: Record<string, string> // user_id -> option key
 }
 
@@ -609,9 +652,78 @@ export async function votePoll(pollId: string, key: string) {
   if (error) throw new Error(/closed|not in this vote|Only people/.test(error.message) ? error.message : "Couldn't save your vote.")
 }
 
+/** After a vote: if an option now has more than half the group, the poll closes on it and its key comes back.
+ *  Null while it's still undecided (or if someone else's vote decided it a moment earlier). */
+export async function decidePoll(pollId: string): Promise<string | null> {
+  const { data, error } = await supabase.rpc('decide_pact_poll', { p_poll_id: pollId })
+  if (error) return null // the database update isn't live yet: the vote still counts, it just doesn't decide
+  return (data as string | null) ?? null
+}
+
+/** Remove a vote that isn't any good. Whoever started it, or the coordinator. */
+export async function removePoll(pollId: string) {
+  const { error } = await supabase.rpc('remove_pact_poll', { p_poll_id: pollId })
+  if (error) throw new Error(/PGRST202|schema cache/i.test(error.message) ? 'Removing votes needs the latest database update.' : /P0001|42501/.test(error.code ?? '') ? error.message : "Couldn't remove that vote.")
+}
+
+/** Ask Pact Pilot for a fresh set, different from the options in this vote. */
+export function retryQuestion(poll: Poll) {
+  const what = poll.kind === 'dinner' ? 'restaurants' : poll.kind === 'stay' ? 'places to stay' : poll.kind === 'ticket' ? 'events or activities' : poll.kind === 'flight' ? 'flights' : 'options'
+  return `Find 3 different ${what} for "${poll.title}", not ${poll.options.map((o) => o.name).join(', ')}, each with its price per person and a link, and put them to a vote.`
+}
+
 export async function closePoll(pollId: string) {
   const { error } = await supabase.rpc('close_pact_poll', { p_poll_id: pollId })
   if (error) throw new Error(/Only whoever/.test(error.message) ? error.message : "Couldn't close the vote.")
+}
+
+/** The coordinator approves the option a poll picked. A vote is your approval, so this does it all in one tap: the
+ *  pick goes on the plan, the plan goes to the group for approval (if nothing is up for approval yet), and everyone who
+ *  voted for it counts as approving. Once the split is set up it goes in as an extra instead. */
+export async function approvePollPick(pact: Pact, poll: Poll, option: PollOption, _me: string, locked: boolean, _send: boolean): Promise<'extra' | 'plan' | 'sent'> {
+  return (await addPollPickToPlan(pact, poll, option, locked)) ? 'extra' : 'plan'
+}
+
+/** Send what's on the plan for everyone to approve. Votes count: whoever ticked a decided vote's winner is already
+ *  approved. Then Pact Pilot posts in Pact Chat who still needs to approve, and they get an email. */
+export async function sendForApproval(id: string, pact: Pact, me: string, polls: Poll[], name: (id: string) => string) {
+  const fresh = await loadPactData(id, me)
+  try { await bookItems(id, pact, fresh.items, me, fresh.members.length) }
+  catch (e) { if (/already up for approval/i.test((e as Error).message)) return; throw e }
+  let after = await loadPactData(id, me)
+  const b = booking(after)
+  const k = b && consent(after, b)
+  if (!b || !k) return
+  for (const p of polls.filter((x) => x.winner_key)) {
+    await supabase.rpc('approve_from_poll', { p_decision_id: k.decision_id, p_poll_id: p.poll_id, p_option_key: p.winner_key }).then(() => undefined, () => undefined)
+  }
+  after = await loadPactData(id, me)
+  const w = waitingOn(after)
+  const waiting = w?.what === 'approve' ? w.people : after.members.map((m) => m.user_id)
+  const who = waiting.map((u) => (u === me ? 'you' : firstName(name(u))))
+  const items = fresh.items.map((i) => i.title).join(', ')
+  if (waiting.length) {
+    await send(id, `Pact Pilot: The plan is up for approval: ${items} · ${dollars(b.perPerson ?? 0)} each. ${who.join(', ')}, open the pact and tap Approve. Nobody pays until everyone approves.`).catch(() => undefined)
+  }
+  // Email everyone who needs to approve, now rather than on the next timer.
+  await invoke('pact-email-worker', { pact_id: id }).catch(() => undefined)
+}
+
+/** The live split function is older than this app (it reads every call as a new split): say so plainly. */
+const outdated = (e: unknown) => (/Share amount must be/i.test(said(e, '')) ? 'This needs the latest server update. Deploy create-pact-payment-plan, then try again.' : null)
+
+/** The coordinator takes an item off a plan that's already split; everyone's share drops by its price. When
+ *  collecting has started, the collection is cancelled and reopened at the lower share, and anyone who paid takes
+ *  their share back first. */
+export async function removePlanItem(id: string, itemId: string) {
+  try { return await invoke<{ removed: boolean; newShare: number | null; reopen: boolean; paid: number }>('create-pact-payment-plan', { action: 'remove_item', pactId: id, itemId }) }
+  catch (e) { throw new Error(outdated(e) ?? said(e, "Couldn't remove that item.")) }
+}
+
+/** "Change the plan": take back a saved split before collecting starts, so the items can be fixed and approved again. */
+export async function changePlan(id: string) {
+  try { await invoke('create-pact-payment-plan', { action: 'remove', pactId: id }) }
+  catch (e) { throw new Error(outdated(e) ?? said(e, "Couldn't change the plan.")) }
 }
 
 /** The picked option goes onto the plan as an item, priced per person, with its link. Once the split is set up the
@@ -619,10 +731,12 @@ export async function closePoll(pollId: string) {
 export async function addPollPickToPlan(pact: Pact, poll: Poll, option: PollOption, locked = false) {
   const draft: ItemDraft = {
     kind: poll.kind, title: option.name, location: pact.location ?? '', startsOn: pact.starts_on, endsOn: pact.ends_on,
-    link: option.link ?? '', price: option.price_each,
+    link: option.link ?? '', price: option.price_each, scope: option.price_for === 'group' ? 'group' : 'each',
   }
   const source = poll.source === 'grok' ? 'grok' : 'manual'
   let extra = locked
+  const { data: existing } = await supabase.from('pact_items').select('item_id').eq('pact_id', pact.pact_id).ilike('title', option.name.trim()).limit(1)
+  if (existing?.length) { await closePoll(poll.poll_id).catch(() => undefined); return extra }
   try { await addItem(pact.pact_id, draft, source, extra) }
   catch (e) {
     // The split was set up after this page last loaded: the plan is locked, so add it as an extra.
@@ -639,9 +753,24 @@ export async function removeItem(itemId: string) {
   if (error) throw new Error("Couldn't remove that item.")
 }
 
-export const itemsTotal = (items: Item[]) => {
-  const prices = items.map((i) => i.price_each).filter((p): p is number => p != null)
-  return prices.length ? prices.reduce((a, b) => a + b, 0) : null
+/** What one person pays for an item: the price, or for a group purchase their share of it (rounded up to the cent). */
+export const itemEach = (i: Pick<Item, 'price_each' | 'price_scope'>, people: number) =>
+  i.price_each == null ? null : i.price_scope === 'group' ? Math.ceil((i.price_each * 100) / Math.max(1, people)) / 100 : i.price_each
+
+/** What each person pays for the whole plan. `people` splits group purchases between everyone in the pact. */
+export const itemsTotal = (items: Item[], people = 1) => {
+  const prices = items.map((i) => itemEach(i, people)).filter((p): p is number => p != null)
+  return prices.length ? Math.round(prices.reduce((a, b) => a + b, 0) * 100) / 100 : null
+}
+
+/** The price as people read it: "$1.49 for the group · $0.50 each", or "$10 each". */
+export const priceText = (i: Pick<Item, 'price_each' | 'price_scope'>, people: number) =>
+  i.price_each == null ? null : i.price_scope === 'group' ? `${dollars(i.price_each)} for the group · ${dollars(itemEach(i, people)!)} each` : `${dollars(i.price_each)} each`
+
+/** Say whether an item's price is per person or once for the whole group. Adjusts a saved split to match. */
+export async function setItemScope(id: string, itemId: string, scope: 'each' | 'group') {
+  try { await invoke('create-pact-payment-plan', { action: 'set_item_scope', pactId: id, itemId, scope }) }
+  catch (e) { throw new Error(outdated(e) ?? said(e, "Couldn't change how it's priced.")) }
 }
 
 /** Pact Pilot reads the chat and each thing the group agreed on becomes an item. */
@@ -656,10 +785,10 @@ export async function addItemsWithGrok(id: string, messages: Message[], name: (i
 }
 
 /** Book it from the items: one write-up of everything, priced at the items' total each, for everyone to approve. */
-export async function bookItems(id: string, pact: Pact, items: Item[], me: string) {
-  const total = itemsTotal(items)
+export async function bookItems(id: string, pact: Pact, items: Item[], me: string, people = 1) {
+  const total = itemsTotal(items, people)
   if (total == null) throw new Error('Add a price to at least one item first.')
-  const lines = items.map((i) => [`${itemTitle(i.kind)}: ${i.title}`, dateRange(i.starts_on, i.ends_on), i.price_each != null ? `${dollars(i.price_each)} each` : null].filter(Boolean).join(' · '))
+  const lines = items.map((i) => [`${itemTitle(i.kind)}: ${i.title}`, dateRange(i.starts_on, i.ends_on), priceText(i, people)].filter(Boolean).join(' · '))
   await saveRecommendation(id, {
     summary: `Everything you're booking: ${items.length} item${items.length === 1 ? '' : 's'}, ${dollars(total)} each.`,
     options: [{ title: pact.name, description: lines.join('\n'), tradeoff: '', price_per_person: total, link: items.find((i) => i.link)?.link ?? null }],
@@ -667,6 +796,7 @@ export async function bookItems(id: string, pact: Pact, items: Item[], me: strin
   }).catch(() => { throw new Error("Couldn't put the items up for approval.") })
   const b = booking(await loadPactData(id, me))
   if (b) await createDecision(id, b.question, b.rec.recommendation_id)
+    .catch((e: Error) => { throw new Error(/already up for approval/i.test(e.message) ? 'This plan is already up for approval.' : e.message) })
 }
 
 // ---- Friends
@@ -877,7 +1007,15 @@ export type TabExpense = {
   source_ref: string | null; created_by: string; version: number; payers: Record<string, number>; shares: Record<string, number>
 }
 export type TabPayback = { from: string; to: string; amount_cents: number }
-export type Tab = { currency: string; members: TabMember[]; expenses: TabExpense[]; settle_up: TabPayback[] }
+/** A split from someone's wallet, waiting for everyone it's split with to approve. It doesn't count until then. */
+export type PendingSplit = Omit<TabExpense, 'version'> & { approved_by: string[] }
+export type Tab = { currency: string; members: TabMember[]; expenses: TabExpense[]; pending?: PendingSplit[]; settle_up: TabPayback[] }
+
+/** Approve my part of a split that's waiting. Once everyone has, it goes on the tab. */
+export async function approveSplit(expenseId: string) {
+  const { error } = await supabase.rpc('approve_pact_expense', { p_expense_id: expenseId })
+  if (error) throw new Error(/PGRST202|schema cache/i.test(error.message) ? 'Approving splits needs the latest database update.' : /P0001/.test(error.code ?? '') ? error.message : "Couldn't approve that split.")
+}
 
 export const cents = (c: number) => `$${(Math.abs(c) / 100).toFixed(2)}`
 export const toCents = (text: string) => Math.round(Number(text.replace(/[^0-9.]/g, '')) * 100)
@@ -1005,6 +1143,6 @@ export async function approveGrok(id: string, operationId: string) {
 
 /** Wallet payments already on a tab, by transaction hash, so the wallet can show which pact each went to. */
 export async function loadTaggedPayments(): Promise<Map<string, string>> {
-  const { data } = await supabase.from('pact_expenses').select('pact_id, source_ref').eq('source', 'wallet').eq('status', 'active')
+  const { data } = await supabase.from('pact_expenses').select('pact_id, source_ref').eq('source', 'wallet').in('status', ['active', 'proposed'])
   return new Map((data ?? []).map((r) => [String(r.source_ref).toLowerCase(), r.pact_id as string]))
 }

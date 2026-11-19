@@ -109,7 +109,8 @@ export function AddExpense({ id, me, members, txHash, amountCents, onClose, onDo
         </div>
         {total > 0 && forWho.length > 0 && <p className="l-dim">About {S.cents(each)} each</p>}
         {error && <p className="l-error">{error}</p>}
-        <button className="l-btn l-wide-btn" type="submit" disabled={working || !title.trim() || total <= 0 || !forWho.length}>{working ? 'Adding…' : 'Add to the tab'}</button>
+        <button className="l-btn l-wide-btn" type="submit" disabled={working || !title.trim() || total <= 0 || !forWho.length}>{working ? 'Adding…' : txHash ? 'Send to the group to approve' : 'Add to the tab'}</button>
+        {txHash && <p className="l-faint" style={{ fontSize: 13, margin: '8px 0 0' }}>Everyone you split it with approves their part. It counts on the tab once they all have.</p>}
       </form>
     </Modal>
   )

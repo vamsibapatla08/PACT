@@ -649,7 +649,7 @@ function NewPact({ onClose }: { onClose: () => void }) {
   const [error, setError] = useState<string | null>(null)
   async function create() {
     setBusy(true); setError(null)
-    try { const id = await S.createPact(name, details, picked); await refresh(); onClose(); go(`/pacts/${id}`) }
+    try { const id = await S.createPact(name, details, picked); await refresh(); onClose(); S.openPilotFirst(id); go(`/pacts/${id}`) }
     catch (e) { setError((e as Error).message); setBusy(false) }
   }
   return (

@@ -47,9 +47,10 @@ function toNumber(value: unknown): number | null {
   return null
 }
 
-// PactSplit keys a pact by its 16 uuid bytes, left-aligned, so the right half must be zero.
+// PactSplit keys a pact by its 16 uuid bytes, left-aligned, and the collection round in the right half (a small
+// number, so its first 24 hex digits are zero). Anything else is not one of ours.
 export function pactIdFromTopic(topic: string): string | null {
-  if (!word.test(topic) || !/^0{32}$/.test(topic.slice(34))) return null
+  if (!word.test(topic) || !/^0{24}[0-9a-f]{8}$/.test(topic.slice(34))) return null
   const hex = topic.slice(2, 34)
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
 }

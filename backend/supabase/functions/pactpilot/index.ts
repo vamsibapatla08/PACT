@@ -427,10 +427,11 @@ const pollSchema = {
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["name", "price_each", "link", "notes"],
+        required: ["name", "price_each", "price_for", "link", "notes"],
         properties: {
           name: { type: "string" },
           price_each: { type: ["number", "null"] },
+          price_for: { type: "string", enum: ["each", "group"] },
           link: { type: ["string", "null"] },
           notes: { type: "string" },
         },
@@ -440,7 +441,7 @@ const pollSchema = {
 }
 const pollIntent = /\b(poll|put (?:\w+ ){0,4}to (?:a |the )?vote|start (?:a |the )?vote|let'?s vote|vote on (?:the )?(?:options|stays|hotels|flights|places|restaurants|dinners?|tickets))\b/i
 const notPollIntent = /\b(rebalance|split|who voted|results?)\b/i
-type PollOption = { name: string; price_each: number | null; link: string | null; notes: string | null }
+type PollOption = { name: string; price_each: number | null; price_for: "each" | "group"; link: string | null; notes: string | null }
 
 function cleanPollOptions(value: unknown): PollOption[] {
   if (!Array.isArray(value)) return []
@@ -452,7 +453,7 @@ function cleanPollOptions(value: unknown): PollOption[] {
     const price = typeof r.price_each === "number" && Number.isFinite(r.price_each) && r.price_each >= 0 ? Math.round(r.price_each * 100) / 100 : null
     const link = typeof r.link === "string" && /^https:\/\/[^\s]+$/i.test(r.link.trim()) ? r.link.trim().slice(0, 500) : null
     const notes = typeof r.notes === "string" && r.notes.trim() ? r.notes.trim().slice(0, 240) : null
-    return [{ name, price_each: price, link, notes }]
+    return [{ name, price_each: price, price_for: r.price_for === "group" ? "group" as const : "each" as const, link, notes }]
   }).slice(0, 8)
 }
 
@@ -596,6 +597,13 @@ Deno.serve(async (request) => {
           "Return 3 options (2 to 5 only if the question asks) that answer what they asked for, using the pact's place, " +
           "dates, budget and group size from the details and chat. Use real, specific places by their real names. " +
           "price_each is your estimated cost per person in USD for the whole stay or thing (null if you can't estimate). " +
+          "price_for says what price_each covers: 'group' when one purchase covers everyone (a domain name, a whole " +
+          "house or car, one booking for all), so price_each is the full price once; 'each' when everyone pays it " +
+          "(tickets, meals, a bed each), so price_each is per person. " +
+          "It is the option's own price, never the group's budget. For events and activities use the real event or venue " +
+          "name, the day and time if known, and the ticket price per person; notes then say what it is and when, like " +
+          "'Live jazz, Sat 8pm, 0.5 km from the hotel'. For a vote on the idea itself (what the pact is), each option is a " +
+          "short, clear plan like 'Weekend in Austin: hackathon + BBQ', with a rough price and no link needed. " +
           "link is an https link to the place's own page or a search page that finds it, or null. notes is one short " +
           "line (under 110 characters) on why it fits, like 'Cheapest, 0.3 km from the venue'. title is short, like " +
           "'Top 3 Austin stays, Nov 19 to 22'. kind is stay, flight, ticket, dinner or other. reply is one or two " +

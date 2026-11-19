@@ -14,8 +14,10 @@ export function usdcWei(amount: unknown): bigint | null {
 }
 
 // A pact's uuid as the bytes32 key PactSplit stores it under: the 16 uuid bytes, left-aligned.
-export function pactKey(pactId: string) {
-  return `0x${pactId.replace(/-/g, '').toLowerCase()}${'0'.repeat(32)}`
+// The pact's 16 uuid bytes, then the collection round in the other 16. Round 0 is all zeros, the original key, so
+// collections opened before rounds existed keep their id. Each reopen after a cancel is a new round and a new key.
+export function pactKey(pactId: string, round = 0) {
+  return `0x${pactId.replace(/-/g, '').toLowerCase()}${round.toString(16).padStart(32, '0')}`
 }
 
 export const PACTS_SELECTOR = '0xf8bfca8b' // pacts(bytes32)

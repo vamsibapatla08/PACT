@@ -9,7 +9,13 @@ type OutboxRow = {
   attempts: number
 }
 
-const json = (body: unknown, status = 200) => Response.json(body, { status })
+// The app calls this from the browser right after a plan goes up for approval, so it answers CORS preflights.
+const cors = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+}
+const json = (body: unknown, status = 200) => Response.json(body, { status, headers: cors })
 
 async function tokenMatches(supplied: string, expected: string) {
   const encoder = new TextEncoder()
@@ -73,6 +79,23 @@ async function compose(db: Db, row: OutboxRow): Promise<Email> {
       ].filter(Boolean), appUrl, row.pact_id),
     }
   }
+  if (row.email_type === "approval_needed") {
+    const recId = typeof row.payload.recommendation_id === "string" ? row.payload.recommendation_id : null
+    const { data: rec } = recId ? await db.from("pact_recommendations").select("summary, options").eq("recommendation_id", recId).maybeSingle() : { data: null }
+    const option = Array.isArray(rec?.options) ? rec.options[0] as { title?: string; description?: string; price_per_person?: number } | undefined : undefined
+    const each = option?.price_per_person != null ? money(option.price_per_person) : ""
+    const lines = typeof option?.description === "string" ? option.description.split("\n").filter(Boolean) : []
+    const intro = `The plan for ${name} is up for approval${each ? `: ${each} each` : ""}. Nobody pays until everyone approves.`
+    return {
+      subject: `Approve the plan: ${name}${each ? ` · ${each} each` : ""}`,
+      text: [intro, ...lines.map((l) => `- ${l}`), `Approve it here: ${appUrl}/pacts/${row.pact_id}`].join("\n"),
+      html: page("Your approval is needed", [
+        esc(intro),
+        lines.length ? `<ul style="padding-left:18px;margin:0">${lines.map((l) => `<li style="margin:0 0 6px">${esc(l)}</li>`).join("")}</ul>` : "",
+        "Open the pact and tap <b>Approve</b>.",
+      ].filter(Boolean), appUrl, row.pact_id),
+    }
+  }
   if (row.email_type === "verified_payment_receipt") {
     const amount = money(row.payload.amount_usdc)
     const line = `Your share${amount ? ` of ${amount}` : ""} for ${name} is in. It's held in the pact until everyone has paid.`
@@ -102,15 +125,29 @@ async function deliver(db: Db, row: OutboxRow) {
 }
 
 Deno.serve(async (request) => {
+  if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: cors })
   if (request.method !== "POST") return json({ error: "Method not allowed" }, 405)
   const workerToken = Deno.env.get("PACT_EMAIL_WORKER_TOKEN")
   const suppliedToken = request.headers.get("Authorization")?.match(/^Bearer\s+(\S+)$/i)?.[1]
-  if (!workerToken || !suppliedToken || !(await tokenMatches(suppliedToken, workerToken))) return json({ error: "Unauthorized" }, 401)
   const url = Deno.env.get("SUPABASE_URL")
   const key = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")
   if (!url || !key) return json({ error: "Email worker is missing server configuration" }, 503)
   const db = createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } })
-  const { data: rows, error } = await db.from("pact_email_outbox").select("email_id,pact_id,recipient_user_id,email_type,payload,attempts").in("status", ["pending", "failed"]).lte("next_attempt_at", new Date().toISOString()).order("created_at").limit(10)
+  // The worker token sends everything queued. A signed-in member can send what's queued for one of their pacts
+  // (right after a plan goes up for approval), and nothing else.
+  let onlyPact: string | null = null
+  if (!workerToken || !suppliedToken || !(await tokenMatches(suppliedToken, workerToken))) {
+    const { data: { user } } = suppliedToken ? await db.auth.getUser(suppliedToken) : { data: { user: null } }
+    const body = await request.json().catch(() => ({})) as { pact_id?: unknown }
+    const pactId = typeof body.pact_id === "string" ? body.pact_id : ""
+    if (!user || !/^[0-9a-f-]{36}$/i.test(pactId)) return json({ error: "Unauthorized" }, 401)
+    const { data: member } = await db.from("pact_members").select("user_id").eq("pact_id", pactId).eq("user_id", user.id).eq("membership_status", "active").maybeSingle()
+    if (!member) return json({ error: "Unauthorized" }, 401)
+    onlyPact = pactId
+  }
+  let pending = db.from("pact_email_outbox").select("email_id,pact_id,recipient_user_id,email_type,payload,attempts").in("status", ["pending", "failed"]).lte("next_attempt_at", new Date().toISOString())
+  if (onlyPact) pending = pending.eq("pact_id", onlyPact)
+  const { data: rows, error } = await pending.order("created_at").limit(10)
   if (error) return json({ error: "Could not load email outbox" }, 500)
   const results: Array<{ email_id: string; status: string }> = []
   for (const row of (rows ?? []) as OutboxRow[]) {
