@@ -531,7 +531,11 @@ async function pactStatus(userId: string, userJwt: string, pactId: unknown) {
     })
     if (syncError) console.error('sync_pact_chain_status failed', syncError)
     // A new payment or the release may have queued emails (receipts, "You're booked"). Wake the worker now.
-    else if (pact.state !== 'none') wakeEmailWorker()
+    else if (pact.state !== 'none') {
+      const { count } = await admin.from('pact_email_outbox').select('email_id', { count: 'exact', head: true })
+        .eq('pact_id', pactId).in('status', ['pending', 'failed'])
+      if (count) wakeEmailWorker()
+    }
   }
   return reply(200, view)
 }

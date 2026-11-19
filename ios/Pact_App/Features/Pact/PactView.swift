@@ -68,10 +68,12 @@ struct PactView: View {
                 await store.loadItems(id)
                 await store.listen(id)
             }
-            // Approvals and payments come from other phones, so the pact re-reads itself while it's open.
+            // Approvals and payments come from other phones, so the pact re-reads itself while it's open. Every
+            // 20 seconds, not 6: each read hits the database and the blockchain, and a whole group polling fast
+            // overloads the server for everyone.
             .task {
                 while !Task.isCancelled {
-                    try? await Task.sleep(for: .seconds(6))
+                    try? await Task.sleep(for: .seconds(20))
                     await store.loadPlan(id)
                     await store.loadPactSplit(id)
                 }

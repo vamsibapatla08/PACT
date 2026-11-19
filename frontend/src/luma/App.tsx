@@ -87,8 +87,11 @@ function Signed({ me }: { me: string }) {
   const refresh = useCallback(async () => {
     const list = await S.loadPacts(me)
     setPacts(list)
-    const loaded = await Promise.all(list.map(async (p) => [p.pact_id, await S.loadPactData(p.pact_id, me)] as const))
-    setData(Object.fromEntries(loaded))
+    // Four pacts at a time, newest first, each showing as soon as its own data lands. Never the whole list at once.
+    await S.inBatches(list, 4, async (p) => {
+      const d = await S.loadPactData(p.pact_id, me).catch(() => null)
+      if (d) setData((all) => ({ ...all, [p.pact_id]: d }))
+    })
   }, [me])
   const refreshSocial = useCallback(async () => setSocial(await S.loadSocial()), [])
 
@@ -247,10 +250,10 @@ function TopBar({ tab }: { tab: string | null }) {
 
 function Home() {
   const { me, profile, pacts, data, social, go, refresh, refreshSocial, wallet, newPact } = useApp()
-  const ready = pacts !== null && pacts.every((p) => data[p.pact_id])
-  if (!ready) return <div className="l-center"><span className="l-spin" /></div>
-  const owe = pacts.reduce((sum, p) => sum + S.owedIn(data[p.pact_id], me), 0)
-  const coming = pacts.reduce((sum, p) => sum + S.collectingIn(data[p.pact_id], me), 0)
+  // Home shows as soon as the list of pacts is in; totals fill in as each pact loads.
+  if (pacts === null) return <div className="l-center"><span className="l-spin" /></div>
+  const owe = pacts.reduce((sum, p) => sum + (data[p.pact_id] ? S.owedIn(data[p.pact_id], me) : 0), 0)
+  const coming = pacts.reduce((sum, p) => sum + (data[p.pact_id] ? S.collectingIn(data[p.pact_id], me) : 0), 0)
   const upcoming = sortByDate(pacts).filter((p) => !isPast(p)).slice(0, 3)
   const needsMe = pacts.flatMap((p) => { const w = data[p.pact_id] ? S.waitingOn(data[p.pact_id]) : null; return w && w.people.includes(me) ? [{ pact: p, w }] : [] })
   const owedInNeeds = needsMe.some(({ w }) => w.what === 'pay')

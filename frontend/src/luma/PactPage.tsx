@@ -41,8 +41,9 @@ export function PactPage({ id }: { id: string }) {
     void S.loadTab(id).then(setTab).catch(() => undefined)
     void S.loadExtras(id).then(setExtras).catch(() => undefined)
   }, [id])
-  // Votes and balances refresh with the pact, every 6 seconds, and right after I act.
-  useEffect(() => { reloadSide(); const t = setInterval(reloadSide, 6000); return () => clearInterval(t) }, [reloadSide, tabVersion])
+  // Votes and balances reload when something changes (live, below) and right after I act. A once-a-minute check
+  // while the page is on screen is only a backup in case a live update is missed.
+  useEffect(() => { reloadSide(); return S.pollWhileVisible(reloadSide, 60000) }, [reloadSide, tabVersion])
   const chatRef = useRef<HTMLElement>(null)
   const slotRef = useRef<HTMLDivElement>(null)
   const dockedHeight = useRef(0)
@@ -80,17 +81,34 @@ export function PactPage({ id }: { id: string }) {
   /** What Pact Pilot is doing right now, shown at the bottom of the chat: thinking, slow, or failed with a retry. */
   const [grokJob, setGrokJob] = useState<{ label: string; slow: boolean; error: string | null; retry: () => void } | null>(null)
 
-  // Chat arrives live; the plan and the split refresh every 6 seconds, like the iOS chat.
+  // Everything on this page is live: chat messages arrive as they're sent, and any change to the plan, votes, money
+  // or tab reloads the page once (changes that land together are batched). Nothing re-asks the database on a timer,
+  // apart from a once-a-minute backup check while the page is on screen.
   useEffect(() => {
     void S.loadMessages(id).then(setMessages)
-    const channel = S.supabase.channel(`pact-messages:${id}`)
+    let pending: ReturnType<typeof setTimeout> | null = null
+    const changed = () => {
+      if (pending) clearTimeout(pending)
+      pending = setTimeout(() => { pending = null; void refreshPact(id); setTabVersion((v) => v + 1) }, 600)
+    }
+    // Chat has its own connection, so it stays live even if the other live updates aren't switched on yet.
+    const chat = S.supabase.channel(`pact-messages:${id}`)
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'pact_messages', filter: `pact_id=eq.${id}` }, (payload) => {
         const m = payload.new as S.Message
         setMessages((all) => (all.some((x) => x.message_id === m.message_id) ? all : [...all, m]))
       }).subscribe()
-    const timer = setInterval(() => void refreshPact(id), 6000)
+    let channel = S.supabase.channel(`pact-live:${id}`)
+    for (const table of S.LIVE_PACT_TABLES) {
+      channel = channel.on('postgres_changes', { event: '*', schema: 'public', table, filter: `pact_id=eq.${id}` }, changed)
+    }
+    // Votes have no pact id on them; the database only sends votes from pacts I'm in, so reload on any.
+    for (const table of ['pact_poll_votes', 'pact_decision_votes']) {
+      channel = channel.on('postgres_changes', { event: '*', schema: 'public', table }, changed)
+    }
+    channel.subscribe()
+    const stop = S.pollWhileVisible(() => void refreshPact(id), 60000)
     void refreshPact(id)
-    return () => { clearInterval(timer); void S.supabase.removeChannel(channel) }
+    return () => { stop(); if (pending) clearTimeout(pending); void S.supabase.removeChannel(channel); void S.supabase.removeChannel(chat) }
   }, [id, refreshPact])
 
   const name = useCallback((userId: string) => {

@@ -10,8 +10,9 @@ export function TabCard({ id, me, members, version }: { id: string; me: string; 
   const [adding, setAdding] = useState(false)
 
   const reload = useCallback(() => S.loadTab(id).then(setTab).catch((e: Error) => setError(e.message)), [id])
-  // version changes when Grok edits the tab, so the change shows at once instead of on the next poll.
-  useEffect(() => { void reload(); const t = setInterval(() => void reload(), 8000); return () => clearInterval(t) }, [reload, version])
+  // version changes whenever the pact changes (live) or Grok edits the tab, so the tab reloads then. The
+  // once-a-minute check is only a backup.
+  useEffect(() => { void reload(); return S.pollWhileVisible(() => void reload(), 60000) }, [reload, version])
 
   const run = async (label: string, work: () => Promise<unknown>) => {
     setWorking(label); setError(null)

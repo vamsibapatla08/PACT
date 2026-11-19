@@ -154,9 +154,36 @@ export async function loadSplit(id: string) {
   const rows = (Array.isArray(data) ? data : []) as (FundingPlan & { user_id: string | null; share_status: string; tx_hash: string | null; paid_at: string | null })[]
   const plan = rows[0] ?? null
   const receipts: Receipt[] = rows.filter((r) => r.user_id).map((r) => ({ user_id: r.user_id!, status: r.share_status, tx_hash: r.tx_hash, paid_at: r.paid_at }))
+  // With no split saved there's no pact on PactSplit yet, so skip the blockchain read (the slowest call here).
+  if (!plan) return { plan, chain: null, receipts, events: (events ?? []) as PaymentEvent[] }
   const read = () => invoke<Chain>('wallet', { action: 'pact_status', pactId: id })
   const chain = await read().catch(() => new Promise((ok) => setTimeout(ok, 900)).then(read)).catch(() => null)
   return { plan, chain, receipts, events: (events ?? []) as PaymentEvent[] }
+}
+
+/** The tables a pact page listens to live (each has a pact_id). Turned on for realtime in the
+ *  20261118130000_realtime_pact_changes migration. */
+export const LIVE_PACT_TABLES = [
+  'pact_polls', 'pact_items', 'pact_decisions', 'pact_recommendations', 'pact_payments', 'pact_shares',
+  'pact_members', 'pact_expenses', 'pact_settlements', 'pact_tab_paybacks', 'pact_extras_rounds',
+] as const
+
+/** Run fn at most `limit` at a time over items, so a long list never floods the database all at once. */
+export async function inBatches<T>(items: T[], limit: number, fn: (item: T) => Promise<void>) {
+  let next = 0
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (next < items.length) await fn(items[next++])
+  }))
+}
+
+/** Run fn every ms while this tab is on screen, and once straight away when you come back to it. Background tabs
+ *  stay quiet, so a pact left open in another tab doesn't keep hitting the database. Returns the cleanup. */
+export function pollWhileVisible(fn: () => void, ms: number) {
+  const shown = () => document.visibilityState === 'visible'
+  const timer = setInterval(() => { if (shown()) fn() }, ms)
+  const back = () => { if (shown()) fn() }
+  document.addEventListener('visibilitychange', back)
+  return () => { clearInterval(timer); document.removeEventListener('visibilitychange', back) }
 }
 
 export async function loadItems(id: string): Promise<Item[]> {

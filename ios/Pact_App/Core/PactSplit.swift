@@ -102,6 +102,11 @@ extension PactStore {
         let rows = try? await client.rpc("get_pact_payment_status", params: ["p_pact_id": id]).execute().data
         fundingPlans[id] = rows.flatMap { try? JSONDecoder().decode([FundingPlan].self, from: $0) }?.first
         shareReceipts[id] = rows.flatMap { try? JSONDecoder().decode([ShareReceipt].self, from: $0) } ?? []
+        // No split saved means nothing on PactSplit yet, so skip the blockchain read, the slowest call in the app.
+        guard fundingPlans[id] != nil else {
+            withAnimation(.smooth) { pactSplit[id] = nil }
+            return
+        }
         let status: PactSplitStatus? = try? await invoke("wallet", ["action": "pact_status", "pactId": key(id)])
         withAnimation(.smooth) { pactSplit[id] = status }
     }
