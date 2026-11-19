@@ -582,7 +582,7 @@ function LedgerLine({ row, taggedTo, onSplit }: { row: S.LedgerRow; taggedTo: st
   const pact = row.pactId ? pacts?.find((p) => p.pact_id === row.pactId) ?? null : null
   const title = row.kind === 'person' ? `${row.incoming ? 'From' : 'To'} ${name(row.userId!)}`
     : row.kind === 'share' ? `Paid your share into ${pact?.name ?? 'a pact'}`
-    : row.kind === 'payout' ? `Paid out from ${pact?.name ?? 'a pact'}`
+    : row.kind === 'payout' ? (row.refund ? `Refund from ${pact?.name ?? 'a pact'}` : `Paid out from ${pact?.name ?? 'a pact'}`)
     : row.kind === 'deposit' ? 'Test USDC added'
     : `Sent to ${short}`
   const when = new Date(row.at).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })

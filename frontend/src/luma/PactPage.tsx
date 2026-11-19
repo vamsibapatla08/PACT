@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+import { Fragment, useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import * as S from './store'
 import { DetailsForm, useApp } from './App'
 import { Avatar, Busy, Cover, Grok, Icon, Modal, Switch, VerifiedBadge } from './ui'
@@ -25,6 +25,19 @@ export function PactPage({ id }: { id: string }) {
   const [renaming, setRenaming] = useState(false)
   const [tab, setTab] = useState<S.Tab | null>(null)
   const [extras, setExtras] = useState<S.Extras | null>(null)
+  const [moves, setMoves] = useState<S.PactMove[] | null>(null)
+  /** The itinerary's Edit mode: remove items, change how they're priced, issue a refund. */
+  const [editing, setEditing] = useState(false)
+  /** The share PactSplit actually holds for this pact, so activity shows real amounts. */
+  const chainShareRef = useRef<number | null>(null)
+  chainShareRef.current = d?.chain && d.chain.state !== 'none' ? Number(d.chain.share.usdc) || null : null
+  const chainShare = chainShareRef.current
+  // One place loads the activity (with the real share), so an earlier load can never overwrite a later one.
+  useEffect(() => {
+    let live = true
+    void S.loadPactActivity(id, chainShare).then((m) => { if (live) setMoves(m) }).catch(() => undefined)
+    return () => { live = false }
+  }, [id, chainShare, tabVersion])
   /** The right panel: the group's Pact Chat, or a private Pact Pilot conversation. */
   const [panel, setPanel] = useState<'chat' | 'pilot'>(() => (S.takePilotFirst(id) ? 'pilot' : 'chat'))
   /** Set once you tap a tab yourself, so the page never switches it under you. */
@@ -229,6 +242,7 @@ export function PactPage({ id }: { id: string }) {
           <div className="l-pact-buttons">
             <button className="l-send-btn" type="button" onClick={() => setSheet({ kind: 'send', to: null })}><ArrowNE size={17} />Send money</button>
             <button className="l-btn l-ghost l-wide-btn" type="button" onClick={() => setSheet({ kind: 'addPeople' })}><Icon name="plus" size={17} />Add people</button>
+            {moves && moves.length > 0 && d && <PactActivity moves={moves} me={me} members={d.members} hostId={S.coordinator(d)?.user_id ?? null} />}
           </div>
         </aside>
 
@@ -259,6 +273,13 @@ export function PactPage({ id }: { id: string }) {
             : step && <StepCard step={step} hasGrok={hasGrok} working={working} onAct={doStep}
             onDecline={step.kind === 'approve' ? () => void run('Saying not yet…', () => S.vote(step.decision, false)) : undefined}
             chain={d.chain} members={d.members} me={me} />}
+          {d?.chain?.myRefund && (
+            <div className="l-card l-status">
+              <h3>You have {S.dollars(Number(d.chain.myRefund.amount))} to take back</h3>
+              <p>The collection was cancelled, so the share you paid is yours again. It goes straight back to your wallet.</p>
+              <button className="l-btn l-glow" type="button" onClick={() => setSheet({ kind: 'action', action: 'claim_refund' })}>Take back {S.dollars(Number(d.chain.myRefund.amount))}</button>
+            </div>
+          )}
           {error && <p className="l-error">{error}</p>}
 
           {!finished && <><div className="l-actions-row">
@@ -279,27 +300,40 @@ export function PactPage({ id }: { id: string }) {
 
           </>}
 
-          {/* Findings: every set of options (Pact Pilot's hotels, flights…) as visual cards to vote on and approve. */}
-          {d && (polls.length > 0 || messageFindings.length > 0) && (
-            <div className="l-findings" ref={findingsRef}>
-              <div className="l-section-title">Findings</div>
-              {[...polls].sort((x, y) => Number(y.status === 'open') - Number(x.status === 'open') || y.created_at.localeCompare(x.created_at)).map((poll) => (
-                <PollCard key={poll.poll_id} poll={poll} me={me} members={d.members} pact={pact} iCoordinate={iCoordinate} locked={Boolean(d.plan)} canSend={step?.kind === 'talk' || step?.kind === 'declined'}
-                  onRetry={(q) => { setQueued({ q, n: Date.now() }); setPanel('pilot') }}
-                  onVoted={reloadSide} onAddedToPlan={() => { reloadSide(); void refreshPact(id) }} />
-              ))}
-              {messageFindings.map((f) => <MessageOptions key={f.m.message_id} id={id} found={f.found} onStarted={reloadSide} />)}
+          {/* Itinerary: everything you're booking, by date, with where it's up to. Picks from votes land here. */}
+          {d && (
+            <div className="l-about" ref={findingsRef}>
+              <div className="l-itinerary-head">
+                <div className="l-section-title">Itinerary</div>
+                {d.items.length > 0 && step && <span className={`l-itinerary-status ${itineraryStatus(step).tone}`}>{itineraryStatus(step).text}</span>}
+                {iCoordinate && d.items.length > 0 && d.chain?.state !== 'released' && (
+                  <button className="l-pill" type="button" style={{ marginLeft: 'auto' }} onClick={() => setEditing((e) => !e)}>{editing ? 'Done' : 'Edit'}</button>
+                )}
+              </div>
+              {/* Edit: while the money is still held in the pact, the coordinator can refund everyone. */}
+              {editing && (
+                <div className="l-itinerary-edit">
+                  <span className="l-faint">Remove an item or change how it's priced. Shares update for everyone.</span>
+                  {d.chain?.state === 'open' && (
+                    <button className="l-btn l-ghost" type="button" style={{ color: '#ff8a6b' }}
+                      onClick={() => setSheet({ kind: 'action', action: 'cancel' })}>
+                      <Icon name="shield" size={14} />Issue a refund{d.chain.sharesPaid ? ` · ${d.chain.sharesPaid} paid` : ''} · PIN
+                    </button>
+                  )}
+                </div>
+              )}
+              {!d.items.length && <p className="l-faint" style={{ margin: '4px 0 0', fontSize: 14 }}>Nothing picked yet. Vote on Pact Pilot's options in Pact Chat, and the winners land here.</p>}
+              {d.items.length > 0 && <Items items={d.items} d={d} grouped canRemove={editing && iCoordinate && Boolean(d.plan) && d.chain?.state !== 'released'}
+                canEdit={editing && iCoordinate && d.chain?.state !== 'released'}
+                onScope={(item, scope) => void run(scope === 'group' ? 'Splitting it between everyone…' : 'Making it per person…', async () => { await S.setItemScope(id, item.item_id, scope); await refreshPact(id) })}
+                onRemove={(item) => setSheet({ kind: 'removeItem', item })} />}
             </div>
           )}
 
-          {d && d.items.length > 0 && (
-            <div className="l-about">
-              <div className="l-section-title">Plan</div>
-              <Items items={d.items} d={d} canRemove={iCoordinate && Boolean(d.plan) && d.chain?.state !== 'released'}
-                canEdit={iCoordinate && d.chain?.state !== 'released'}
-                onScope={(item, scope) => void run(scope === 'group' ? 'Splitting it between everyone…' : 'Making it per person…', async () => { await S.setItemScope(id, item.item_id, scope); await refreshPact(id) })}
-                onRemove={(item) => setSheet({ kind: 'removeItem', item })} />
-            </div>
+          {/* Past votes: what the group already decided. Open votes are in Pact Chat. */}
+          {d && pact && polls.some((p) => p.status !== 'open') && (
+            <PastVotes polls={polls.filter((p) => p.status !== 'open').sort((x, y) => y.created_at.localeCompare(x.created_at))}
+              me={me} members={d.members} pact={pact} iCoordinate={iCoordinate} locked={Boolean(d.plan)} onChanged={reloadSide} />
           )}
 
           {d && tab?.pending && tab.pending.length > 0 && (
@@ -362,7 +396,7 @@ export function PactPage({ id }: { id: string }) {
           <div className="l-card l-status">
             <h3>You have {S.dollars(Number(d.chain.myRefund.amount))} to take back</h3>
             <p>The collection was cancelled, so the share you paid is yours again. It goes straight back to your wallet.</p>
-            <button className="l-btn" type="button" onClick={() => setSheet({ kind: 'action', action: 'claim_refund' })}>Take back {S.dollars(Number(d.chain.myRefund.amount))}</button>
+            <button className="l-btn l-glow" type="button" onClick={() => setSheet({ kind: 'action', action: 'claim_refund' })}>Take back {S.dollars(Number(d.chain.myRefund.amount))}</button>
           </div>
         )}
         {d && step && !finished && <WaitingCard d={d} me={me} step={step} hasGrok={hasGrok} working={working} onAct={doStep} />}
@@ -508,16 +542,19 @@ function Progress({ step }: { step: S.Step }) {
   )
 }
 
-function Items({ items, d, canRemove, onRemove, canEdit, onScope }: {
+function Items({ items, d, canRemove, onRemove, canEdit, onScope, grouped }: {
   items: S.Item[]; d?: S.PactData; canRemove?: boolean; onRemove?: (item: S.Item) => void
-  canEdit?: boolean; onScope?: (item: S.Item, scope: 'each' | 'group') => void
+  canEdit?: boolean; onScope?: (item: S.Item, scope: 'each' | 'group') => void; grouped?: boolean
 }) {
+  const dayOf = (i: S.Item) => (i.starts_on ? new Date(`${i.starts_on}T12:00:00`).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) : 'Any time')
   const people = d?.members.length ?? 1
   const total = S.itemsTotal(items, people)
   return (
     <div style={{ marginTop: 6 }}>
-      {items.map((i) => (
-        <div className="l-item" key={i.item_id}>
+      {items.map((i, n) => (
+        <Fragment key={i.item_id}>
+        {grouped && (n === 0 || dayOf(items[n - 1]) !== dayOf(i)) && <div className="l-itinerary-day">{dayOf(i)}</div>}
+        <div className="l-item">
           <div className="l-item-icon"><Icon name={i.kind} /></div>
           <div style={{ minWidth: 0 }}><b>{i.title}</b><span>{[S.itemTitle(i.kind), S.dateRange(i.starts_on, i.ends_on), i.location].filter(Boolean).join(' · ')}</span></div>
           {i.price_each != null && <span className="l-item-price" title={S.priceText(i, people) ?? ''}>
@@ -532,6 +569,7 @@ function Items({ items, d, canRemove, onRemove, canEdit, onScope }: {
           {i.link && <a className="l-icon-btn" href={i.link} target="_blank" rel="noreferrer" aria-label="Open link"><Icon name="link" /></a>}
           {canRemove && onRemove && <button className="l-icon-btn" type="button" aria-label={`Remove ${i.title}`} title="Remove from the plan" onClick={() => onRemove(i)}><Icon name="x" /></button>}
         </div>
+        </Fragment>
       ))}
       {total != null && <div className="l-item"><b style={{ flex: 1 }}>Each person pays</b><span className="l-item-price">{S.dollars(total)}</span></div>}
     </div>
@@ -571,7 +609,9 @@ function Chat({ messages, recs, onGrok, me, name, members, polls, pact, iCoordin
           : <FoundSummary key={e.poll.poll_id} found={e.poll} votes={Object.keys(e.poll.votes).length} onOpen={onSeeFindings} />]
         const m = e.m
         const found = S.parseOptions(m.body)
-        if (found) return [divider, <FoundSummary key={m.message_id} found={found} onOpen={onSeeFindings} />]
+        if (found) return [divider, pact
+          ? <MessageOptions key={m.message_id} id={pact.pact_id} found={found} onStarted={onVoted} />
+          : <FoundSummary key={m.message_id} found={found} onOpen={onSeeFindings} />]
         const mine = m.sender_id === me
         const first = newDay || prev?.kind !== 'message' || prev.m.sender_id !== m.sender_id
         const who = members.find((x) => x.user_id === m.sender_id)
@@ -1325,8 +1365,8 @@ function ActionSheet({ id, action: first, d, iCoordinate, onClose }: { id: strin
     cancel: { title: 'Cancel collecting',
       text: chain?.needsReopen
         ? `Someone left, so the shares have to change. Cancelling lets everyone who paid take their ${S.dollars(share)} back. Then you reopen it at ${S.dollars(newShare)} each for the people still in.`
-        : `Everyone who paid can take their ${S.dollars(share)} back. You can reopen it afterwards.`,
-      button: 'Cancel collecting' },
+        : `Everyone who paid can take their ${S.dollars(share)} back. You can reopen it afterwards. You'll confirm with your PIN.`,
+      button: 'Cancel and refund · confirm with PIN' },
     claim_refund: { title: 'Take your share back', text: `The collection was cancelled. Take back the ${S.dollars(refund)} you paid in. It goes straight to your wallet.`, button: `Take back ${S.dollars(refund)}` },
     pay_share: { title: 'Approve your share', text: `Pay ${S.dollars(share)} into the pact. It's held until everyone has paid, then goes to the coordinator.`, button: `Approve ${S.dollars(share)}` },
     release: { title: 'Finalise and book', text: `Everyone has paid. Release ${S.dollars(total)} to yourself, then book it.`, button: `Finalise · ${S.dollars(total)}` },
@@ -1373,7 +1413,13 @@ function ActionSheet({ id, action: first, d, iCoordinate, onClose }: { id: strin
         {state === 'done' || alreadyOpen ? <button className="l-btn l-wide-btn" type="button" onClick={() => { void refreshPact(id); onClose() }}>Done</button>
           : state === 'busy' ? <Busy text="Confirm with your PIN, then Arc confirms it…" />
           : <button className="l-btn l-wide-btn" type="button" disabled={action !== 'pay_share' && action !== 'claim_refund' && !iCoordinate}
-              onClick={async () => { setState('busy'); setError(null); try { await S.pactAction(action, id); await refreshPact(id); setWallet(await S.loadWallet()); setState('done') } catch (e) { const msg = (e as Error).message ?? ''; if (/already (on chain|started|open)/i.test(msg)) { await refreshPact(id); setState('done'); return } setError(msg || "That didn't go through. Try again."); setState('idle') } }}>{copy.button}</button>}
+              onClick={async () => { setState('busy'); setError(null); try {
+                await S.pactAction(action, id)
+                if (action === 'cancel' && chain) {
+                  const paid = chain.members.filter((m) => m.paid).map((m) => (m.userId === me ? 'you' : S.firstName(d.members.find((x) => x.user_id === m.userId)?.name)))
+                  if (paid.length) void S.send(id, `Pact Pilot: The collection was cancelled and everyone's money is still safe in the pact. ${paid.join(', ')}: open the pact and tap Take back ${S.dollars(share)} to get your share back.`).catch(() => undefined)
+                }
+                await refreshPact(id); setWallet(await S.loadWallet()); setState('done') } catch (e) { const msg = (e as Error).message ?? ''; if (/already (on chain|started|open)/i.test(msg)) { await refreshPact(id); setState('done'); return } setError(msg || "That didn't go through. Try again."); setState('idle') } }}>{copy.button}</button>}
       </div>
     </Modal>
   )
@@ -1381,6 +1427,84 @@ function ActionSheet({ id, action: first, d, iCoordinate, onClose }: { id: strin
 
 /** Send USDC to someone in the pact by who they are, not their address. Confirmed with my PIN, and a note goes in the
  *  chat. From Settle it's a payback (it counts on the tab); from Send money it's a plain send. */
+/** The pact's own money, newest first: who paid in, sends between members, the release, refunds. Each opens on Arc. */
+function PactActivity({ moves, me, members, hostId }: { moves: S.PactMove[]; me: string; members: S.Member[]; hostId: string | null }) {
+  const [all, setAll] = useState(false)
+  const who = (u: string | null) => (!u ? 'Someone' : u === me ? 'You' : S.firstName(members.find((m) => m.user_id === u)?.name))
+  const amt = (n: number | null) => (n == null ? '' : S.dollars(n))
+  const line = (m: S.PactMove) => {
+    switch (m.kind) {
+      case 'paid': return { icon: 'down', text: `${who(m.from)} paid ${amt(m.amount)} in`, tone: 'in' }
+      case 'sent': return { icon: 'up', text: `${who(m.from)} sent ${who(m.to)} ${amt(m.amount)}`, tone: 'out' }
+      case 'released': return { icon: 'checkCircle', text: `${amt(m.amount) || 'The total'} released to ${who(hostId)}`, tone: 'in' }
+      case 'cancelled': return { icon: 'x', text: 'Collection cancelled', tone: 'mute' }
+      case 'refunded': return { icon: 'up', text: `${who(m.to)} took back ${amt(m.amount)}`, tone: 'out' }
+    }
+  }
+  const shown = all ? moves : moves.slice(0, 5)
+  return (
+    <div className="l-pact-activity">
+      <span className="l-pilot-presets-label">Pact activity</span>
+      {shown.map((m) => {
+        const l = line(m)
+        const when = new Date(m.at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+        const body = <><span className={`l-pact-activity-icon ${l.tone}`}><Icon name={l.icon} size={13} /></span><span className="l-pact-activity-text">{l.text}</span><small>{when}</small></>
+        return m.tx
+          ? <a key={m.key} className="l-pact-activity-row" href={S.txLink(m.tx)} target="_blank" rel="noreferrer" title="See it on the Arc explorer">{body}</a>
+          : <div key={m.key} className="l-pact-activity-row">{body}</div>
+      })}
+      {moves.length > 5 && <button type="button" className="l-link-btn" onClick={() => setAll((a) => !a)}>{all ? 'Show less' : `Show all ${moves.length}`}</button>}
+    </div>
+  )
+}
+
+/** Where the itinerary is up to, in one chip. */
+function itineraryStatus(step: S.Step): { text: string; tone: 'go' | 'warn' | 'mute' } {
+  switch (step.kind) {
+    case 'done': return { text: 'Booked ✓', tone: 'go' }
+    case 'cancelled': case 'reopen': return { text: 'Cancelled · refunds open', tone: 'mute' }
+    case 'approve': case 'waitingApprovals': return { text: 'Up for approval', tone: 'warn' }
+    case 'needsWallet': case 'settingUp': case 'waitSetup': case 'startCollecting': case 'waitStart': case 'checking': return { text: 'Approved · ready to collect', tone: 'warn' }
+    case 'pay': case 'waitPay': return { text: 'Collecting', tone: 'warn' }
+    case 'reallocate': case 'waitReopen': return { text: 'Changing the split', tone: 'warn' }
+    case 'finalise': case 'waitFinalise': return { text: 'Paid · ready to book', tone: 'go' }
+    default: return { text: 'Picked · not booked yet', tone: 'mute' }
+  }
+}
+
+/** Votes the group already decided, newest first: one line each with the winner; tap to see every option. */
+function PastVotes({ polls, me, members, pact, iCoordinate, locked, onChanged }: {
+  polls: S.Poll[]; me: string; members: S.Member[]; pact: S.Pact; iCoordinate: boolean; locked: boolean; onChanged: () => void
+}) {
+  const [open, setOpen] = useState<string | null>(null)
+  return (
+    <div className="l-about">
+      <div className="l-section-title">Past votes</div>
+      {polls.map((p) => {
+        const count = (key: string) => Object.values(p.votes).filter((v) => v === key).length
+        const winner = p.options.find((o) => o.key === p.winner_key) ?? [...p.options].sort((a, b) => count(b.key) - count(a.key))[0]
+        const total = Object.keys(p.votes).length
+        return (
+          <Fragment key={p.poll_id}>
+            <button type="button" className="l-item l-past-vote" onClick={() => setOpen(open === p.poll_id ? null : p.poll_id)} aria-expanded={open === p.poll_id}>
+              <div className="l-item-icon"><Icon name="checkCircle" /></div>
+              <div style={{ minWidth: 0, flex: 1, textAlign: 'left' }}>
+                <b>{p.title}</b>
+                <span>{winner && count(winner.key) > 0 ? `Picked ${winner.name}` : 'No pick'} · {total} {total === 1 ? 'vote' : 'votes'} · {new Date(p.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>
+              </div>
+              <Icon name={open === p.poll_id ? 'up' : 'down'} size={16} />
+            </button>
+            {open === p.poll_id && (
+              <PollCard poll={p} me={me} members={members} pact={pact} iCoordinate={iCoordinate} locked={locked} canSend={false} compact
+                onVoted={onChanged} onAddedToPlan={onChanged} onRetry={() => undefined} />
+            )}
+          </Fragment>
+        )
+      })}
+    </div>
+  )
+}
+
 /** Take an item off a plan that's already split. Says exactly what happens to the money before you confirm. */
 function RemoveItemSheet({ id, item, d, me, onClose, onDone }: {
   id: string; item: S.Item; d: S.PactData; me: string; onClose: () => void; onDone: (cancelNow: boolean) => void
@@ -1408,7 +1532,11 @@ function RemoveItemSheet({ id, item, d, me, onClose, onDone }: {
           onClick={async () => {
             setBusy(true); setError(null)
             try { const r = await S.removePlanItem(id, item.item_id); onDone(Boolean(r?.reopen && open)) }
-            catch (e) { setError((e as Error).message); setBusy(false) }
+            catch (e) {
+              // Someone else (or another tab) already removed it: refresh so it leaves the plan, and close.
+              if (/already gone/i.test((e as Error).message)) return onDone(false)
+              setError((e as Error).message); setBusy(false)
+            }
           }}>{busy ? 'Removing…' : open ? 'Remove and cancel the collection' : `Remove · ${S.dollars(next)} each`}</button>
         <button className="l-btn l-ghost" type="button" disabled={busy} onClick={onClose}>Keep it</button>
       </div>
@@ -1710,7 +1838,8 @@ function PollCard({ poll, me, members, pact, iCoordinate, locked, canSend, compa
     } catch (e) { setError((e as Error).message); setMineNow(undefined) }
     setBusy(null)
   }
-  const canRemove = open && !poll.winner_key && (iCoordinate || poll.created_by === me)
+  // The coordinator or whoever started it can clear a vote away, open or decided. Try again is only for open ones.
+  const canRemove = iCoordinate || poll.created_by === me
   const decidedOnce = useRef(false)
   useEffect(() => {
     if (!open || decidedOnce.current || top * 2 <= members.length) return
@@ -1744,9 +1873,9 @@ function PollCard({ poll, me, members, pact, iCoordinate, locked, canSend, compa
         {/* Not a good set? Try again searches for 3 different ones; the X just removes it. */}
         {canRemove && (
           <div className="l-poll-tools">
-            <button className="l-pill" type="button" disabled={Boolean(busy)} title="Remove this and find 3 different options"
-              onClick={() => void remove(true)}><Icon name="sparkles" size={14} />Try again</button>
-            <button className="l-x" type="button" disabled={Boolean(busy)} aria-label="Remove this vote" title="Remove this vote"
+            {open && <button className="l-pill" type="button" disabled={Boolean(busy)} title="Remove this and find 3 different options"
+              onClick={() => void remove(true)}><Icon name="sparkles" size={14} />Try again</button>}
+            <button className="l-x" type="button" disabled={Boolean(busy)} aria-label="Remove this vote" title={open ? 'Remove this vote' : 'Clear this vote away (its pick stays on the plan)'}
               onClick={() => void remove(false)}><Icon name="x" size={15} /></button>
           </div>
         )}

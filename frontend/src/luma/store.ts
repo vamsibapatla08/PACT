@@ -1,6 +1,6 @@
 // The iOS app's logic, ported for the web: the same tables, functions and steps as ios/Pact_App/Core.
 import { supabase as maybeClient } from '../lib/supabase'
-import { createPactMoneyWallet, runPactAction, sendPactMoney } from '../lib/pactMoneyService'
+import { createPactMoneyWallet, PactVerificationError, runPactAction, sendPactMoney } from '../lib/pactMoneyService'
 
 export const supabase = maybeClient!
 
@@ -478,7 +478,10 @@ export async function setUpSplit(id: string, d: PactData, wallet: Wallet) {
 export type MoneyAction = 'create_pact' | 'pay_share' | 'release' | 'cancel' | 'claim_refund'
 export async function pactAction(action: MoneyAction, id: string) {
   try { return await runPactAction(action, id) }
-  catch (e) { throw new Error(said(e, "That didn't go through.")) }
+  catch (e) {
+    if (e instanceof PactVerificationError && e.pending) return // done on Arc; the record catches up on its own
+    throw new Error(said(e, "That didn't go through."))
+  }
 }
 
 // ---- Details, people and items
@@ -857,6 +860,42 @@ const EXPLORER = 'https://explorer.testnet.arc.io'
 const USDC_TOKEN = '0x3600000000000000000000000000000000000000'
 export const txLink = (hash: string) => `${EXPLORER}/tx/${hash}`
 
+/** One money movement inside this pact. */
+export type PactMove = {
+  key: string; at: string; amount: number | null; tx: string | null
+  kind: 'paid' | 'released' | 'cancelled' | 'refunded' | 'sent'
+  from: string | null; to: string | null
+}
+
+/** Every money movement in this pact only, newest first: shares paid in, paybacks and sends between members, the
+ *  release to the coordinator, a cancel and the refunds. Nothing from outside the pact. */
+export async function loadPactActivity(id: string, chainShare?: number | null): Promise<PactMove[]> {
+  const [{ data: events }, { data: shares }, { data: transfers }] = await Promise.all([
+    supabase.from('pact_payment_events').select('event_id, event_type, user_id, amount_usdc, tx_hash, created_at').eq('pact_id', id),
+    supabase.from('pact_shares').select('share_id, user_id, status, amount_usdc, tx_hash, paid_at, refunded_at').eq('pact_id', id),
+    supabase.from('pact_transfers').select('transfer_id, sender_id, recipient_id, amount_usdc, tx_hash, status, created_at').eq('pact_id', id).eq('status', 'confirmed'),
+  ])
+  const moves: PactMove[] = []
+  const seen = new Set<string>()
+  for (const e of events ?? []) {
+    const kind = (['paid', 'released', 'cancelled', 'refunded'] as const).find((k) => k === e.event_type)
+    if (!kind) continue
+    if (kind === 'paid' && e.user_id) seen.add(`paid:${e.user_id}`)
+    if (kind === 'refunded' && e.user_id) seen.add(`refunded:${e.user_id}`)
+    moves.push({ key: `e${e.event_id}`, at: e.created_at, amount: e.amount_usdc == null ? null : Number(e.amount_usdc), tx: e.tx_hash ?? null, kind, from: kind === 'paid' ? e.user_id : null, to: kind === 'refunded' ? e.user_id : null })
+  }
+  // A share the app saw paid on chain before the event arrived still shows. The amount is the share PactSplit
+  // actually took (the chain), so a record saved before the plan changed can't show the wrong number.
+  for (const s of shares ?? []) {
+    if (s.paid_at && !seen.has(`paid:${s.user_id}`)) moves.push({ key: `s${s.share_id}`, at: s.paid_at, amount: chainShare ?? Number(s.amount_usdc), tx: s.tx_hash ?? null, kind: 'paid', from: s.user_id, to: null })
+    if (s.refunded_at && !seen.has(`refunded:${s.user_id}`)) moves.push({ key: `r${s.share_id}`, at: s.refunded_at, amount: chainShare ?? Number(s.amount_usdc), tx: null, kind: 'refunded', from: null, to: s.user_id })
+  }
+  for (const t of transfers ?? []) {
+    moves.push({ key: `t${t.transfer_id}`, at: t.created_at, amount: Number(t.amount_usdc), tx: t.tx_hash ?? null, kind: 'sent', from: t.sender_id, to: t.recipient_id })
+  }
+  return moves.sort((a, b) => b.at.localeCompare(a.at))
+}
+
 export type LedgerRow = {
   id: string
   at: string
@@ -864,6 +903,8 @@ export type LedgerRow = {
   amount: number
   /** Who it was with: a friend, a pact's PactSplit, test money, or an address nobody here knows. */
   kind: 'person' | 'share' | 'payout' | 'deposit' | 'address'
+  /** A payout that was a refund from a cancelled collection (PactSplit's claimRefund). */
+  refund?: boolean
   userId: string | null
   address: string
   txHash: string
@@ -946,6 +987,7 @@ export async function loadLedger(address: string, pactIds: string[]): Promise<Le
       input = res?.ok ? ((await res.json()) as ExplorerTx).raw_input ?? '' : ''
     }
     r.pactId = pactIdFromCall(input)
+    r.refund = input.toLowerCase().startsWith('0x71de2ffc') // claimRefund(bytes32)
   }))
   // Every transaction I send pays a small network fee in USDC.
   const fees = txs.filter((t) => t.from.hash.toLowerCase() === me).reduce((sum, t) => sum + Number(t.fee.value) / 1e18, 0)

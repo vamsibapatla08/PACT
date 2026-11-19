@@ -1687,3 +1687,25 @@ html, body { overscroll-behavior: none; }
 .l-poll-tools .l-x { width: 32px; height: 32px; flex: none; display: grid; place-items: center; border: 0; border-radius: 999px; cursor: pointer;
   color: var(--dim); background: rgba(255, 255, 255, 0.07); }
 .l-poll-tools .l-x:hover { color: var(--text, #fff); background: rgba(255, 255, 255, 0.13); }
+
+/* Pact activity: this pact's money only, under the people. */
+.l-pact-activity { display: grid; gap: 4px; margin-top: 18px; }
+.l-pact-activity .l-pilot-presets-label { margin-bottom: 4px; }
+.l-pact-activity-row { display: flex; align-items: center; gap: 10px; padding: 7px 8px; border-radius: 12px; color: inherit; text-decoration: none; font-size: 13.5px; }
+a.l-pact-activity-row:hover { background: rgba(255, 255, 255, 0.06); }
+.l-pact-activity-row small { margin-left: auto; color: var(--dim); font-size: 12px; flex: none; }
+.l-pact-activity-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.l-pact-activity-icon { width: 24px; height: 24px; flex: none; display: grid; place-items: center; border-radius: 999px; background: rgba(255, 255, 255, 0.07); color: var(--dim); }
+.l-pact-activity-icon.in { color: var(--go, #3ecf8e); background: rgba(62, 207, 142, 0.12); }
+.l-pact-activity-icon.out { color: #f0a35e; background: rgba(240, 163, 94, 0.12); }
+
+/* Itinerary: the plan as a dated list with where it's up to. */
+.l-itinerary-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.l-itinerary-status { font-size: 12px; font-weight: 700; padding: 4px 10px; border-radius: 999px; background: rgba(255, 255, 255, 0.07); color: var(--dim); white-space: nowrap; }
+.l-itinerary-status.go { color: var(--go, #3ecf8e); background: rgba(62, 207, 142, 0.12); }
+.l-itinerary-status.warn { color: #f0c35e; background: rgba(240, 195, 94, 0.12); }
+.l-itinerary-day { margin: 14px 0 2px; font-size: 12px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--dim); }
+.l-past-vote { width: 100%; border: 0; background: none; color: inherit; font: inherit; cursor: pointer; text-align: left; }
+.l-past-vote:hover { background: rgba(255, 255, 255, 0.04); }
+
+.l-itinerary-edit { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin: 8px 0 4px; padding: 10px 12px; border-radius: 14px; background: rgba(255, 255, 255, 0.05); font-size: 13.5px; }
