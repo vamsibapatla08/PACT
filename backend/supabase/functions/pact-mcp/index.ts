@@ -489,9 +489,9 @@ async function handle(msg: Json, me: Me) {
 // The client registers, sends the person to /authorize, which hands over to the Pact app. They sign in with Google
 // and approve there, and the app sends them back with a one-time code. /token swaps the code for a pact_ token.
 
-// The connector lives on the Pact site (pact-chi-nine.vercel.app/mcp), which forwards to this function. That way the
+// The connector lives on the Pact site (getpact.space/mcp), which forwards to this function. That way the
 // sign-in details sit at the root of a domain we own (/.well-known/…), where Grok and other apps look for them.
-const APP_URL = (Deno.env.get('PACT_APP_URL') ?? 'https://pact-chi-nine.vercel.app').replace(/\/$/, '')
+const APP_URL = (Deno.env.get('PACT_APP_URL') ?? 'https://getpact.space').replace(/\/$/, '')
 const BASE = (Deno.env.get('PACT_MCP_URL') ?? `${APP_URL}/mcp`).replace(/\/$/, '')
 const ISSUER = new URL(BASE).origin
 

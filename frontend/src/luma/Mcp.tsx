@@ -11,7 +11,7 @@ import { LiquidGold } from './LiquidGold'
 /** Where to download the Grok Bot app (by SpaceXAI and Cursor). VITE_GROK_BOT_URL overrides it. */
 export const GROK_BOT_URL = (import.meta.env.VITE_GROK_BOT_URL as string | undefined) || 'https://cursor.com/download/bot'
 
-export const MCP_URL = (import.meta.env.VITE_PACT_MCP_URL ?? 'https://pact-chi-nine.vercel.app/mcp').replace(/\/$/, '')
+export const MCP_URL = (import.meta.env.VITE_PACT_MCP_URL ?? 'https://getpact.space/mcp').replace(/\/$/, '')
 
 export type McpTool = { name: string; label: string; does: string; read?: boolean; detail: string; ask: string; result: string[] }
 

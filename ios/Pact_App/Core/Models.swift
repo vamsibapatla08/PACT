@@ -7,7 +7,7 @@ enum PactConfig {
     /// Google sends people back here after sign-in. It must be in Supabase's Auth redirect list.
     static let authRedirect = URL(string: "pact://login-callback")!
     /// The live web app, where invite links land.
-    static let web = URL(string: "https://pact-chi-nine.vercel.app")!
+    static let web = URL(string: "https://getpact.space")!
 }
 
 /// A row in `pacts`.

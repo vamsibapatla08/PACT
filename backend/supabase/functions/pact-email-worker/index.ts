@@ -53,7 +53,7 @@ type ItemRow = { title: string; starts_on: string | null; ends_on: string | null
 
 /** What the email says, built from the database at send time so it's never stale. */
 async function compose(db: Db, row: OutboxRow): Promise<Email> {
-  const appUrl = (Deno.env.get("PACT_APP_URL") ?? "https://pact-chi-nine.vercel.app").replace(/\/$/, "")
+  const appUrl = (Deno.env.get("PACT_APP_URL") ?? "https://getpact.space").replace(/\/$/, "")
   const { data: pact } = await db.from("pacts").select("name,location,starts_on,ends_on").eq("pact_id", row.pact_id).maybeSingle()
   const name = (pact?.name as string | undefined) ?? "Your pact"
   if (row.email_type === "pact_booked") {
