@@ -25,6 +25,26 @@ Deno.serve(async (req) => {
   if (!user) return reply({ error: 'Sign in first' }, 401)
   if (!API_KEY) return reply({ error: "Pact Pilot's voice isn't set up yet." }, 503)
 
+  // Speech to text: the app sends a recording as form data ("audio") and gets back what was said.
+  if ((req.headers.get('Content-Type') ?? '').startsWith('multipart/form-data')) {
+    const form = await req.formData().catch(() => null)
+    const audio = form?.get('audio')
+    if (!(audio instanceof File) || !audio.size) return reply({ error: 'No recording came through.' }, 400)
+    if (audio.size > 10_000_000) return reply({ error: 'That recording is too long. Keep it under a minute.' }, 413)
+    const out = new FormData()
+    out.append('model_id', Deno.env.get('ELEVENLABS_STT_MODEL_ID') ?? 'scribe_v1')
+    out.append('language_code', 'en')
+    out.append('tag_audio_events', 'false')
+    out.append('file', audio, audio.name || 'speech.webm')
+    const stt = await fetch('https://api.elevenlabs.io/v1/speech-to-text', { method: 'POST', headers: { 'xi-api-key': API_KEY }, body: out }).catch(() => null)
+    if (!stt?.ok) {
+      console.error('[pilot-voice] ElevenLabs STT', stt?.status, await stt?.text().catch(() => ''))
+      return reply({ error: "Couldn't hear that. Try again." }, 502)
+    }
+    const heard = await stt.json().catch(() => ({})) as { text?: unknown }
+    return reply({ text: typeof heard.text === 'string' ? heard.text.trim() : '' }, 200)
+  }
+
   const body = await req.json().catch(() => ({})) as { text?: unknown }
   // Speak the words, not the markdown.
   const text = typeof body.text === 'string' ? body.text.replace(/[*_#`>]/g, '').replace(/\s+/g, ' ').trim().slice(0, 1200) : ''

@@ -31,8 +31,8 @@ export function PilotCard({ id, me, members, onDone }: { id: string; me: string;
 }
 
 /** Pact Pilot's reply, and any changes it wants to make as one card you approve. Used by the Ask Pact Pilot card and by @Pilot in the chat. */
-export function PilotAnswerView({ id, me, members, answer, onDone, onDismiss }: {
-  id: string; me: string; members: S.Member[]; answer: S.PilotAnswer; onDone: () => void; onDismiss: () => void
+export function PilotAnswerView({ id, me, members, answer, onDone, onDismiss, onOpenChat }: {
+  id: string; me: string; members: S.Member[]; answer: S.PilotAnswer; onDone: () => void; onDismiss: () => void; onOpenChat?: () => void
 }) {
   const [working, setWorking] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -41,6 +41,13 @@ export function PilotAnswerView({ id, me, members, answer, onDone, onDismiss }: 
   return (
     <div className="l-tab-answer">
       <ReplyText text={answer.reply} />
+      {answer.poll && (
+        <div className="l-pilot-plan">
+          <span className="l-dim">Vote started · {answer.poll.title}</span>
+          <ul>{answer.poll.options.map((o, i) => <li key={i}>{o.name}{o.price_each != null ? ` · ${S.dollars(o.price_each)} each` : ''}</li>)}</ul>
+          {onOpenChat && <div className="l-pilot-buttons"><button className="l-btn l-small" type="button" onClick={onOpenChat}>See the vote in Pact Chat</button></div>}
+        </div>
+      )}
       {changes.length > 0 && (
         <div className="l-pilot-plan">
           <span className="l-dim">Pact Pilot wants to</span>

@@ -530,8 +530,22 @@ async function pactStatus(userId: string, userJwt: string, pactId: unknown) {
       p_paid_user_ids: members.filter((m) => m.paid).map((m) => m.userId),
     })
     if (syncError) console.error('sync_pact_chain_status failed', syncError)
+    // A new payment or the release may have queued emails (receipts, "You're booked"). Wake the worker now.
+    else if (pact.state !== 'none') wakeEmailWorker()
   }
   return reply(200, view)
+}
+
+/** Ask the email worker to send whatever is queued. Fire and forget: a failed wake never breaks the request. */
+function wakeEmailWorker() {
+  const token = Deno.env.get('PACT_EMAIL_WORKER_TOKEN')
+  const url = Deno.env.get('SUPABASE_URL')
+  if (!token || !url) return
+  const sent = fetch(`${url}/functions/v1/pact-email-worker`, { method: 'POST', headers: { Authorization: `Bearer ${token}` } })
+    .then((r) => { if (!r.ok) console.error('pact-email-worker wake failed', r.status) })
+    .catch((e) => console.error('pact-email-worker wake failed', e))
+  // Keep the function alive until the wake lands.
+  ;(globalThis as { EdgeRuntime?: { waitUntil(p: Promise<unknown>): void } }).EdgeRuntime?.waitUntil(sent)
 }
 
 // Read only, so no PIN. Each member's saved wallet address, so the app can show who can be paid.

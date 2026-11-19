@@ -352,10 +352,20 @@ async function createDecision(id: string, question: string, recommendationId: st
 
 /** Pact Pilot reads the chat, writes up the one thing to book, and it goes to everyone to approve. */
 export async function askGrokToBook(id: string, me: string, pact: Pact, messages: Message[], name: (id: string) => string) {
+  // A vote the group already ticked is the clearest answer: the leading option goes on the plan and up for approval,
+  // with no need for Pact Pilot to read the chat.
+  const voted = (await loadPolls(id)).filter((p) => p.status === 'open' && Object.keys(p.votes).length > 0).at(-1)
+  if (voted) {
+    const count = (key: string) => Object.values(voted.votes).filter((v) => v === key).length
+    const leader = [...voted.options].sort((a, b) => count(b.key) - count(a.key))[0]
+    await addPollPickToPlan(pact, voted, leader)
+    const fresh = await loadPactData(id, me)
+    return bookItems(id, pact, fresh.items, me)
+  }
   await askPilot(id, bookingQuestion, messages, name)
   const d = await loadPactData(id, me)
   const b = booking(d)
-  if (!b) throw new Error("Pact Pilot couldn't find one thing you've agreed to book yet. Agree on it in the chat, with the link and price, then try again.")
+  if (!b) throw new Error("Nothing's agreed to book yet. Ask Pact Pilot to put a few options to a vote, or say in the chat what to book with the link and price.")
   if (consent(d, b)) return
   await createDecision(id, b.question, b.rec.recommendation_id)
   await importFromGrok(pact, d, me)
@@ -444,6 +454,18 @@ export async function createPact(name: string, d: Details, friendIds: string[]) 
 export async function invite(id: string, userIds: string[]) {
   const { error } = await supabase.rpc('invite_to_pact', { p_pact_id: id, p_user_ids: userIds })
   if (error) throw new Error("Couldn't ask them in.")
+}
+
+/** The coordinator deletes the pact for everyone. */
+export async function deletePact(id: string) {
+  const { error } = await supabase.rpc('delete_pact', { p_pact_id: id })
+  if (error) throw new Error(/PGRST202|schema cache/i.test(error.message) ? 'Deleting needs the latest database update.' : (/P0001|42501/.test(error.code ?? '') ? error.message : "Couldn't delete the pact."))
+}
+
+/** Leave a pact. You can be asked back in later. */
+export async function leavePact(id: string) {
+  const { error } = await supabase.rpc('leave_pact', { p_pact_id: id })
+  if (error) throw new Error(/PGRST202|schema cache/i.test(error.message) ? 'Leaving needs the latest database update.' : (/P0001|42501/.test(error.code ?? '') ? error.message : "Couldn't leave the pact."))
 }
 
 export async function removeMember(id: string, userId: string) {
@@ -565,13 +587,24 @@ export async function closePoll(pollId: string) {
   if (error) throw new Error(/Only whoever/.test(error.message) ? error.message : "Couldn't close the vote.")
 }
 
-/** The picked option goes onto the plan as an item, priced per person, with its link. */
-export async function addPollPickToPlan(pact: Pact, poll: Poll, option: PollOption) {
-  await addItem(pact.pact_id, {
+/** The picked option goes onto the plan as an item, priced per person, with its link. Once the split is set up the
+ *  plan is locked, so it goes in as an extra for the group to approve instead. Returns true when it went in as an extra. */
+export async function addPollPickToPlan(pact: Pact, poll: Poll, option: PollOption, locked = false) {
+  const draft: ItemDraft = {
     kind: poll.kind, title: option.name, location: pact.location ?? '', startsOn: pact.starts_on, endsOn: pact.ends_on,
     link: option.link ?? '', price: option.price_each,
-  }, poll.source === 'grok' ? 'grok' : 'manual')
+  }
+  const source = poll.source === 'grok' ? 'grok' : 'manual'
+  let extra = locked
+  try { await addItem(pact.pact_id, draft, source, extra) }
+  catch (e) {
+    // The split was set up after this page last loaded: the plan is locked, so add it as an extra.
+    if (extra || !/add it as an extra/.test((e as Error).message)) throw e
+    extra = true
+    await addItem(pact.pact_id, draft, source, true)
+  }
   await closePoll(poll.poll_id).catch(() => undefined)
+  return extra
 }
 
 export async function removeItem(itemId: string) {
@@ -867,20 +900,44 @@ export async function sendTo(id: string, toUser: string, amountCents: number, re
 }
 
 /** Pact Pilot's answer read aloud by the ElevenLabs voice. Returns an audio clip to play. */
+/** What you said in a recording, written out by ElevenLabs speech to text. */
+export async function transcribe(clip: Blob): Promise<string> {
+  const { data: { session } } = await supabase.auth.getSession()
+  const url = import.meta.env.VITE_SUPABASE_URL?.trim()
+  const key = (import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || import.meta.env.VITE_SUPABASE_ANON_KEY)?.trim()
+  if (!session || !url || !key) throw new Error('Sign in to talk to Pact Pilot.')
+  const form = new FormData()
+  form.append('audio', clip, clip.type.includes('mp4') ? 'speech.mp4' : 'speech.webm')
+  const res = await fetch(`${url}/functions/v1/pilot-voice`, { method: 'POST', headers: { Authorization: `Bearer ${session.access_token}`, apikey: key }, body: form }).catch(() => null)
+  const out = res ? await res.json().catch(() => null) as { text?: string; error?: string } | null : null
+  if (!res?.ok || typeof out?.text !== 'string') throw new Error(out?.error && res?.status !== 400 ? out.error : "Couldn't hear that. Try again.")
+  return out.text
+}
+
 export async function speak(text: string): Promise<Blob> {
-  const { data, error } = await supabase.functions.invoke('pilot-voice', { body: { text: text.slice(0, 1200) } })
-  if (error || !(data instanceof Blob)) throw new Error("Pact Pilot's voice isn't available right now.")
-  return data
+  // Fetched directly, because functions.invoke reads an audio/mpeg reply as text and the clip comes back broken.
+  const { data: { session } } = await supabase.auth.getSession()
+  const url = import.meta.env.VITE_SUPABASE_URL?.trim()
+  const key = (import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || import.meta.env.VITE_SUPABASE_ANON_KEY)?.trim()
+  if (!session || !url || !key) throw new Error('Sign in to hear Pact Pilot.')
+  const res = await fetch(`${url}/functions/v1/pilot-voice`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${session.access_token}`, apikey: key, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text: text.slice(0, 1200) }),
+  }).catch(() => null)
+  const clip = res?.ok ? await res.blob() : null
+  if (!clip || !clip.size) throw new Error("Pact Pilot's voice isn't available right now.")
+  return clip.type ? clip : new Blob([clip], { type: 'audio/mpeg' })
 }
 
 export type PilotAction = { tool: string; args: Record<string, unknown> }
 /** Pact Pilot's reply, and the changes it wants to make. operationId is the saved plan the asker approves. */
-export type PilotAnswer = { reply: string; actions: PilotAction[]; operationId: string | null }
+export type PilotAnswer = { reply: string; actions: PilotAction[]; operationId: string | null; poll?: { title: string; options: { name: string; price_each: number | null }[] } | null }
 
 /** Ask Pact Pilot anything about the pact. It reads the tab and the plan, and proposes changes that only run once you approve. */
 export async function askGrok(id: string, question: string): Promise<PilotAnswer> {
-  const a = await invoke<{ reply?: string; summary?: string; actions?: PilotAction[]; operation_id?: string | null }>('pactpilot', { pact_id: id, question: question.slice(0, 2000), quick: question === summaryQuestion, idempotency_key: crypto.randomUUID() })
-  return { reply: a.reply ?? a.summary ?? '', actions: a.actions ?? [], operationId: a.operation_id ?? null }
+  const a = await invoke<{ reply?: string; summary?: string; actions?: PilotAction[]; operation_id?: string | null; poll?: PilotAnswer['poll'] }>('pactpilot', { pact_id: id, question: question.slice(0, 2000), quick: question === summaryQuestion, idempotency_key: crypto.randomUUID() })
+  return { reply: a.reply ?? a.summary ?? '', actions: a.actions ?? [], operationId: a.operation_id ?? null, poll: a.poll ?? null }
 }
 
 /** Your saved Pact Pilot conversation in this pact, oldest first. Empty if the history table isn't live yet. */

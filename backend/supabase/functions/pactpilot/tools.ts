@@ -145,9 +145,12 @@ export async function executePactPilotTool({ client, pactId, tool, args }: ToolI
     const rule = args.approval_rule === "unanimous" || args.approval_rule === "host" ? args.approval_rule : "majority"
     const recommendationId = args.recommendation_id == null ? null : args.recommendation_id
     if (!question || question.length > 2000 || options.length < 2 || options.length > 20 || (recommendationId !== null && !isUuid(recommendationId))) throw new Error("Invalid poll details")
-    const { data, error } = await client.rpc("create_pact_decision", { p_pact_id: pactId, p_question: question, p_options: options, p_approval_rule: rule, p_recommendation_id: recommendationId })
+    void rule
+    const cards = options.slice(0, 8).map((name) => ({ name: name.slice(0, 120), price_each: null, link: null, notes: null }))
+    const kind = /hotel|stay|airbnb|room/i.test(question) ? "stay" : /flight|fly/i.test(question) ? "flight" : /dinner|restaurant|food|eat/i.test(question) ? "dinner" : /ticket|show|concert|event|game/i.test(question) ? "ticket" : "other"
+    const { data, error } = await client.rpc("create_pact_poll", { p_pact_id: pactId, p_title: question.slice(0, 120), p_options: cards, p_kind: kind, p_source: "grok" })
     if (error) throw new Error(error.message)
-    return { tool, status: "completed", decision_id: data }
+    return { tool, status: "completed", poll_id: data }
   }
 
   if (tool === "publish_action_card") {

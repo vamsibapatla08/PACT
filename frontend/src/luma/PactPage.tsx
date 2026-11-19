@@ -247,7 +247,7 @@ export function PactPage({ id }: { id: string }) {
             <div className="l-findings" ref={findingsRef}>
               <div className="l-section-title">Findings</div>
               {[...polls].sort((x, y) => Number(y.status === 'open') - Number(x.status === 'open') || y.created_at.localeCompare(x.created_at)).map((poll) => (
-                <PollCard key={poll.poll_id} poll={poll} me={me} members={d.members} pact={pact} iCoordinate={iCoordinate}
+                <PollCard key={poll.poll_id} poll={poll} me={me} members={d.members} pact={pact} iCoordinate={iCoordinate} locked={Boolean(d.plan)}
                   onVoted={reloadSide} onAddedToPlan={() => { reloadSide(); void refreshPact(id) }} />
               ))}
               {messageFindings.map((f) => <MessageOptions key={f.m.message_id} id={id} found={f.found} onStarted={reloadSide} />)}
@@ -302,7 +302,7 @@ export function PactPage({ id }: { id: string }) {
         {d && d.recommendations.length > 0 && (
           <GrokBlock rec={d.recommendations[d.recommendations.length - 1]} big onOpen={(rec) => setSheet({ kind: 'summary', rec })} />
         )}
-        <Chat messages={messages} me={me} name={name} members={d?.members ?? []} polls={polls} pact={pact} iCoordinate={iCoordinate}
+        <Chat messages={messages} me={me} name={name} members={d?.members ?? []} polls={polls} pact={pact} iCoordinate={iCoordinate} locked={Boolean(d?.plan)}
           onVoted={reloadSide} onAddedToPlan={() => { reloadSide(); void refreshPact(id) }}
           onSeeFindings={() => findingsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
           recs={(d?.recommendations ?? []).slice(0, -1)} onGrok={(rec) => setSheet({ kind: 'summary', rec })} />
@@ -460,9 +460,9 @@ function Items({ items }: { items: S.Item[] }) {
   )
 }
 
-function Chat({ messages, recs, onGrok, me, name, members, polls, onSeeFindings }: {
+function Chat({ messages, recs, onGrok, me, name, members, polls, pact, iCoordinate, locked, onVoted, onAddedToPlan, onSeeFindings }: {
   messages: S.Message[]; recs: S.Recommendation[]; onGrok: (rec: S.Recommendation) => void; me: string; name: (id: string) => string; members: S.Member[]
-  polls: S.Poll[]; pact: S.Pact; iCoordinate: boolean; onVoted: () => void; onAddedToPlan: () => void; onSeeFindings: () => void
+  polls: S.Poll[]; pact: S.Pact | undefined; iCoordinate: boolean; locked: boolean; onVoted: () => void; onAddedToPlan: () => void; onSeeFindings: () => void
 }) {
   const end = useRef<HTMLDivElement>(null)
   const seen = useRef<number | null>(null)
@@ -486,7 +486,10 @@ function Chat({ messages, recs, onGrok, me, name, members, polls, onSeeFindings 
         const newDay = !prev || new Date(prev.at).toDateString() !== new Date(e.at).toDateString()
         const divider = newDay && <div className="l-chat-day" key={`d${i}`}><span>{day}</span></div>
         if (e.kind === 'grok') return [divider, <GrokBlock key={e.rec.recommendation_id} rec={e.rec} onOpen={onGrok} />]
-        if (e.kind === 'poll') return [divider, <FoundSummary key={e.poll.poll_id} found={e.poll} votes={Object.keys(e.poll.votes).length} onOpen={onSeeFindings} />]
+        // A vote shows right in the chat as cards everyone can tick, the same as in Findings.
+        if (e.kind === 'poll') return [divider, pact
+          ? <PollCard key={e.poll.poll_id} poll={e.poll} me={me} members={members} pact={pact} iCoordinate={iCoordinate} locked={locked} compact onVoted={onVoted} onAddedToPlan={onAddedToPlan} />
+          : <FoundSummary key={e.poll.poll_id} found={e.poll} votes={Object.keys(e.poll.votes).length} onOpen={onSeeFindings} />]
         const m = e.m
         const found = S.parseOptions(m.body)
         if (found) return [divider, <FoundSummary key={m.message_id} found={found} onOpen={onSeeFindings} />]
@@ -580,6 +583,67 @@ function useDictation(onText: (text: string) => void) {
   return { supported: Boolean(Speech), listening, failure, start, stop, clear: () => setFailure(null) }
 }
 
+/** Talk to Pact Pilot: records you, stops by itself when you pause, and ElevenLabs writes down what you said.
+ *  Works in any browser with a microphone, unlike the browser's own voice typing. */
+function useVoiceRecorder(onHeard: (text: string) => void) {
+  const supported = typeof MediaRecorder !== 'undefined' && Boolean(navigator.mediaDevices?.getUserMedia)
+  const [state, setState] = useState<'idle' | 'listening' | 'hearing'>('idle')
+  const [failure, setFailure] = useState<string | null>(null)
+  const stopNow = useRef<(() => void) | null>(null)
+  const heard = useRef(onHeard)
+  heard.current = onHeard
+  useEffect(() => () => stopNow.current?.(), [])
+
+  async function start() {
+    if (state !== 'idle') return
+    setFailure(null)
+    let stream: MediaStream
+    try { stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } }) }
+    catch (e) { setFailure((e as DOMException).name === 'NotFoundError' ? speechMessages['audio-capture'] : speechMessages['not-allowed']); return }
+    const type = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4'].find((t) => MediaRecorder.isTypeSupported(t))
+    const recorder = new MediaRecorder(stream, type ? { mimeType: type } : undefined)
+    const chunks: Blob[] = []
+    recorder.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data) }
+
+    // Listen for a pause: once you've spoken, 1.4 seconds of quiet ends the recording. Nothing said in 8 seconds cancels it.
+    const ctx = new AudioContext()
+    const analyser = ctx.createAnalyser()
+    analyser.fftSize = 1024
+    ctx.createMediaStreamSource(stream).connect(analyser)
+    const samples = new Uint8Array(analyser.fftSize)
+    const began = performance.now()
+    let spoke = false
+    let lastLoud = began
+    let frame = 0
+    const watch = () => {
+      analyser.getByteTimeDomainData(samples)
+      let sum = 0
+      for (const s of samples) sum += ((s - 128) / 128) ** 2
+      const now = performance.now()
+      if (Math.sqrt(sum / samples.length) > 0.035) { spoke = true; lastLoud = now }
+      if ((spoke && now - lastLoud > 1400) || (!spoke && now - began > 8000) || now - began > 45000) return void finish()
+      frame = requestAnimationFrame(watch)
+    }
+    const finish = () => { if (recorder.state !== 'inactive') recorder.stop() }
+    recorder.onstop = async () => {
+      cancelAnimationFrame(frame)
+      stream.getTracks().forEach((t) => t.stop())
+      void ctx.close()
+      stopNow.current = null
+      if (!spoke || !chunks.length) { setState('idle'); setFailure("Didn't hear anything. Tap the mic and talk."); return }
+      setState('hearing')
+      try { heard.current((await S.transcribe(new Blob(chunks, { type: recorder.mimeType || 'audio/webm' }))).trim()) }
+      catch (e) { setFailure((e as Error).message) }
+      setState('idle')
+    }
+    stopNow.current = finish
+    recorder.start()
+    setState('listening')
+    frame = requestAnimationFrame(watch)
+  }
+  return { supported, state, failure, start, stop: () => stopNow.current?.(), clear: () => setFailure(null) }
+}
+
 /** Pact Pilot, one to one: preset prompts, your questions and its answers, and voice (speak, and hear it answer).
  *  Its changes still need your Approve, and its status updates still show in Pact Chat. */
 const PILOT_PRESETS: { label: string; ask?: string; fill?: string; summary?: boolean }[] = [
@@ -600,6 +664,8 @@ function PilotPanel({ id, me, pact, d, queued, onChanged, onOpenChat }: {
   const [voiceOn, setVoiceOn] = useState(false)
   const [voiceError, setVoiceError] = useState<string | null>(null)
   const voice = useDictation(setText)
+  // Speak to Pact Pilot: what you say is asked straight away, and the answer is read back to you.
+  const talk = useVoiceRecorder((said) => { if (said) { setVoiceOn(true); void ask(said) } else setVoiceError("Didn't catch that. Try again.") })
   const box = useRef<HTMLTextAreaElement>(null)
   const end = useRef<HTMLDivElement>(null)
   const audio = useRef<HTMLAudioElement | null>(null)
@@ -641,6 +707,7 @@ function PilotPanel({ id, me, pact, d, queued, onChanged, onOpenChat }: {
     try {
       const answer = await S.askGrok(id, q)
       setLog((l) => l.map((x) => (x.key === key ? { ...x, answer } : x)))
+      if (answer.poll) onChanged() // the new vote shows in Pact Chat and Findings straight away
       void say(answer.reply)
     } catch (e) {
       setLog((l) => l.map((x) => (x.key === key ? { ...x, error: (e as Error).message || "Pact Pilot couldn't answer. Try again." } : x)))
@@ -675,7 +742,7 @@ function PilotPanel({ id, me, pact, d, queued, onChanged, onOpenChat }: {
                 {x.answer && <button className="l-x" type="button" title="Read it aloud" aria-label="Read it aloud" onClick={() => { const was = voiceOn; setVoiceOn(true); void (async () => { try { const clip = await S.speak(x.answer!.reply); audio.current?.pause(); const a = new Audio(URL.createObjectURL(clip)); audio.current = a; await a.play() } catch (e) { setVoiceError((e as Error).message) } setVoiceOn(was) })() }}><Icon name="wave" size={15} /></button>}
               </div>
               {x.answer && x.summary && <PactStats pact={pact} d={d} />}
-              {x.answer ? <PilotAnswerView id={id} me={me} members={members} answer={x.answer} onDone={onChanged} onDismiss={() => setLog((l) => l.filter((y) => y.key !== x.key))} />
+              {x.answer ? <PilotAnswerView id={id} me={me} members={members} answer={x.answer} onDone={onChanged} onOpenChat={onOpenChat} onDismiss={() => setLog((l) => l.filter((y) => y.key !== x.key))} />
                 : x.error ? <p className="l-error">{x.error}</p>
                 : <div className="l-grok-ask-busy"><span>Pact Pilot is thinking</span><span className="l-dots"><i /><i /><i /></span></div>}
             </div>
@@ -687,15 +754,23 @@ function PilotPanel({ id, me, pact, d, queued, onChanged, onOpenChat }: {
       <div className="l-pilot-presets">
         {PILOT_PRESETS.map((p) => <button key={p.label} type="button" className="l-pill" onClick={() => pick(p)}>{p.label}</button>)}
       </div>
-      {(voice.failure || voiceError) && <p className="l-error">{voice.failure ?? voiceError}</p>}
+      {(talk.failure || voice.failure || voiceError) && <p className="l-error">{talk.failure ?? voice.failure ?? voiceError}</p>}
       <form className="l-composer grok" onSubmit={(e) => { e.preventDefault(); void ask(text) }}>
-        <textarea ref={box} rows={1} value={text} placeholder={voice.listening ? 'Listening… speak now' : 'Ask Pact Pilot'} onChange={(e) => setText(e.target.value)}
+        <textarea ref={box} rows={1} value={text} placeholder={talk.state === 'listening' ? "Listening… pause when you're done" : talk.state === 'hearing' ? 'Writing down what you said…' : voice.listening ? 'Listening… speak now' : 'Ask Pact Pilot'} onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void ask(text) } }} />
+        {talk.supported ? (
+        <button type="button" className={talk.state !== 'idle' ? 'l-icon-btn l-mic on' : 'l-icon-btn l-mic'} disabled={talk.state === 'hearing'}
+          onClick={() => { if (talk.state === 'listening') talk.stop(); else { audio.current?.pause(); setVoiceError(null); setVoiceOn(true); void talk.start() } }}
+          aria-label={talk.state === 'listening' ? 'Done talking' : 'Talk to Pact Pilot'} title={talk.state === 'listening' ? 'Done talking' : 'Talk to Pact Pilot. It answers out loud.'}>
+          <Icon name={talk.state === 'idle' ? 'mic' : 'wave'} />
+        </button>
+        ) : (
         <button type="button" className={voice.listening ? 'l-icon-btn l-mic on' : 'l-icon-btn l-mic'}
           onClick={() => { if (voice.listening) { voice.stop(); void ask(text) } else { setVoiceOn(true); void voice.start(text) } }}
           aria-label={voice.listening ? 'Stop and ask' : 'Talk to Pact Pilot'} title={voice.listening ? 'Stop and ask' : 'Talk to Pact Pilot'}>
           <Icon name={voice.listening ? 'wave' : 'mic'} />
         </button>
+        )}
         <button type="submit" className="l-send" disabled={!text.trim()} aria-label="Ask Pact Pilot"><Icon name="up" /></button>
       </form>
     </div>
@@ -794,9 +869,10 @@ function Composer({ id, onAskGrok }: { id: string; onAskGrok: (question: string)
 }
 
 function Settings({ pact, d, onClose, onAddPeople, onAddItem }: { pact: S.Pact; d: S.PactData; onClose: () => void; onAddPeople: () => void; onAddItem: () => void }) {
-  const { me, refresh, refreshPact } = useApp()
+  const { me, refresh, refreshPact, go } = useApp()
   const iCoordinate = S.coordinator(d)?.user_id === me
   const locked = Boolean(d.plan)
+  const [confirming, setConfirming] = useState(false)
   const [editing, setEditing] = useState(false)
   const [details, setDetails] = useState(() => S.detailsOf(pact))
   const [error, setError] = useState<string | null>(null)
@@ -856,6 +932,30 @@ function Settings({ pact, d, onClose, onAddPeople, onAddItem }: { pact: S.Pact; 
         </div>
       )) : <p className="l-faint" style={{ fontSize: 14 }}>Nothing added yet. Add the stays, flights, tickets and dinners you're booking.</p>}
       {!locked && <button className="l-btn l-ghost l-wide-btn" style={{ marginTop: 12 }} type="button" onClick={onAddItem}><Icon name="plus" size={16} />Add to itinerary</button>}
+      {/* Leave (anyone) or delete (the coordinator). A second tap confirms, so nothing goes on a slip. */}
+      <div className="l-head" style={{ margin: '22px 0 6px' }}><b className="l-dim">{iCoordinate ? 'Delete this pact' : 'Leave this pact'}</b></div>
+      <p className="l-faint" style={{ fontSize: 13, margin: '0 0 10px' }}>
+        {iCoordinate ? 'Deletes the chat, plan, votes and tab for everyone. This can’t be undone.' : 'You leave the chat and the plan. Someone can ask you back in later.'}
+      </p>
+      {confirming ? (
+        <div className="l-pilot-buttons">
+          <button className="l-btn l-danger" type="button" disabled={busy} style={{ background: '#d93b3b', color: '#fff' }}
+            onClick={() => void (async () => {
+              setBusy(true); setError(null)
+              try {
+                await (iCoordinate ? S.deletePact(pact.pact_id) : S.leavePact(pact.pact_id))
+                onClose(); go('/pacts'); void refresh()
+              } catch (e) { setError((e as Error).message); setConfirming(false); setBusy(false) }
+            })()}>
+            {busy ? (iCoordinate ? 'Deleting…' : 'Leaving…') : iCoordinate ? `Yes, delete ${pact.name}` : `Yes, leave ${pact.name}`}
+          </button>
+          <button className="l-btn l-ghost" type="button" disabled={busy} onClick={() => setConfirming(false)}>Cancel</button>
+        </div>
+      ) : (
+        <button className="l-btn l-ghost l-wide-btn" type="button" style={{ color: '#ff6b6b' }} onClick={() => { setError(null); setConfirming(true) }}>
+          {iCoordinate ? 'Delete pact' : 'Leave pact'}
+        </button>
+      )}
       {error && <p className="l-error">{error}</p>}
     </Modal>
   )
@@ -1351,9 +1451,10 @@ function OptionGrid({ options, title, compact, renderFoot }: {
 
 /** A vote: the options as cards, tap Vote on one (tap again to take it back), live counts and faces, and Approve for
  *  the coordinator on the one that's ahead. */
-function PollCard({ poll, me, members, pact, iCoordinate, onVoted, onAddedToPlan }: {
-  poll: S.Poll; me: string; members: S.Member[]; pact: S.Pact; iCoordinate: boolean; onVoted: () => void; onAddedToPlan: () => void
+function PollCard({ poll, me, members, pact, iCoordinate, locked, compact, onVoted, onAddedToPlan }: {
+  poll: S.Poll; me: string; members: S.Member[]; pact: S.Pact; iCoordinate: boolean; locked: boolean; compact?: boolean; onVoted: () => void; onAddedToPlan: () => void
 }) {
+  const [note, setNote] = useState<string | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [mineNow, setMineNow] = useState<string | null | undefined>(undefined) // my tap shows straight away
@@ -1370,7 +1471,11 @@ function PollCard({ poll, me, members, pact, iCoordinate, onVoted, onAddedToPlan
   }
   async function approve(option: S.PollOption) {
     setBusy(option.key); setError(null)
-    try { await S.addPollPickToPlan(pact, poll, option); onAddedToPlan() } catch (e) { setError((e as Error).message) }
+    try {
+      const extra = await S.addPollPickToPlan(pact, poll, option, locked)
+      setNote(extra ? `${option.name} went in as an extra. Send the extras to the group to approve.` : `${option.name} is on the plan.`)
+      onAddedToPlan()
+    } catch (e) { setError((e as Error).message) }
     setBusy(null)
   }
   return (
@@ -1379,7 +1484,7 @@ function PollCard({ poll, me, members, pact, iCoordinate, onVoted, onAddedToPlan
         {poll.source === 'grok' && <span className="l-av" style={{ width: 28, height: 28, background: '#000' }}><Grok size={15} /></span>}
         <div><b>{poll.title}</b><span>{open ? `${total} of ${members.length} voted` : 'Decided'}</span></div>
       </div>
-      <OptionGrid options={poll.options} renderFoot={(o) => {
+      <OptionGrid options={poll.options} compact={compact} renderFoot={(o) => {
         const n = count(o.key)
         const chosen = votes[me] === o.key
         const voters = members.filter((m) => votes[m.user_id] === o.key)
@@ -1390,10 +1495,11 @@ function PollCard({ poll, me, members, pact, iCoordinate, onVoted, onAddedToPlan
             <span className="l-poll-faces">{voters.slice(0, 4).map((m) => <Avatar key={m.user_id} name={m.name} url={m.avatar_url} size={22} />)}</span>
             <span className="l-opt-count">{n} {n === 1 ? 'vote' : 'votes'}</span>
             {open && <VoteCheck on={chosen} disabled={Boolean(busy)} label={o.name} onClick={() => void vote(o.key)} />}
-            {iCoordinate && open && leading && <button className="l-settle" type="button" disabled={Boolean(busy)} onClick={() => void approve(o)}>Approve</button>}
+            {iCoordinate && open && leading && <button className="l-settle" type="button" disabled={Boolean(busy)} title={locked ? 'The split is set up, so this goes in as an extra' : 'Add it to the plan'} onClick={() => void approve(o)}>{locked ? 'Add as extra' : 'Approve'}</button>}
           </div>
         )
       }} />
+      {note && <p className="l-dim" style={{ margin: '8px 0 0', fontSize: 13 }}>{note}</p>}
       {error && <p className="l-error">{error}</p>}
     </div>
   )
