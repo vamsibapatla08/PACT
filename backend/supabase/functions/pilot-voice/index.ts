@@ -1,6 +1,7 @@
 // Pact Pilot's voice: turns an answer into speech with ElevenLabs and returns the audio. Signed-in people only.
 // The ElevenLabs key stays here, as a secret; the app never sees it.
 import { createClient } from 'npm:@supabase/supabase-js@2'
+import { fixHeard, toSpoken } from './speech.ts'
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
 const admin = createClient(SUPABASE_URL, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!, { auth: { persistSession: false, autoRefreshToken: false } })
@@ -42,12 +43,11 @@ Deno.serve(async (req) => {
       return reply({ error: "Couldn't hear that. Try again." }, 502)
     }
     const heard = await stt.json().catch(() => ({})) as { text?: unknown }
-    return reply({ text: typeof heard.text === 'string' ? heard.text.trim() : '' }, 200)
+    return reply({ text: typeof heard.text === 'string' ? fixHeard(heard.text) : '' }, 200)
   }
 
   const body = await req.json().catch(() => ({})) as { text?: unknown }
-  // Speak the words, not the markdown.
-  const text = typeof body.text === 'string' ? body.text.replace(/[*_#`>]/g, '').replace(/\s+/g, ' ').trim().slice(0, 1200) : ''
+  const text = typeof body.text === 'string' ? toSpoken(body.text.slice(0, 20000)) : ''
   if (!text) return reply({ error: 'Nothing to say.' }, 400)
 
   const res = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${VOICE_ID}?output_format=mp3_44100_128`, {
