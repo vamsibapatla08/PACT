@@ -655,12 +655,19 @@ export async function votePoll(pollId: string, key: string) {
   if (error) throw new Error(/closed|not in this vote|Only people/.test(error.message) ? error.message : "Couldn't save your vote.")
 }
 
-/** After a vote: if an option now has more than half the group, the poll closes on it and its key comes back.
+/** After a vote: if everyone in the pact has picked the same option, the poll closes on it and its key comes back.
  *  Null while it's still undecided (or if someone else's vote decided it a moment earlier). */
 export async function decidePoll(pollId: string): Promise<string | null> {
   const { data, error } = await supabase.rpc('decide_pact_poll', { p_poll_id: pollId })
   if (error) return null // the database update isn't live yet: the vote still counts, it just doesn't decide
   return (data as string | null) ?? null
+}
+
+/** Change your pick on a vote that already decided. It opens again with your new pick and its old pick comes off the
+ *  plan, so the whole group agrees again. Locked once the money is being collected. */
+export async function changePollVote(pollId: string, key: string) {
+  const { error } = await supabase.rpc('change_pact_poll_vote', { p_poll_id: pollId, p_option_key: key })
+  if (error) throw new Error(/PGRST202|schema cache/i.test(error.message) ? 'Changing a past vote needs the latest database update.' : /locked|not in this vote|Only people/.test(error.message) ? error.message.replace(/\.?$/, '.') : "Couldn't change your vote.")
 }
 
 /** Remove a vote that isn't any good. Whoever started it, or the coordinator. */

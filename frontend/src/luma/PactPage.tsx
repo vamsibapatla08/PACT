@@ -765,10 +765,11 @@ function useVoiceRecorder(onHeard: (text: string) => void) {
 
 /** Pact Pilot, one to one: preset prompts, your questions and its answers, and voice (speak, and hear it answer).
  *  Its changes still need your Approve, and its status updates still show in Pact Chat. */
-const PILOT_PRESETS: { label: string; icon: string; ask?: string; fill?: string; summary?: boolean }[] = [
+const PILOT_PRESETS: { label: string; icon: string; ask?: string; fill?: string; summary?: boolean; speak?: boolean }[] = [
   { label: 'Vote on the idea', icon: 'sparkles', ask: "Put our idea to a vote so we agree before planning anything: give 3 clear options for what this pact is (what we do and where), each with a rough price per person, and put them to a vote." },
   { label: 'Vote on 3 events', icon: 'ticket', ask: 'Find the top 3 paid events or activities that fit our place, dates and budget, each with its ticket price per person, when it is, and a link, and put them to a vote.' },
   { label: 'Vote on 3 stays', icon: 'stay', ask: 'Find 3 real places to stay that fit our dates and budget each, and put them to a vote.' },
+  { label: 'Brief me out loud', icon: 'mic', ask: 'Give me a 30-second spoken briefing on this pact: where and when, what the group has decided, who has approved and paid, and the one thing that should happen next. Talk like a friend catching me up, in short plain sentences, with no lists, links or symbols.', speak: true },
   { label: 'Sum up the chat', icon: 'wave', summary: true },
   { label: "What's left to decide?", icon: 'checkCircle', ask: 'What does this pact still need decided before we can book?' },
   { label: 'Who owes what?', icon: 'wallet', ask: 'Who owes what on the tab, and what are the fewest paybacks to square up?' },
@@ -810,7 +811,7 @@ function PilotPanel({ id, me, pact, d, queued, onChanged, onOpenChat, onAct, fin
   const [voiceError, setVoiceError] = useState<string | null>(null)
   const voice = useDictation(setText)
   // Speak to Pact Pilot: what you say is asked straight away, and the answer is read back to you.
-  const talk = useVoiceRecorder((said) => { if (said) { setVoiceOn(true); void ask(said) } else setVoiceError("Didn't catch that. Try again.") })
+  const talk = useVoiceRecorder((said) => { if (said) { setVoiceOn(true); void ask(said, undefined, true) } else setVoiceError("Didn't catch that. Try again.") })
   const box = useRef<HTMLTextAreaElement>(null)
   const end = useRef<HTMLDivElement>(null)
   const audio = useRef<HTMLAudioElement | null>(null)
@@ -832,8 +833,8 @@ function PilotPanel({ id, me, pact, d, queued, onChanged, onOpenChat, onAct, fin
   const askedFrom = useRef(0)
   useEffect(() => { if (queued && queued.n !== askedFrom.current) { askedFrom.current = queued.n; void ask(queued.q) } }, [queued]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  async function say(reply: string) {
-    if (!voiceOn || !reply) return
+  async function say(reply: string, force = false) {
+    if ((!voiceOn && !force) || !reply) return
     try {
       const clip = await S.speak(reply)
       audio.current?.pause()
@@ -843,7 +844,7 @@ function PilotPanel({ id, me, pact, d, queued, onChanged, onOpenChat, onAct, fin
     } catch (e) { setVoiceError((e as Error).message) }
   }
   /** Ask Pact Pilot. `shown` is what your bubble says, when the question sent is longer than what you tapped. */
-  async function ask(question: string, shown?: string) {
+  async function ask(question: string, shown?: string, speak = false) {
     const q = question.trim()
     if (!q) return
     voice.stop(); setText(''); setVoiceError(null)
@@ -853,7 +854,7 @@ function PilotPanel({ id, me, pact, d, queued, onChanged, onOpenChat, onAct, fin
       const answer = await S.askGrok(id, q)
       setLog((l) => l.map((x) => (x.key === key ? { ...x, answer } : x)))
       if (answer.poll) onChanged() // the new vote shows in Pact Chat and Findings straight away
-      void say(answer.reply)
+      void say(answer.reply, speak)
     } catch (e) {
       setLog((l) => l.map((x) => (x.key === key ? { ...x, error: (e as Error).message || "Pact Pilot couldn't answer. Try again." } : x)))
     }
@@ -861,7 +862,7 @@ function PilotPanel({ id, me, pact, d, queued, onChanged, onOpenChat, onAct, fin
   const pick = (p: (typeof PILOT_PRESETS)[number]) => {
     if (p.summary) return void ask(S.summaryQuestion)
     if (p.fill) { setText(p.fill); requestAnimationFrame(() => box.current?.focus()); return }
-    if (p.ask) void ask(p.ask)
+    if (p.ask) void ask(p.ask, p.speak ? p.label : undefined, p.speak)
   }
   return (
     <div className="l-pilot-panel">
@@ -1821,8 +1822,24 @@ function PollCard({ poll, me, members, pact, iCoordinate, locked, canSend, compa
   const count = (key: string) => Object.values(votes).filter((v) => v === key).length
   const top = Math.max(0, ...poll.options.map((o) => count(o.key)))
   const open = poll.status === 'open'
-  // A tick is your approval. Once more than half the group has ticked the same option, the vote decides itself: the
-  // winner goes on the plan and up for approval, with everyone who ticked it already counted as approving.
+  // A tick is your approval. Once everyone in the pact has ticked the same option, the vote decides itself: the
+  // winner goes on the plan and up for approval, with everyone already counted as approving.
+  // The first time you vote, a popup explains that rule before your tick counts.
+  const [ruleFor, setRuleFor] = useState<string | null>(null)
+  function tap(key: string) {
+    let seen = false
+    try { seen = localStorage.getItem(VOTE_RULE_SEEN) === '1' } catch { /* private mode: show it */ }
+    if (seen || votes[me] === key) return void (open ? vote(key) : change(key))
+    setRuleFor(key)
+  }
+  // A decided vote: change your pick. It opens again and its old pick comes off the plan.
+  async function change(key: string) {
+    if (votes[me] === key) return
+    setBusy(key); setError(null); setMineNow(key)
+    try { await S.changePollVote(poll.poll_id, key); decidedOnce.current = false; setNote('Your pick changed, so the vote is open again. Everyone has to agree on one option for it to go through.'); onVoted() }
+    catch (e) { setError((e as Error).message); setMineNow(undefined) }
+    setBusy(null)
+  }
   async function vote(key: string) {
     setBusy(key); setError(null); setMineNow(votes[me] === key ? null : key)
     try {
@@ -1842,7 +1859,7 @@ function PollCard({ poll, me, members, pact, iCoordinate, locked, canSend, compa
   const canRemove = iCoordinate || poll.created_by === me
   const decidedOnce = useRef(false)
   useEffect(() => {
-    if (!open || decidedOnce.current || top * 2 <= members.length) return
+    if (!open || decidedOnce.current || !members.length || top < members.length) return
     decidedOnce.current = true
     void (async () => {
       const won = await S.decidePoll(poll.poll_id)
@@ -1863,8 +1880,9 @@ function PollCard({ poll, me, members, pact, iCoordinate, locked, canSend, compa
       onVoted()
     } catch (e) { setError((e as Error).message); setBusy(null) }
   }
-  // How many more ticks the leading option needs to decide the vote.
-  const toDecide = Math.floor(members.length / 2) + 1 - top
+  // How many more ticks the leading option needs: everyone has to agree.
+  const toDecide = members.length - top
+  const canChange = !open && !locked
   return (
     <div className="l-poll">
       <div className="l-poll-head">
@@ -1890,17 +1908,36 @@ function PollCard({ poll, me, members, pact, iCoordinate, locked, canSend, compa
             <span className="l-opt-bar" style={{ width: total ? `${(n / total) * 100}%` : 0 }} aria-hidden />
             <span className="l-poll-faces">{voters.slice(0, 4).map((m) => <Avatar key={m.user_id} name={m.name} url={m.avatar_url} size={22} />)}</span>
             <span className="l-opt-count">{n} {n === 1 ? 'vote' : 'votes'}</span>
-            {open && <VoteCheck on={chosen} disabled={Boolean(busy)} label={o.name} onClick={() => void vote(o.key)} />}
-            {open && leading && toDecide > 0 && <span className="l-faint" style={{ fontSize: 12, marginLeft: 'auto' }}>{toDecide} more to decide</span>}
+            {(open || canChange) && <VoteCheck on={chosen} disabled={Boolean(busy)} label={o.name} onClick={() => tap(o.key)} />}
+            {open && leading && toDecide > 0 && <span className="l-faint" style={{ fontSize: 12, marginLeft: 'auto' }}>{toDecide} more to agree</span>}
             {!open && poll.winner_key === o.key && <span className="l-faint" style={{ fontSize: 12, marginLeft: 'auto' }}>Picked</span>}
           </div>
         )
       }} />
+      {canChange && <p className="l-faint" style={{ margin: '8px 0 0', fontSize: 12.5 }}>Changed your mind? Tick another option. The vote opens again until everyone agrees.</p>}
       {note && <p className="l-dim" style={{ margin: '8px 0 0', fontSize: 13 }}>{note}</p>}
       {error && <p className="l-error">{error}</p>}
+      {ruleFor && (
+        <Modal title="Everyone has to agree" onClose={() => setRuleFor(null)}>
+          <div className="l-vote-rule">
+            <span className="l-vote-rule-faces">{members.slice(0, 5).map((m) => <Avatar key={m.user_id} name={m.name} url={m.avatar_url} size={30} />)}</span>
+            <p>A vote only goes through when <b>all {members.length} of you</b> pick the same option. Then it goes on the plan, and your tick counts as your approval.</p>
+            <p className="l-dim">Not agreeing yet? Talk it out in Pact Chat, ask Pact Pilot for other options, or change your pick at any time. You can still change it after the vote is decided, until the money is being collected.</p>
+          </div>
+          <div className="l-pilot-buttons">
+            <button className="l-btn" type="button" onClick={() => {
+              const key = ruleFor; setRuleFor(null)
+              try { localStorage.setItem(VOTE_RULE_SEEN, '1') } catch { /* fine */ }
+              void (open ? vote(key) : change(key))
+            }}>Got it, count my vote</button>
+            <button className="l-btn l-ghost" type="button" onClick={() => setRuleFor(null)}>Not yet</button>
+          </div>
+        </Modal>
+      )}
     </div>
   )
 }
+const VOTE_RULE_SEEN = 'pact-vote-rule-seen'
 
 /** Options Pact Pilot (or anyone) posted as a chat message, as cards. Tick one to vote: the first tick turns the list into a vote. */
 function MessageOptions({ id, found, onStarted }: { id: string; found: NonNullable<ReturnType<typeof S.parseOptions>>; onStarted: () => void }) {
