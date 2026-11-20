@@ -724,8 +724,9 @@ function useVoiceRecorder(onHeard: (text: string) => void) {
     const chunks: Blob[] = []
     recorder.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data) }
 
-    // Listen for a pause: once you've spoken, 1.4 seconds of quiet ends the recording. Nothing said in 8 seconds cancels it.
+    // Listen for a pause: once you've spoken, 1.4 seconds of quiet ends the recording. If no speech is picked up, it stops after 8 seconds.
     const ctx = new AudioContext()
+    void ctx.resume().catch(() => undefined) // Safari can start it paused, which would leave the pause detector deaf
     const analyser = ctx.createAnalyser()
     analyser.fftSize = 1024
     ctx.createMediaStreamSource(stream).connect(analyser)
@@ -739,7 +740,7 @@ function useVoiceRecorder(onHeard: (text: string) => void) {
       let sum = 0
       for (const s of samples) sum += ((s - 128) / 128) ** 2
       const now = performance.now()
-      if (Math.sqrt(sum / samples.length) > 0.035) { spoke = true; lastLoud = now }
+      if (Math.sqrt(sum / samples.length) > 0.02) { spoke = true; lastLoud = now }
       if ((spoke && now - lastLoud > 1400) || (!spoke && now - began > 8000) || now - began > 45000) return void finish()
       frame = requestAnimationFrame(watch)
     }
@@ -749,7 +750,9 @@ function useVoiceRecorder(onHeard: (text: string) => void) {
       stream.getTracks().forEach((t) => t.stop())
       void ctx.close()
       stopNow.current = null
-      if (!spoke || !chunks.length) { setState('idle'); setFailure("Didn't hear anything. Tap the mic and talk."); return }
+      // The pause detector only decides when to stop. Whatever was recorded goes to ElevenLabs, so a quiet mic
+      // (or a detector that couldn't hear) still gets written down; real silence comes back as "Didn't catch that".
+      if (!chunks.length) { setState('idle'); setFailure("Didn't hear anything. Tap the mic and talk."); return }
       setState('hearing')
       try { heard.current((await S.transcribe(new Blob(chunks, { type: recorder.mimeType || 'audio/webm' }))).trim()) }
       catch (e) { setFailure((e as Error).message) }
@@ -1005,10 +1008,14 @@ function Composer({ id, onAskGrok }: { id: string; onAskGrok: (question: string)
   const [text, setText] = useState('')
   const [error, setError] = useState<string | null>(null)
   const voice = useDictation(setText)
+  // Talk instead of typing: ElevenLabs writes down what you said into the box, for you to check and send.
+  // Browsers that can't record fall back to their own voice typing.
+  const talk = useVoiceRecorder((said) => { if (said) setText((t) => (t.trim() ? `${t.trim()} ${said}` : said)); else setError("Didn't catch that. Try again.") })
+  const listening = talk.supported ? talk.state !== 'idle' : voice.listening
   async function submit() {
     const body = text.trim()
     if (!body) return
-    voice.stop()
+    voice.stop(); talk.stop()
     setText('')
     // Pact Chat is for the group. A message to @Pilot goes to Pact Pilot instead of the group.
     if (AT_GROK.test(body)) { onAskGrok(body.replace(AT_GROK, ' ').replace(/\s+/g, ' ').trim() || 'What should we do next?'); return }
@@ -1016,13 +1023,19 @@ function Composer({ id, onAskGrok }: { id: string; onAskGrok: (question: string)
   }
   return (
     <>
-      {(error || voice.failure) && <p className="l-error">{error ?? voice.failure}</p>}
+      {(error || talk.failure || voice.failure) && <p className="l-error">{error ?? talk.failure ?? voice.failure}</p>}
       <form className="l-composer" onSubmit={(e) => { e.preventDefault(); void submit() }}>
-        <textarea rows={1} value={text} placeholder={voice.listening ? 'Listening… speak now' : 'Message the group'} onChange={(e) => setText(e.target.value)}
+        <textarea rows={1} value={text} onChange={(e) => setText(e.target.value)}
+          placeholder={talk.state === 'listening' ? "Listening… pause when you're done" : talk.state === 'hearing' ? 'Writing down what you said…' : voice.listening ? 'Listening… speak now' : 'Message the group'}
           onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void submit() } }} />
-        <button type="button" className={voice.listening ? 'l-icon-btn l-mic on' : 'l-icon-btn l-mic'} onClick={() => (voice.listening ? voice.stop() : void voice.start(text))}
-          aria-label={voice.listening ? 'Stop talking' : 'Talk instead of typing'} title={voice.listening ? 'Stop' : 'Talk instead of typing'}>
-          <Icon name={voice.listening ? 'wave' : 'mic'} />
+        <button type="button" className={listening ? 'l-icon-btn l-mic on' : 'l-icon-btn l-mic'} disabled={talk.state === 'hearing'}
+          onClick={() => {
+            setError(null)
+            if (!talk.supported) return void (voice.listening ? voice.stop() : voice.start(text))
+            if (talk.state === 'listening') talk.stop(); else void talk.start()
+          }}
+          aria-label={listening ? 'Done talking' : 'Talk instead of typing'} title={listening ? 'Done talking' : 'Talk instead of typing'}>
+          <Icon name={listening ? 'wave' : 'mic'} />
         </button>
         <button type="submit" className="l-send" disabled={!text.trim()} aria-label="Send"><Icon name="up" /></button>
       </form>
