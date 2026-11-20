@@ -29,6 +29,7 @@ const paths: Record<string, ReactNode> = {
   sparkles: <path d="M12 3l1.8 4.6L18.5 9l-4.7 1.6L12 15l-1.8-4.4L5.5 9l4.7-1.4zM18.5 15l.8 2 2 .8-2 .7-.8 2-.8-2-2-.7 2-.8z" />,
   mic: <><rect x="9" y="3" width="6" height="11" rx="3" /><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21" /></>,
   wave: <path d="M4 10v4M8 7v10M12 4v16M16 8v8M20 10.5v3" />,
+  stop: <rect x="7" y="7" width="10" height="10" rx="2.2" fill="currentColor" stroke="none" />,
   x: <path d="M6 6l12 12M18 6L6 18" />,
   clock: <><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></>,
   shield: <><path d="M12 3l7.5 3v5.5c0 4.6-3.2 8.3-7.5 9.5-4.3-1.2-7.5-4.9-7.5-9.5V6z" /><path d="M8.6 12.2l2.3 2.3 4.6-4.8" /></>,

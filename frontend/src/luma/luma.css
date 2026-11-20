@@ -206,6 +206,21 @@ button.l-card:hover { background: var(--card-hover); }
 .l-bubble small { display: block; color: var(--dim); font-size: 12px; font-weight: 600; margin-bottom: 2px; }
 .l-composer { position: sticky; bottom: 16px; display: flex; gap: 8px; align-items: flex-end; margin-top: 16px; padding: 8px 8px 8px 16px; border-radius: 26px; background: rgba(30, 31, 36, 0.92); backdrop-filter: blur(18px); box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5); }
 .l-composer textarea { flex: 1; background: none; border: 0; outline: none; resize: none; font-size: 15px; padding: 8px 0; max-height: 140px; }
+/* Group chat: the box grows upward as you write, up to about half the chat, then scrolls inside */
+.l-compose-body { flex: 1; min-width: 0; display: flex; }
+.l-compose-body textarea { width: 100%; max-height: min(45vh, 360px); overflow-y: auto; line-height: 1.45; }
+.l-draft { flex: 1; padding: 8px 0; font-size: 15px; line-height: 1.45; max-height: min(45vh, 360px); overflow-y: auto; white-space: pre-wrap; word-break: break-word; }
+.l-chat-wide .l-draft { font-size: 16.5px; }
+.l-draft-live { color: var(--faint); transition: color 0.2s; }
+.l-draft-hint { color: var(--faint); }
+/* Live waveform while you talk: newest on the right */
+.l-wave { display: flex; align-items: center; gap: 2.5px; height: 32px; flex: 0 0 auto; align-self: center; padding: 0 4px; }
+.l-wave i { width: 3px; height: 100%; border-radius: 3px; background: var(--text); opacity: 0.85; transform: scaleY(0.12); transition: transform 0.09s linear; }
+.l-wave i:nth-last-child(-n+4) { opacity: 1; }
+.l-wave i:nth-child(-n+6) { opacity: 0.35; }
+.l-mic .l-spin { width: 16px; height: 16px; border-width: 2px; border-color: rgba(0, 0, 0, 0.15); border-top-color: #0b0b0d; }
+.l-composer.recording .l-mic.on { animation: none; }
+@media (max-width: 640px) { .l-wave i:nth-child(-n+12) { display: none; } }
 .l-send { width: 36px; height: 36px; border-radius: 99px; border: 0; background: var(--silver); color: #0b0b0d; display: grid; place-items: center; flex: none; }
 .l-send:disabled { opacity: 0.35; }
 .l-send svg { width: 17px; height: 17px; }

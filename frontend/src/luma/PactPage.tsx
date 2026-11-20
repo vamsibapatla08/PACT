@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from 'react'
 import * as S from './store'
 import { DetailsForm, useApp } from './App'
 import { Avatar, Busy, Cover, Grok, Icon, Modal, Switch, VerifiedBadge } from './ui'
@@ -702,15 +702,22 @@ function useDictation(onText: (text: string) => void) {
   return { supported: Boolean(Speech), listening, failure, start, stop, clear: () => setFailure(null) }
 }
 
-/** Talk to Pact Pilot: records you, stops by itself when you pause, and ElevenLabs writes down what you said.
- *  Works in any browser with a microphone, unlike the browser's own voice typing. */
-function useVoiceRecorder(onHeard: (text: string) => void) {
+/** Talk instead of typing: records you and ElevenLabs writes down what you said. Works in any browser with a
+ *  microphone, unlike the browser's own voice typing.
+ *  - autoStop: stop by itself once you pause (Pact Pilot). Off, it keeps listening until you tap stop (group chat).
+ *  - onLive: while you talk, what you've said so far is written down every second or so, for a live preview.
+ *  - bars: an element whose children become a live waveform of your voice. */
+function useVoiceRecorder(onHeard: (text: string) => void, opts: { autoStop?: boolean; onLive?: (text: string) => void; bars?: RefObject<HTMLElement | null> } = {}) {
+  const { autoStop = true } = opts
   const supported = typeof MediaRecorder !== 'undefined' && Boolean(navigator.mediaDevices?.getUserMedia)
   const [state, setState] = useState<'idle' | 'listening' | 'hearing'>('idle')
   const [failure, setFailure] = useState<string | null>(null)
   const stopNow = useRef<(() => void) | null>(null)
   const heard = useRef(onHeard)
   heard.current = onHeard
+  const live = useRef(opts.onLive)
+  live.current = opts.onLive
+  const bars = opts.bars
   useEffect(() => () => stopNow.current?.(), [])
 
   async function start() {
@@ -721,12 +728,14 @@ function useVoiceRecorder(onHeard: (text: string) => void) {
     catch (e) { setFailure((e as DOMException).name === 'NotFoundError' ? speechMessages['audio-capture'] : speechMessages['not-allowed']); return }
     const type = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4'].find((t) => MediaRecorder.isTypeSupported(t))
     const recorder = new MediaRecorder(stream, type ? { mimeType: type } : undefined)
+    const mime = recorder.mimeType || type || 'audio/webm'
     const chunks: Blob[] = []
     recorder.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data) }
 
-    // Listen for a pause: once you've spoken, 1.4 seconds of quiet ends the recording. If no speech is picked up, it stops after 8 seconds.
+    // Listen to the mic: for the waveform, and to tell when you've paused. With autoStop, 1.4 seconds of quiet after
+    // speaking ends the recording. Either way it stops if nothing is said for 10 seconds, or after 2 minutes.
     const ctx = new AudioContext()
-    void ctx.resume().catch(() => undefined) // Safari can start it paused, which would leave the pause detector deaf
+    void ctx.resume().catch(() => undefined) // Safari can start it paused, which would leave the detector deaf
     const analyser = ctx.createAnalyser()
     analyser.fftSize = 1024
     ctx.createMediaStreamSource(stream).connect(analyser)
@@ -735,35 +744,70 @@ function useVoiceRecorder(onHeard: (text: string) => void) {
     let spoke = false
     let lastLoud = began
     let frame = 0
+    let lastBar = 0
+    const history: number[] = []
+    // Live preview: send what's been recorded so far, one request at a time.
+    let asking = false
+    let lastAsked = began
+    let done = false
+    const preview = () => {
+      if (!live.current || asking || !chunks.length) return
+      asking = true
+      S.transcribe(new Blob(chunks.slice(), { type: mime }))
+        .then((t) => { if (!done && t.trim()) live.current?.(t.trim()) })
+        .catch(() => undefined)
+        .finally(() => { asking = false; lastAsked = performance.now() })
+    }
     const watch = () => {
       analyser.getByteTimeDomainData(samples)
       let sum = 0
       for (const s of samples) sum += ((s - 128) / 128) ** 2
+      const rms = Math.sqrt(sum / samples.length)
       const now = performance.now()
-      if (Math.sqrt(sum / samples.length) > 0.02) { spoke = true; lastLoud = now }
-      if ((spoke && now - lastLoud > 1400) || (!spoke && now - began > 8000) || now - began > 45000) return void finish()
+      if (rms > 0.02) { spoke = true; lastLoud = now }
+      // Waveform: the newest loudness on the right, older bars scrolling left.
+      const row = bars?.current
+      if (row && now - lastBar > 70) {
+        lastBar = now
+        history.push(Math.min(1, rms * 9))
+        const els = row.children
+        while (history.length > els.length) history.shift()
+        for (let i = 0; i < els.length; i++) {
+          const v = history[history.length - els.length + i] ?? 0
+          ;(els[i] as HTMLElement).style.transform = `scaleY(${Math.max(0.12, v)})`
+        }
+      }
+      if (spoke && now - lastAsked > 1100) preview()
+      if ((autoStop && spoke && now - lastLoud > 1400) || (!spoke && now - began > 10000) || now - began > 120000) return void finish()
       frame = requestAnimationFrame(watch)
     }
     const finish = () => { if (recorder.state !== 'inactive') recorder.stop() }
     recorder.onstop = async () => {
+      done = true
       cancelAnimationFrame(frame)
       stream.getTracks().forEach((t) => t.stop())
       void ctx.close()
       stopNow.current = null
-      // The pause detector only decides when to stop. Whatever was recorded goes to ElevenLabs, so a quiet mic
-      // (or a detector that couldn't hear) still gets written down; real silence comes back as "Didn't catch that".
+      // The detector only decides when to stop. Whatever was recorded goes to ElevenLabs, so a quiet mic still gets
+      // written down; real silence comes back as "Didn't catch that".
       if (!chunks.length) { setState('idle'); setFailure("Didn't hear anything. Tap the mic and talk."); return }
       setState('hearing')
-      try { heard.current((await S.transcribe(new Blob(chunks, { type: recorder.mimeType || 'audio/webm' }))).trim()) }
+      try { heard.current((await S.transcribe(new Blob(chunks, { type: mime }))).trim()) }
       catch (e) { setFailure((e as Error).message) }
       setState('idle')
     }
     stopNow.current = finish
-    recorder.start()
+    // With a live preview, hand over the recording in small pieces so it can be read while you're still talking.
+    recorder.start(live.current ? 400 : undefined)
     setState('listening')
     frame = requestAnimationFrame(watch)
   }
   return { supported, state, failure, start, stop: () => stopNow.current?.(), clear: () => setFailure(null) }
+}
+
+/** A live waveform of your voice while recording. useVoiceRecorder drives the bars through `bars`. */
+function VoiceWave({ bars }: { bars: RefObject<HTMLSpanElement | null> }) {
+  return <span className="l-wave" ref={bars} aria-hidden="true">{Array.from({ length: 28 }, (_, i) => <i key={i} />)}</span>
 }
 
 /** Pact Pilot, one to one: preset prompts, your questions and its answers, and voice (speak, and hear it answer).
@@ -1006,16 +1050,38 @@ const AT_GROK = /(^|\s)@(pilot|grok)\b[:,]?/i
 
 function Composer({ id, onAskGrok }: { id: string; onAskGrok: (question: string) => void }) {
   const [text, setText] = useState('')
+  const [live, setLive] = useState('')
   const [error, setError] = useState<string | null>(null)
   const voice = useDictation(setText)
-  // Talk instead of typing: ElevenLabs writes down what you said into the box, for you to check and send.
-  // Browsers that can't record fall back to their own voice typing.
-  const talk = useVoiceRecorder((said) => { if (said) setText((t) => (t.trim() ? `${t.trim()} ${said}` : said)); else setError("Didn't catch that. Try again.") })
+  const bars = useRef<HTMLSpanElement>(null)
+  const box = useRef<HTMLTextAreaElement>(null)
+  const form = useRef<HTMLFormElement>(null)
+  // Talk instead of typing: what you say shows up grey as you talk, then ElevenLabs' final version lands in the box
+  // in white once you tap stop, for you to check and send. Browsers that can't record fall back to voice typing.
+  const talk = useVoiceRecorder((said) => {
+    if (said) setText((t) => (t.trim() ? `${t.trim()} ${said}` : said)); else setError("Didn't catch that. Try again.")
+    setLive('')
+  }, { autoStop: false, onLive: setLive, bars })
   const listening = talk.supported ? talk.state !== 'idle' : voice.listening
+  const recording = talk.supported && talk.state !== 'idle'
+  useEffect(() => { if (talk.state === 'idle') setLive('') }, [talk.state])
+
+  // The box grows upward with what you write (up to about half the chat), pushing the messages up instead of
+  // scrolling inside a one-line box. If you were at the newest message, you stay there.
+  useLayoutEffect(() => {
+    const el = box.current
+    if (!el) return
+    const list = form.current?.parentElement?.querySelector<HTMLElement>('.l-chat')
+    const atBottom = list ? list.scrollHeight - list.scrollTop - list.clientHeight < 40 : false
+    el.style.height = 'auto'
+    el.style.height = `${el.scrollHeight}px`
+    if (list && atBottom) list.scrollTop = list.scrollHeight
+  }, [text, recording])
+
   async function submit() {
     const body = text.trim()
-    if (!body) return
-    voice.stop(); talk.stop()
+    if (!body || recording) return
+    voice.stop()
     setText('')
     // Pact Chat is for the group. A message to @Pilot goes to Pact Pilot instead of the group.
     if (AT_GROK.test(body)) { onAskGrok(body.replace(AT_GROK, ' ').replace(/\s+/g, ' ').trim() || 'What should we do next?'); return }
@@ -1024,10 +1090,20 @@ function Composer({ id, onAskGrok }: { id: string; onAskGrok: (question: string)
   return (
     <>
       {(error || talk.failure || voice.failure) && <p className="l-error">{error ?? talk.failure ?? voice.failure}</p>}
-      <form className="l-composer" onSubmit={(e) => { e.preventDefault(); void submit() }}>
-        <textarea rows={1} value={text} onChange={(e) => setText(e.target.value)}
-          placeholder={talk.state === 'listening' ? "Listening… pause when you're done" : talk.state === 'hearing' ? 'Writing down what you said…' : voice.listening ? 'Listening… speak now' : 'Message the group'}
-          onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void submit() } }} />
+      <form ref={form} className={recording ? 'l-composer recording' : 'l-composer'} onSubmit={(e) => { e.preventDefault(); void submit() }}>
+        <div className="l-compose-body">
+          {recording ? (
+            <div className="l-draft" aria-live="polite">
+              {text.trim() && <span>{text.trim()} </span>}
+              {live ? <span className="l-draft-live">{live}</span> : !text.trim() && <span className="l-draft-hint">{talk.state === 'hearing' ? 'Writing down what you said…' : 'Listening… tap stop when you\'re done'}</span>}
+            </div>
+          ) : (
+            <textarea ref={box} rows={1} value={text} onChange={(e) => setText(e.target.value)}
+              placeholder={voice.listening ? 'Listening… speak now' : 'Message the group'}
+              onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void submit() } }} />
+          )}
+        </div>
+        {recording && <VoiceWave bars={bars} />}
         <button type="button" className={listening ? 'l-icon-btn l-mic on' : 'l-icon-btn l-mic'} disabled={talk.state === 'hearing'}
           onClick={() => {
             setError(null)
@@ -1035,9 +1111,9 @@ function Composer({ id, onAskGrok }: { id: string; onAskGrok: (question: string)
             if (talk.state === 'listening') talk.stop(); else void talk.start()
           }}
           aria-label={listening ? 'Done talking' : 'Talk instead of typing'} title={listening ? 'Done talking' : 'Talk instead of typing'}>
-          <Icon name={listening ? 'wave' : 'mic'} />
+          {talk.state === 'hearing' ? <span className="l-spin" /> : <Icon name={listening ? 'stop' : 'mic'} />}
         </button>
-        <button type="submit" className="l-send" disabled={!text.trim()} aria-label="Send"><Icon name="up" /></button>
+        <button type="submit" className="l-send" disabled={!text.trim() || recording} aria-label="Send"><Icon name="up" /></button>
       </form>
     </>
   )
